@@ -1,0 +1,39 @@
+version: "3.8"
+
+services:
+  memoria:
+    build: .
+    ports:
+      # Bind to loopback only — the service (BIND_ALL=true) enforces auth, but
+      # there is no reason to expose it on every host interface for local use.
+      # Override with HOST_BIND=0.0.0.0 if LAN exposure is genuinely intended.
+      - "${HOST_BIND:-127.0.0.1}:3100:3100"
+    volumes:
+      - memoria-data:/data
+    environment:
+      - MEMORIA_API_KEY=${MEMORIA_API_KEY:?Set MEMORIA_API_KEY in .env}
+      # BREAKING (2026-07 security hardening): with BIND_ALL=true the server
+      # refuses to start unless BOTH secrets below are set (previously it fell
+      # back to the API key / an auto-generated on-disk key with a warning).
+      # Generate:
+      #   MEMORIA_OAUTH_CLIENT_SECRET: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+      #   MEMORIA_ENCRYPTION_KEY:      node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+      # Or accept the old insecure fallbacks with MEMORIA_INSECURE_ALLOW_FALLBACKS=true.
+      - MEMORIA_OAUTH_CLIENT_SECRET=${MEMORIA_OAUTH_CLIENT_SECRET:?Set MEMORIA_OAUTH_CLIENT_SECRET in .env (see comment)}
+      - MEMORIA_ENCRYPTION_KEY=${MEMORIA_ENCRYPTION_KEY:?Set MEMORIA_ENCRYPTION_KEY in .env (see comment)}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Pin the public URL so OAuth discovery metadata is never derived from the
+      # (attacker-influenceable) Host header. Required at boot when BIND_ALL=true.
+      - MEMORIA_PUBLIC_URL=${MEMORIA_PUBLIC_URL:-http://localhost:3100}
+      - BIND_ALL=true
+      - DOCKER=true
+      - PORT=3100
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3100/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  memoria-data:

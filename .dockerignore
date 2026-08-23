@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.claude
+data
+*.sqlite
+.env
+# Personal memory files are runtime data (mounted at /data/memoria), never
+# baked into the image. Keep them out of the build context entirely.
+memories
+reports

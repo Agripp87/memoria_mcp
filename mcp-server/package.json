@@ -1,0 +1,79 @@
+{
+  "name": "@memoria/mcp",
+  "version": "0.1.0",
+  "description": "Memoria — persistent, plain-text memory for Claude over MCP. Markdown files you own, hybrid semantic + keyword search, OAuth 2.1 remote transport, and agentic self-maintenance.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "memoria-mcp": "dist/index.js",
+    "memoria-mcp-http": "dist/http.js"
+  },
+  "files": [
+    "dist/",
+    "scripts/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Agripp87/memoria.git",
+    "directory": "mcp-server"
+  },
+  "homepage": "https://github.com/Agripp87/memoria#readme",
+  "bugs": {
+    "url": "https://github.com/Agripp87/memoria/issues"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "start:http": "node dist/http.js",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "demo": "node scripts/demo.mjs",
+    "demo:gen": "node scripts/generate-demo-data.mjs",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "memory",
+    "claude",
+    "claude-code",
+    "agent-memory",
+    "markdown",
+    "sqlite",
+    "fts5",
+    "embeddings"
+  ],
+  "author": "Agripp87",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/markdown-it": "^14.1.2",
+    "better-sqlite3": "^12.8.0",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.1",
+    "js-yaml": "^4.3.1",
+    "markdown-it": "^14.2.0",
+    "zod": "^4.3.6"
+  },
+  "optionalDependencies": {
+    "@xenova/transformers": "^2.17.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.5.0",
+    "@types/supertest": "^6.0.3",
+    "@vitest/coverage-v8": "^3.2.6",
+    "supertest": "^7.2.2",
+    "typescript": "^6.0.2",
+    "vitest": "^3.1.1"
+  }
+}

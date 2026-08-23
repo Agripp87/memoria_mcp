@@ -1,0 +1,117 @@
+# Cloud Build: build the image, push to Artifact Registry, deploy to Cloud Run.
+# Template — copy to your repo root (or pass --config deploy/gcp/cloudbuild.yaml)
+# and supply _BUCKET and _PUBLIC_URL. See deploy/gcp/README.md.
+steps:
+  # Build the Docker image
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-t"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/memoria:${SHORT_SHA}"
+      - "-t"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/memoria:latest"
+      - "."
+
+  # Push to Artifact Registry
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "--all-tags"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/memoria"
+
+  # Deploy to Cloud Run
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      - "run"
+      - "deploy"
+      - "memoria"
+      - "--image"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/memoria:${SHORT_SHA}"
+      - "--region"
+      - "${_REGION}"
+      - "--platform"
+      - "managed"
+      - "--port"
+      - "3100"
+      # 2Gi: required for the local MiniLM semantic-embedding model
+      # (MEMORIA_EMBEDDINGS=minilm below) — 1Gi OOMed under model load.
+      - "--memory"
+      - "2Gi"
+      # Gen2 execution environment is REQUIRED for the GCS FUSE volume mount.
+      - "--execution-environment"
+      - "gen2"
+      - "--min-instances"
+      - "0"
+      # Single writer only. The derived SQLite search index lives on the shared
+      # GCS-FUSE volume, and concurrent writers across instances corrupt the
+      # WAL ("disk I/O error"). Keep max-instances at 1 until the index is moved
+      # to a real single-writer store.
+      - "--max-instances"
+      - "1"
+      # Durable storage: mount the GCS bucket at /data so the canonical memory
+      # files, encrypted buffer, config and key survive restarts / scale-to-zero.
+      # Without this the entire store is ephemeral per-instance disk (wiped on
+      # cold start). MEMORIA_TOKEN_DB_DIR (set in the image to /tmp) keeps the
+      # token DB off FUSE, where SQLite WAL is unreliable.
+      - "--add-volume"
+      - "name=gcs-fuse-vol,type=cloud-storage,bucket=${_BUCKET}"
+      - "--add-volume-mount"
+      - "volume=gcs-fuse-vol,mount-path=/data"
+      - "--set-env-vars"
+      # MEMORIA_EMBEDDINGS=minilm enables TRUE semantic search using the
+      # pre-baked local all-MiniLM-L6-v2 model (Phase 2 of the critical-review
+      # remediation; approved 2026-07). The FIRST startup after this change
+      # re-embeds the whole store (provider change 'hash' -> 'minilm') — expect
+      # one slow cold start; subsequent starts reuse content hashes. Requires
+      # --memory 2Gi above.
+      # MEMORIA_TOKEN_DB_DIR keeps the OAuth token DB on container-local /tmp
+      # (SQLite WAL is unreliable on the GCS-FUSE mount). Also set in the image.
+      # MEMORIA_AUTO_COMPILE=true runs the "compile, don't retrieve" loop on a
+      # 24h timer: it rolls the daily-log firehose up into linked entity pages
+      # under entities/ (draining the ingest→compile queue so only touched
+      # sources rebuild). Deterministic + idempotent, and max-instances=1 means
+      # no concurrency hazard.
+      # Raw/provenance archive: RE-ENABLED (Phase 5). The archive now batches
+      # (one append per source per ingest cycle, not per event) and rotates at
+      # 5MB parts, so FUSE full-object-rewrite appends are amortized and
+      # bounded. Default is on; no env var needed.
+      - "BIND_ALL=true,DOCKER=true,MEMORIA_DIR=/data/memoria,MEMORIA_EMBEDDINGS=minilm,MEMORIA_REQUIRE_ENCRYPTION_KEY=true,MEMORIA_TOKEN_DB_DIR=/tmp/memoria,MEMORIA_AUTO_COMPILE=true,MEMORIA_PUBLIC_URL=${_PUBLIC_URL}"
+      # MEMORIA_API_KEY: bearer token for /mcp, /ingest, /dashboard/api.
+      # MEMORIA_OAUTH_CLIENT_SECRET: DISTINCT from the API key (own secret), so a
+      # leaked/rotated API key doesn't also mint OAuth tokens. Create once:
+      #   node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64url'))" \
+      #     | gcloud secrets create memoria-oauth-client-secret --data-file=- \
+      #     && gcloud secrets add-iam-policy-binding memoria-oauth-client-secret \
+      #          --member="serviceAccount:memoria-runtime@${PROJECT_ID}.iam.gserviceaccount.com" \
+      #          --role=roles/secretmanager.secretAccessor
+      # MEMORIA_ENCRYPTION_KEY: the AES-256 master key (64 hex chars). Pinning it
+      # from Secret Manager keeps the key OFF the GCS bucket that holds the
+      # ciphertext it protects (otherwise key + data sit side-by-side). Create it
+      # once before deploying:
+      #   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" \
+      #     | gcloud secrets create memoria-encryption-key --data-file=- \
+      #     && gcloud secrets add-iam-policy-binding memoria-encryption-key \
+      #          --member="serviceAccount:memoria-runtime@${PROJECT_ID}.iam.gserviceaccount.com" \
+      #          --role=roles/secretmanager.secretAccessor
+      # NOTE: rotating this key makes existing ciphertext (buffer/config) undecryptable.
+      - "--set-secrets"
+      - "MEMORIA_API_KEY=memoria-api-key:latest,MEMORIA_OAUTH_CLIENT_SECRET=memoria-oauth-client-secret:latest,MEMORIA_ENCRYPTION_KEY=memoria-encryption-key:latest"
+      - "--service-account"
+      - "memoria-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
+      - "--allow-unauthenticated"
+
+substitutions:
+  _REGION: us-central1
+  _REPO: memoria
+  # Required — pass both on every submit (no safe defaults exist):
+  #   --substitutions SHORT_SHA=$(git rev-parse --short HEAD),_BUCKET=your-bucket,_PUBLIC_URL=https://memoria-<hash>-<region>.a.run.app
+  # _BUCKET:     GCS bucket mounted at /data (canonical memory store + derived index)
+  # _PUBLIC_URL: the service's external URL; pins OAuth discovery metadata so it
+  #              is never derived from the Host header. Create the service once,
+  #              read its URL, then re-deploy with it set.
+  _BUCKET: ""
+  _PUBLIC_URL: ""
+
+images:
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/memoria"

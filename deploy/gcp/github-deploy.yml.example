@@ -1,0 +1,140 @@
+# EXAMPLE - continuous deployment to Cloud Run after CI passes on main.
+# To use: copy to .github/workflows/deploy.yml, set the repo variables
+# GCP_PROJECT_ID / MEMORIA_SERVICE_URL / MEMORIA_BUCKET, and add either
+# GCP_WIF_PROVIDER + GCP_DEPLOY_SA (preferred) or GCP_SA_KEY as secrets.
+# Shipped with a .example suffix so it does not run on forks by default.
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: deploy-memoria
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # Gate so we don't email-spam failures when no GCP auth is configured.
+  # Drop GCP_SA_KEY (or GCP_WIF_PROVIDER + GCP_DEPLOY_SA) into repo secrets and
+  # the deploy job will start firing on the next merge — no workflow change.
+  check-secrets:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        env:
+          HAS_AUTH: ${{ secrets.GCP_SA_KEY != '' || secrets.GCP_WIF_PROVIDER != '' }}
+        run: |
+          if [ "$HAS_AUTH" = "true" ]; then
+            echo "enabled=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No GCP auth secret configured (GCP_SA_KEY or GCP_WIF_PROVIDER). Skipping deploy."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    needs: check-secrets
+    if: needs.check-secrets.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+
+    env:
+      # Configure these as repository *variables* (Settings -> Secrets and
+      # variables -> Actions -> Variables); they are not secret.
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      SERVICE_URL: ${{ vars.MEMORIA_SERVICE_URL }}
+      BUCKET: ${{ vars.MEMORIA_BUCKET }}
+
+    steps:
+      - name: Checkout main at the commit CI passed for
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Auth to GCP
+        # Prefers Workload Identity Federation; falls back to JSON SA key.
+        # To switch: set GCP_WIF_PROVIDER + GCP_DEPLOY_SA in repo secrets and
+        # remove GCP_SA_KEY.
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Record serving revision (rollback target)
+        # Captured BEFORE the deploy so a failed smoke test can shift traffic
+        # back in one command. (A tagged-candidate pre-promotion gate is NOT
+        # used deliberately: a second live revision would mount the same
+        # GCS-FUSE volume and violate the single-writer SQLite constraint —
+        # the exact WAL corruption max-instances=1 exists to prevent.)
+        id: prev
+        run: |
+          PREV=$(gcloud run services describe memoria \
+            --project "$PROJECT_ID" --region us-central1 \
+            --format 'value(status.traffic[0].revisionName)' || true)
+          echo "revision=$PREV" >> "$GITHUB_OUTPUT"
+          echo "Current serving revision: ${PREV:-<none>}"
+
+      - name: Cloud Build (image + Cloud Run deploy via cloudbuild.yaml)
+        # Tag with the SAME commit we checked out (workflow_run's head_sha).
+        # GITHUB_SHA on a workflow_run event is the default-branch HEAD at event
+        # time, which can differ from the commit CI actually passed for.
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          SHORT_SHA="${HEAD_SHA::7}"
+          gcloud builds submit . \
+            --project "$PROJECT_ID" \
+            --config deploy/gcp/cloudbuild.yaml \
+            --substitutions "SHORT_SHA=$SHORT_SHA,_BUCKET=$BUCKET,_PUBLIC_URL=$SERVICE_URL" \
+            --timeout=20m
+
+      - name: Smoke test (health + dashboard + auth gate)
+        run: |
+          # Wait for the new revision to answer /health. Generous window: a
+          # provider change (e.g. hash -> minilm) re-embeds the store on first
+          # startup, which can take a few minutes on GCS FUSE.
+          ok=0
+          for i in {1..60}; do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "$SERVICE_URL/health")
+            echo "health attempt $i: HTTP $CODE"
+            [ "$CODE" = "200" ] && { ok=1; break; }
+            sleep 5
+          done
+          [ "$ok" = "1" ] || { echo "FAIL: /health never returned 200"; exit 1; }
+
+          # The dashboard shipped broken to prod twice when only /health was
+          # checked. Assert the page renders, root redirects, and the auth gate
+          # rejects unauthenticated callers. (The client script's syntax is
+          # gated separately by dashboard.test.ts in CI before this runs.)
+          fail() { echo "FAIL: $1"; exit 1; }
+          ROOT=$(curl -s -o /dev/null -w '%{http_code}' "$SERVICE_URL/")
+          { [ "$ROOT" = "302" ] || [ "$ROOT" = "301" ]; } || fail "/ did not redirect (got $ROOT)"
+          curl -s "$SERVICE_URL/dashboard" | grep -q 'data-tab="wiki"' || fail "/dashboard missing expected markup"
+          GATE=$(curl -s -o /dev/null -w '%{http_code}' "$SERVICE_URL/dashboard/api/stats")
+          [ "$GATE" = "401" ] || fail "/dashboard/api auth gate not enforcing 401 (got $GATE)"
+          echo "Smoke checks passed."
+
+      - name: Auto-rollback on smoke failure
+        # A bad deploy is now REVERTED, not just detected: shift traffic back
+        # to the revision that was serving before this deploy. Runs only when
+        # the smoke step failed and a previous revision exists.
+        if: failure() && steps.prev.outputs.revision != ''
+        run: |
+          echo "Smoke failed — rolling traffic back to ${{ steps.prev.outputs.revision }}"
+          gcloud run services update-traffic memoria \
+            --project "$PROJECT_ID" --region us-central1 \
+            --to-revisions "${{ steps.prev.outputs.revision }}=100"
+          echo "Rollback complete. The failed revision remains deployed at 0% traffic for debugging."

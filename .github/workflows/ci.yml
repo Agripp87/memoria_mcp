@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  typescript:
+    name: TypeScript build (mcp-server, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu matches the production runtime; windows is the primary
+        # development platform. Without the windows leg, path-separator bugs
+        # (getRelativePath emits "/" while path.sep is "\\") fail only on the
+        # developer's machine and stay green on main indefinitely.
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: mcp-server
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          # Match the production runtime (Docker image is node:22-alpine).
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      # Coverage thresholds gate merges on the production platform only, so the
+      # per-file floors in vitest.config.ts have a single source of truth.
+      - if: matrix.os == 'ubuntu-latest'
+        run: npm run test:coverage
+      - if: matrix.os != 'ubuntu-latest'
+        run: npm test
+
+  python:
+    name: Python syntax (integrations)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: python -m compileall -q integrations
+
+  shell:
+    name: Shellcheck (scripts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: shellcheck --severity=warning scripts/*.sh deploy/gcp/*.sh
+
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      # The public repo must never contain a credential or a memory file. This
+      # scans the full history on every push/PR and fails the build on a hit.
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

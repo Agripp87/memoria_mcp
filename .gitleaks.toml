@@ -1,0 +1,22 @@
+# gitleaks configuration for the Memoria code repo.
+# Extends the default ruleset; only documented false positives are allow-listed.
+# If you need to add an entry here, it must be a *fake* value that exists to be
+# detected (a fixture) or an obvious placeholder — never a real secret.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented fixtures and placeholders"
+regexes = [
+  # README / docs placeholders
+  '''YOUR_API_KEY''',
+  # privacy.test.ts: a deliberately fake sk- key used to assert that the
+  # privacy tier re-classifier REDACTS secrets (the test exists because of this
+  # pattern). Not a credential.
+  '''sk-abcdEFGH1234ijklMNOP5678''',
+]
+paths = [
+  # Demo data generator emits realistic-looking fake content (the "Alex Rivera" persona)
+  '''mcp-server/scripts/generate-demo-data\.mjs''',
+]

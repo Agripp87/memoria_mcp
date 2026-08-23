@@ -1,0 +1,781 @@
+# Memoria
+
+**Persistent, plain-text memory for Claude — as a Markdown repo you own.**
+
+Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Code, claude.ai (Chat / CoWork) and any other MCP client a shared long-term memory. Memories are Markdown files with YAML frontmatter in a directory you control; a derived SQLite + FTS5 index provides hybrid semantic + keyword search; a set of agentic tools (reflect, lint, compact, compile) keeps the store healthy; and an optional collector daemon feeds in events from your own tools. It runs as a stdio server for Claude Code and as an OAuth 2.1 HTTP server for remote clients.
+
+> **Status: early public release.** The server has run as the maintainer's daily driver since spring 2026 (hosted on Cloud Run, ~240 tests, two adversarial security reviews). The packaging, plugin and npm publish are in progress — see [Roadmap](#roadmap). The sub-memory **collector** (iMessage / IMAP / Google ingestion) ships but should be treated as **experimental**; read [SECURITY.md](SECURITY.md) before enabling sources.
+
+**Why Memoria instead of another memory layer?**
+
+- **You own the data.** Plain Markdown in a folder — grep it, edit it, commit it, diff it. The SQLite index is derived and fully rebuildable. No hosted database, no proprietary format, no lock-in.
+- **Multi-device without a service.** Keep the store in a private git repo (or any object store); daily logs are append-only and merge with an append-union strategy, so two machines writing the same day never clobber each other ([Multi-device sync](#multi-device-sync)).
+- **Agentic self-maintenance.** Write-time dedup, reflection, contradiction lint, decay/promotion, and a deterministic "compile, don't retrieve" loop that rolls the daily firehose into linked entity pages.
+- **Spec-complete remote transport.** OAuth 2.1 with PKCE, client credentials, dynamic client registration and metadata discovery — works as a claude.ai custom connector out of the box.
+- **Honest about search.** Three embedding providers (OpenAI → local MiniLM → n-gram fallback), three-signal scoring, and every result reports its scan coverage.
+
+## Architecture
+
+```
+ Claude Code          Claude Chat          CoWork
+ (CLI)                (claude.ai)          (claude.ai)
+      |                    |                    |
+ Direct file           MCP Server          MCP Server
+ read/write           (HTTP/OAuth)        (HTTP/OAuth)
+      |                    |                    |
+      +------------ $MEMORIA_DIR/memories/ ---------+
+                   (canonical store)
+                         |
+              +----------+----------+
+              |                     |
+        SQLite + FTS5         Sub-Memory
+      (search index)          Collector
+                              (daemon)
+                                 |
+                   +------+------+------+
+                   |      |      |      |
+                iMessage Email Calendar Custom
+                   |      |      |      |
+                   +------+------+------+
+                         |
+                 Encrypted Ring Buffer
+                         |
+                 Ingestion Pipeline
+                 (re-score, dedup,
+                  rate-limit, fuse)
+```
+
+**Key principle**: Markdown files are the source of truth. The SQLite index is derived and fully rebuildable from the files.
+
+## Features
+
+- **17 MCP tools** for memory management, data collection, lint, knowledge compilation, entity-page compilation, and digest compaction
+- **Sub-memory collector** with source adapters for iMessage, Calendar, Email (IMAP), and user-defined custom sources
+- **Three-signal retrieval**: `score = 0.2 x recency + 0.3 x importance + 0.5 x relevance`
+- **Hybrid search**: Vector cosine similarity (0.7) + FTS5 BM25 keyword scoring (0.3). Three embedding providers, auto-selected: OpenAI `text-embedding-3-small` (if `OPENAI_API_KEY` set) → local `all-MiniLM-L6-v2` via `@xenova/transformers` (true semantic, fully offline after a one-time ~23MB download) → n-gram hashing (lexical fallback). Control with `MEMORIA_EMBEDDINGS`.
+- **Cross-source temporal fusion**: Detects correlated activities across sources within configurable time windows
+- **Write-time dedup**: Checks top-3 similar memories before every write, returns duplicates for agent review
+- **Encrypted at rest**: All collector data encrypted with AES-256-GCM; master key auto-generated (chmod 600)
+- **User agreement flow**: Sources cannot be enabled without explicit user consent
+- **Auto-dependency installation**: Missing npm packages installed automatically when a source is enabled
+- **Content hashing**: Skips re-embedding unchanged files during reindex (SHA-256)
+- **Importance scoring** (1-10) with idempotent decay/boost and health monitoring
+- **FTS5 full-text search** with automatic sync triggers
+- **Bi-temporal metadata**: `valid_from` / `valid_until` for temporal reasoning
+- **Memory linking**: Zettelkasten-style `related` field for graph-like traversal
+- **Agentic behaviors**: Reflection, consolidation, self-assessment, promotion/demotion
+- **OAuth 2.1 authentication**: Full MCP-spec auth with authorization_code + PKCE, client_credentials, dynamic client registration, and metadata discovery
+- **Security hardening**: Rate limiting, body size limits, session caps, path traversal protection, timing-safe comparisons
+- **Dual transport**: stdio (Claude Code) + Streamable HTTP / SSE (claude.ai and other remote MCP clients)
+- **Docker-first deployment**: multi-stage image, non-root user, persistent volume; a reference Cloud Run + GCS FUSE template under [`deploy/gcp/`](deploy/gcp/README.md)
+- **Spec-compliant YAML parser**: Uses `js-yaml` for frontmatter (handles quoted colons, multi-line strings, special chars in tags) — gracefully degrades on malformed YAML
+- **Bounded lint operations**: Contradiction scan capped at top 30 memories by importance, batched 5-in-parallel to control embedding API cost
+- **Buffer capacity reporting**: `/ingest` returns `bufferDropped` count and `bufferUsage` so callers know when events are dropped at capacity
+- **Test suite**: 231 tests covering chunker, embeddings, store, optimizer, ingestion, path resolution (incl. symlink-leaf containment), file_watcher allowlisting, privacy-tier classification + sink-side redaction, AES-256-GCM crypto (round-trip/tamper/strict-key), YAML edge cases, access tracking, plus an **HTTP integration suite** (supertest over the real Express app: the `/dashboard/api` Bearer auth-gate, the full OAuth `authorization_code`+PKCE flow end-to-end, client-credential + API-key-decoupling checks, redirect allowlisting) and **wiki rendering** (code-safe `[[wikilink]]` resolution, stored-XSS escaping, link-label safety). CI fails on coverage regression via per-file floors.
+- **File watcher**: Auto-reindex on change with 1.5s debounce, plus a periodic reindex sweep (default 5 min) as a fallback for mounts where `fs.watch` is inert (e.g. GCS FUSE on Cloud Run)
+
+## Quick Start
+
+### Prerequisites
+
+- Node.js 18+ (22 recommended — matches the Docker image)
+- npm
+- (Optional) an OpenAI API key for the highest-quality embeddings. Without one, a local `all-MiniLM-L6-v2` model provides semantic embeddings fully offline (one-time ~23 MB download).
+
+### 1. Build from source
+
+```bash
+git clone https://github.com/Agripp87/memoria.git
+cd memoria/mcp-server
+npm install
+npm run build
+```
+
+> An npm package (`@memoria/mcp`, `npx`-runnable) and a Claude Code plugin are on the [roadmap](#roadmap); until then, build from source.
+
+### 2. Try it on fake data (30 seconds)
+
+```bash
+npm run demo
+# → generates a throwaway ./demo-store with ~29 cross-linked memories
+# → open http://127.0.0.1:3110/dashboard   (key: demo-key-123)
+```
+
+### 3. Register with Claude Code
+
+```bash
+claude mcp add memoria -s user -- node /absolute/path/to/memoria/mcp-server/scripts/mcp-start.mjs
+```
+
+or add to `~/.claude.json` / your project's `.claude/settings.local.json`:
+
+```json
+{
+  "mcpServers": {
+    "memoria": {
+      "command": "node",
+      "args": ["/absolute/path/to/memoria/mcp-server/scripts/mcp-start.mjs"],
+      "env": { "MEMORIA_DIR": "/path/to/your/memory-store" }
+    }
+  }
+}
+```
+
+The store defaults to `~/.memoria` (`MEMORIA_DIR` overrides it). The first `memory_write` creates the directory layout. `OPENAI_API_KEY` in `env` switches to OpenAI embeddings.
+
+> **Why `scripts/mcp-start.mjs` and not `dist/index.js`:** the wrapper runs
+> `tsc` before serving (compiler output redirected to stderr — stdout is the
+> JSON-RPC transport), so the server you talk to is always built from the
+> checked-out source. If the build fails, it falls back to the previous
+> `dist/` with a loud stderr warning rather than starting nothing.
+
+Then tell Claude how to use it. Memoria works best with a short standing instruction in your `CLAUDE.md` — e.g. *"At session start, `memory_search` for context relevant to the task. Record decisions, solved bugs and preferences with `memory_daily` during the session, `memory_write` for durable facts. Do not capture transactional work."* The server's own MCP instructions already ask for at least one daily-log entry per session.
+
+### 4. Remote access (claude.ai, other devices) with Docker
+
+```bash
+cp .env.example .env
+# fill in MEMORIA_API_KEY, MEMORIA_OAUTH_CLIENT_SECRET, MEMORIA_ENCRYPTION_KEY
+# (generation one-liners are in the file) and MEMORIA_PUBLIC_URL
+docker compose up -d
+curl http://localhost:3100/health
+```
+
+The compose file publishes the port on loopback only and mounts a named volume at `/data` for the store. Put it behind your usual TLS ingress (Caddy, Cloudflare Tunnel, ngrok, a reverse proxy) and set `MEMORIA_PUBLIC_URL` to the external URL.
+
+Then in **claude.ai → Settings → Connectors → Add custom connector**:
+
+- **URL**: `https://<your-host>/mcp`
+- **Advanced → OAuth Client ID**: `memoria`
+- **Advanced → OAuth Client Secret**: your `MEMORIA_OAUTH_CLIENT_SECRET`
+
+For a durable cloud deployment see [`deploy/gcp/README.md`](deploy/gcp/README.md) (Cloud Run + GCS FUSE + Secret Manager, with CI/CD and auto-rollback). The server itself only needs a directory at `MEMORIA_DIR`, so any host with a persistent volume works.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MEMORIA_API_KEY` | *(required for HTTP)* | Bearer token for HTTP transport authentication (`/mcp`, `/ingest`, `/dashboard/api`). Distinct from the OAuth client secret below. |
+| `OPENAI_API_KEY` | *(none)* | Enables OpenAI text-embedding-3-small (1536-dim). When unset, falls back to the local MiniLM model (see `MEMORIA_EMBEDDINGS`). |
+| `MEMORIA_EMBEDDINGS` | `auto` | Embedding provider: `auto` (OpenAI if key, else local MiniLM if installed, else hash), `openai`, `minilm` (local all-MiniLM-L6-v2, 384-dim, true semantic), or `hash` (n-gram lexical fallback, 384-dim). |
+| `MEMORIA_MODEL_CACHE` | *(package default)* | Directory for the cached MiniLM model. The Docker image pre-bakes it at `/app/mcp-server/.models`. |
+| `MEMORIA_MODEL_OFFLINE` | `false` | Set to `true` to forbid model downloads (use only the cached/pre-baked model). |
+| `MEMORIA_OAUTH_CLIENT_SECRET` | *(required when `BIND_ALL=true`)* | OAuth client secret. Keep it distinct from the API key so rotating one doesn't rotate the other. Locally (loopback) it falls back to the API key with a warning. |
+| `MEMORIA_ENCRYPTION_KEY` | *(required when `BIND_ALL=true`)* | AES-256-GCM master key (64 hex chars) for the collector's encrypted buffer and credential store. Locally, an on-disk key is auto-generated at `data/collector.key` unless `MEMORIA_REQUIRE_ENCRYPTION_KEY=true`. Rotating it makes existing ciphertext unreadable. |
+| `MEMORIA_REQUIRE_ENCRYPTION_KEY` | `false` | Refuse to start without `MEMORIA_ENCRYPTION_KEY` (fail-closed; no on-disk key fallback). |
+| `MEMORIA_ALLOWED_REDIRECT_HOSTS` | `claude.ai,claude.com,anthropic.com,localhost,127.0.0.1` | Comma-separated hostnames permitted as OAuth `redirect_uri` targets (subdomains allowed). |
+| `MEMORIA_ALLOW_SHELL_SOURCES` | `false` | Set to `true` (trusted local instances only) to permit `shell_command` custom sources, which execute arbitrary commands. Disabled by default. |
+| `MEMORIA_REINDEX_INTERVAL_MS` | `300000` | Interval for the periodic reindex sweep (fallback for inert `fs.watch`). |
+| `MEMORIA_AUTO_OPTIMIZE` | `false` | Set to `true` to run the idempotent decay/promote/staleness passes on a timer (genuinely autonomous self-management), instead of only when an agent calls `memory_optimize`. |
+| `MEMORIA_OPTIMIZE_INTERVAL_MS` | `86400000` | Interval for the auto-optimize pass (default 24h; only used when `MEMORIA_AUTO_OPTIMIZE=true`). |
+| `MEMORIA_AUTO_COMPILE` | `false` | Set to `true` to autonomously roll the daily-log firehose up into linked entity pages on a timer (the "compile, don't retrieve" loop), instead of only when an agent calls `memory_entities`. Drains the ingest-driven compile queue so only sources touched since the last run are rebuilt. |
+| `MEMORIA_COMPILE_INTERVAL_MS` | `86400000` | Interval for the auto-compile pass (default 24h; only used when `MEMORIA_AUTO_COMPILE=true`). |
+| `MEMORIA_RAW_ARCHIVE` | `true` | Durable, immutable provenance archive of every ingested event under `data/raw/<source>/<YYYY-MM>.jsonl` (privacy-aware: `local-only` stores a hash only). **Batched** (one append per source per ingest cycle) and **rotated** (5MB parts), so it is safe on object-storage FUSE mounts. Set to `false` to disable. |
+| `MEMORIA_RAW_ARCHIVE_BATCH` / `MEMORIA_RAW_ARCHIVE_FLUSH_MS` / `MEMORIA_RAW_ARCHIVE_ROTATE_BYTES` | `20` / `60000` / `5242880` | Raw-archive batching knobs: flush after N buffered records or T ms (also flushed every ingest cycle and on shutdown); rotate to a new `-pN.jsonl` part past the byte cap. |
+| `MEMORIA_INGEST_MAX_ATTEMPTS` | `3` | Failed ingest attempts before a poison event is dead-lettered (metadata-only record in `data/.dead-letter.jsonl`; content never written). |
+| `MEMORIA_BACKPRESSURE_THRESHOLD` | `0.8` | Fraction of buffer capacity at which source polling pauses so ingestion can drain the unsynced backlog instead of the buffer evicting unsynced (personal) events. |
+| `MEMORIA_PUBLIC_URL` | *(none)* | Pins the OAuth issuer/endpoint metadata base URL. Without it, the base URL is derived from request headers (`Host`/`X-Forwarded-Host`), which reflects attacker-supplied hosts into the discovery document. **Set this in any network-exposed deployment.** |
+| `MEMORIA_INSECURE_ALLOW_FALLBACKS` | `false` | **Breaking-change escape hatch (2026-07):** with `BIND_ALL=true` the server now refuses to start unless `MEMORIA_OAUTH_CLIENT_SECRET` and `MEMORIA_ENCRYPTION_KEY` are both set (previously it warned and fell back to the API key / an on-disk key). Self-hosted setups that accept those risks can set this to `true` to restore the old behavior. |
+| `MEMORIA_VECTOR_SCAN_CAP` | `5000` | Max chunks scanned per query for semantic candidate selection. |
+| `MEMORIA_DIR` | Auto-detected | Override the root Memoria directory. Auto-detects: `/data/memoria` in Docker, `~/.memoria` locally. |
+| `MEMORIA_REPO_URL` | `https://github.com/Agripp87/memoria` | Link shown in the dashboard's About card (forks: point it at your repo/docs). |
+| `PORT` | `3100` | HTTP server port |
+| `BIND_ALL` | `false` | Set to `true` to bind to `0.0.0.0` instead of `127.0.0.1` (required for Docker/Cloud Run) |
+| `DOCKER` | `false` | Set to `true` to use Docker-optimized defaults |
+
+## MCP Tools
+
+### Core Memory Tools (13)
+
+| Tool | Description |
+|------|-------------|
+| `memory_search` | Semantic + keyword hybrid search with three-signal scoring |
+| `memory_read` | Read a specific memory file (returns empty if missing, not error) |
+| `memory_write` | Create/update memory with dedup check (top-3 similar). Use `force: true` to skip. |
+| `memory_list` | List all memories, filter by type or tag |
+| `memory_index` | Rebuild vector + FTS5 search index and MEMORY_INDEX.md catalog |
+| `memory_daily` | Append an entry to today's daily log |
+| `memory_optimize` | Run `decay`, `promote`, `detect_stale`, or `find_duplicates` |
+| `memory_reflect` | Read recent daily logs for agent reflection/synthesis |
+| `memory_stats` | Health metrics: importance distribution, stale count, access patterns, warnings |
+| `memory_lint` | Proactive health checks: contradiction scan, orphan detection, stale cross-refs, missing descriptions, gap analysis, **index drift** (rule VII), **entity-alias collisions** and **low-confidence claims** (rule VIII), **unknown directories** (files outside the documented layout — how the store once silently split into `reference/` + `references/`) |
+| `memory_compile` | Compile analysis results into structured core memories with auto-generated frontmatter and index update |
+| `memory_compact` | Read recent daily logs, deduplicate by source+content, surface high-importance events. Output is designed to be summarized into a reflection memory via `memory_compile`. |
+| `memory_entities` | Compile the daily-log firehose into durable, linked per-source **entity pages** under `entities/` — the "compile, don't retrieve" loop (Karpathy rule IV). Deterministic (no LLM), idempotent, and never overwrites a page a human has taken over. Runs on demand, or autonomously via `MEMORIA_AUTO_COMPILE=true`. |
+
+### Sub-Memory Collector Tools (4)
+
+| Tool | Description |
+|------|-------------|
+| `memory_sources` | List, enable, disable, add custom, remove, or configure data sources. Includes user agreement flow. |
+| `memory_ingest` | Manually trigger ingestion of buffered events into core memory |
+| `memory_fuse` | Run cross-source temporal fusion to detect correlated activities |
+| `memory_priority` | View collector status, adjust importance thresholds, flush buffer |
+
+## Sub-Memory Collector
+
+The collector is an autonomous sub-agent that gathers data from personal tools and feeds it into core memory through an encrypted pipeline.
+
+### Built-in Sources
+
+| Source | ID | Platform | Description |
+|--------|----|----------|-------------|
+| **iMessage** | `imessage` | macOS | Reads `~/Library/Messages/chat.db`. Requires Full Disk Access. |
+| **Calendar** | `calendar` | macOS | Reads `~/Library/Calendars/Calendar Cache`. Configurable look-ahead/behind. |
+| **Email (IMAP)** | `email` | All | Connects to any IMAP server (Gmail, Outlook, iCloud). Auto-installs `imapflow`. |
+| **Gmail** | `google-gmail` | All | Google Gmail via API. Label filtering, importance markers, history-based incremental sync. |
+| **Google Calendar** | `google-calendar` | All | Google Calendar via API. Multi-calendar, attendees, meeting links, syncToken incremental sync. |
+| **Google Drive** | `google-drive` | All | Monitors selected Drive folders. Extracts text from Docs, Sheets, plain text files. |
+
+### Google Account Setup
+
+The three Google adapters share a single set of OAuth 2.0 credentials:
+
+**1. Create Google Cloud credentials:**
+
+```bash
+# Go to https://console.cloud.google.com
+# 1. Create a new project (or use existing)
+# 2. Enable these APIs:
+#    - Gmail API
+#    - Google Calendar API
+#    - Google Drive API
+# 3. Go to Credentials > Create Credentials > OAuth client ID
+#    - Application type: Desktop app
+#    - Download the JSON file
+```
+
+**2. Get a refresh token:**
+
+```bash
+# Use the OAuth playground or run this one-time script:
+# https://developers.google.com/oauthplayground/
+#
+# Select scopes:
+#   - Gmail: https://www.googleapis.com/auth/gmail.readonly
+#   - Calendar: https://www.googleapis.com/auth/calendar.readonly
+#   - Drive: https://www.googleapis.com/auth/drive.readonly
+#
+# Exchange authorization code for tokens
+# Copy the refresh_token
+```
+
+**3. Enable the adapters:**
+
+```
+memory_sources action="agree" source="google-gmail"
+memory_sources action="enable" source="google-gmail" config={
+  "google_client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
+  "google_client_secret": "YOUR_CLIENT_SECRET",
+  "google_refresh_token": "YOUR_REFRESH_TOKEN",
+  "labels": ["INBOX"],
+  "excludeLabels": ["SPAM", "TRASH", "PROMOTIONS"]
+}
+```
+
+The same credentials work for all three Google adapters. Credentials are stored encrypted (AES-256-GCM).
+
+**4. Google Drive folder selection:**
+
+```
+memory_sources action="enable" source="google-drive" config={
+  "google_client_id": "...",
+  "google_client_secret": "...",
+  "google_refresh_token": "...",
+  "folderIds": ["FOLDER_ID_1", "FOLDER_ID_2"],
+  "includeContent": true
+}
+```
+
+To find folder IDs, open the folder in Google Drive — the ID is in the URL after `/folders/`.
+
+### Custom Sources
+
+Users can add their own data sources in three modes:
+
+| Mode | Use Case | Example |
+|------|----------|---------|
+| `file_watcher` | Monitor a file/directory for changes | Fitness app JSON exports, chat logs |
+| `shell_command` | Periodically run a command and parse output | Custom scripts, API calls via curl |
+| `webhook` | Receive HTTP POST with event data *(not yet implemented — push to the authenticated `/ingest` endpoint instead)* | Smart home systems, IFTTT triggers |
+
+Custom sources support JSON, CSV, and plain text formats with configurable field mappings.
+
+### Collector Pipeline
+
+```
+Source Adapters (poll on interval; PAUSED under backpressure)
+        |
+   Edge Filtering (importance threshold + privacy tier)
+        |
+   Encrypted Ring Buffer (SQLite, AES-256-GCM, max 10K events)
+        |
+   Ingestion Pipeline (per-source-fair batches)
+   ├── Re-score importance (boost personal, penalize automated)
+   ├── Rate limit (20 events/source/minute — over-budget events are
+   │   DEFERRED and retried next cycle, never dropped)
+   ├── Content-hash dedup (SHA-256; recorded only after a successful write)
+   ├── Consolidation (search existing → ADD/UPDATE/SKIP)
+   └── Write to daily logs
+        |
+   Per-event outcomes → only durably-handled events marked synced;
+   errored events retry up to MEMORIA_INGEST_MAX_ATTEMPTS, then are
+   dead-lettered (metadata-only) to data/.dead-letter.jsonl
+        |
+   Temporal Fusion (±30 min window)
+   └── Cross-source activity detection → fused activity records
+```
+
+**No-silent-loss guarantees** (2026-07 hardening): the daemon marks **only
+durably-handled** events as synced (written / duplicate / below-threshold);
+rate-limited events stay buffered and retry when the budget refills; a write
+failure does not consume the event's dedup slot (retries aren't mistaken for
+duplicates); always-failing (poison) events stop retrying after
+`MEMORIA_INGEST_MAX_ATTEMPTS` and leave a metadata-only dead-letter record;
+ingestion batches are split fairly across sources so one backlogged source
+can't starve the rest; and polling pauses at `MEMORIA_BACKPRESSURE_THRESHOLD`
+of buffer capacity so the ring buffer never has to evict unsynced personal
+events while ingestion catches up.
+
+### Privacy Tiers
+
+All events are classified into privacy tiers before leaving the device:
+
+| Tier | Behavior | Example |
+|------|----------|---------|
+| `send` | Transmit content as-is | Calendar event titles |
+| `summarize` | Truncate/redact before sending | Long email content |
+| `local-only` | Never leaves the device | Messages containing passwords, credit cards, SSNs |
+
+### Encryption
+
+- **Master key**: AES-256-GCM. Sourced from `MEMORIA_ENCRYPTION_KEY` (recommended — pin from a secret manager), else auto-generated on first run at `data/collector.key` (chmod 600, best-effort). Set `MEMORIA_REQUIRE_ENCRYPTION_KEY=true` to require the env var and refuse the on-disk fallback.
+- **Ring buffer**: All event content encrypted before SQLite storage
+- **Config**: Source configurations (including IMAP credentials) encrypted at `data/collector-config.enc`
+- **Access**: Only the Memoria agent and the user have access to decrypted data
+
+### Enabling a Source
+
+```
+1. memory_sources action="list"                    # See available sources
+2. memory_sources action="agree" source="imessage" # Record user consent
+3. memory_sources action="enable" source="imessage" # Enable + auto-install deps
+4. memory_priority action="status"                 # Verify it's collecting
+```
+
+### Adding a Custom Source
+
+```
+memory_sources action="add_custom" custom_definition={
+  "id": "fitbit-sleep",
+  "name": "Fitbit Sleep Data",
+  "description": "Daily sleep quality from Fitbit JSON export",
+  "mode": "file_watcher",
+  "watchPath": "/path/to/fitbit-export.json",
+  "fileFormat": "json",
+  "jsonPath": "sleep.data",
+  "fieldMap": {
+    "content": "summary",
+    "timestamp": "dateOfSleep",
+    "id": "logId"
+  }
+}
+```
+
+## HTTP Ingestion (external agents & systems)
+
+Any external system can push events to Memoria's authenticated `/ingest` endpoint — agent frameworks, cron jobs, webhooks, other assistants. Events flow through the same pipeline as collector sources (re-score, rate-limit, dedup, consolidate, write to the daily log, index).
+
+```bash
+curl -X POST https://<your-host>/ingest \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "events": [{
+      "id": "unique-id",
+      "source": "my-agent",
+      "content": "Agent completed task X",
+      "timestamp": "2026-04-03T15:30:00Z",
+      "importance": 6,
+      "meta": {"agent_id": "research-agent"}
+    }]
+  }'
+```
+
+Response: `{ "accepted": 1, "buffered": 1, "written": 1, "deduplicated": 0, "rateLimited": 0 }`
+
+
+**Python hook.** [`integrations/orchestrator_hook.py`](integrations/orchestrator_hook.py) is a dependency-light (`httpx` or `requests`) client that buffers events and flushes them every 30 s in the background — originally written for a multi-agent orchestrator, but generic: `record_agent_result`, `record_metric`, `record_conversation`, `record_training_eval`, plus raw `record(...)`. All calls are best-effort; a Memoria outage never breaks the caller.
+
+```python
+from integrations.orchestrator_hook import MemoriaHook
+hook = MemoriaHook(memoria_url="https://<your-host>/ingest", api_key=os.environ["MEMORIA_API_KEY"])
+hook.record_agent_result("research-agent", task, result, metrics)
+hook.flush()  # on shutdown
+```
+
+**Close the loop.** Ingestion makes Memoria write-heavy; to make it useful, have your agents call `memory_search` (or `GET /dashboard/api/search` with the bearer key) before a run and prepend the top results to their context. That is what turned the maintainer's setup from write-only into a memory that compounds.
+
+## Dashboard (Web UI)
+
+Memoria includes a built-in web dashboard for managing memory, data sources, and journaling — no CLI required.
+
+**Access**: `http://127.0.0.1:3100/dashboard` (or your public URL)
+
+On first visit, the dashboard prompts for your `MEMORIA_API_KEY`. It's saved in the browser's localStorage.
+
+### Demo mode (fake data)
+
+Showcase the dashboard — including the **Wiki** — with realistic made-up data, without touching your real memories.
+
+**Hosted demo:** [`https://memoria-demo-hpb4luig7q-uc.a.run.app/dashboard`](https://memoria-demo-hpb4luig7q-uc.a.run.app/dashboard) (key: `memoria-demo`). The demo runs as a **separate Cloud Run service** under a **zero-privilege service account** (no Secret Manager, no real bucket) on ephemeral data regenerated on every cold start — a demo compromise can't reach the real service's secrets or memories. Deployed via [`deploy/gcp/deploy-demo.sh`](deploy/gcp/deploy-demo.sh).
+
+**Locally:**
+
+```bash
+cd mcp-server
+npm run demo
+# → generates a throwaway ./demo-store and launches the dashboard
+# → open http://127.0.0.1:3110/dashboard   (key: demo-key-123)
+```
+
+`npm run demo` builds (if needed), writes ~29 cross-linked fake memories (an "Alex Rivera" indie-dev persona: profile, projects, decisions, reflections, and 16 collector-style daily logs), and serves them on a local-only port. The demo store is git-ignored and your real `MEMORIA_DIR` is never touched. Use `npm run demo:gen -- --out <dir>` to just generate the data. Override the port/key with `PORT=…` / `MEMORIA_API_KEY=…`.
+
+> **Security note:** the dashboard authenticates via an httpOnly, SameSite=Strict session cookie minted at `POST /dashboard/login` (Phase 3, 2026-07) — the API key is no longer stored in `localStorage`, so origin XSS cannot exfiltrate it. All memory/source-derived fields remain HTML-escaped against stored XSS; still treat the dashboard as a trusted-network tool.
+
+### Sections
+
+| Tab | What it does |
+|-----|-------------|
+| **Overview** | Memory stats (file count, chunks, avg importance, stale), collector status, recent journal entries |
+| **Data Sources** | List all sources with status badges. Enable/disable with one click. Configure credentials via modal forms. Add custom sources (file watcher, shell command). |
+| **Journal** | Write daily journal entries with optional mood tracking and tags. Entries are saved to the daily log and indexed for search. View recent entries. |
+| **Memories** | Browse all memory files sorted by importance. Full-text search across all memories. |
+| **Wiki** | Browse the whole memory store as a cross-linked wiki: rendered markdown, an index by category + a daily-log calendar, `related` links + `[[wiki links]]` + computed backlinks, and **append-only** "add note" annotations on any memory (provenance preserved). |
+| **Settings** | Rebuild search index, view buffer stats, links. |
+
+### Journal
+
+The journal provides a way to manually add context that automated collectors can't capture — thoughts, decisions, reflections, plans. Entries support:
+
+- **Mood tracking**: Select from 5 mood states per entry
+- **Tags**: Comma-separated tags for categorization
+- **Full indexing**: Journal entries are immediately indexed for semantic search
+
+Journal entries are stored in `memories/daily/YYYY-MM-DD.md` alongside auto-collected events, creating a unified timeline.
+
+## Memory File Format
+
+Every memory file uses Markdown with YAML frontmatter:
+
+```markdown
+---
+name: Nightjar project status
+description: Overview of the offline-first notes app
+type: project
+importance: 8
+created: 2026-03-27
+updated: 2026-03-27
+tags: [app, react-native]
+related: [user/profile.md]
+valid_from: 2026-03-27
+valid_until:
+---
+
+Content in plain markdown...
+```
+
+### Types
+
+`user` | `project` | `decision` | `feedback` | `reference` | `session` | `reflection` | `pattern` | `source-rollup` (auto-compiled per-source pages under `entities/`; renamed from `entity` in Phase 5 — they are activity rollups keyed by collector source, not extracted entities)
+
+### Importance Scale
+
+| Score | Meaning | Example |
+|-------|---------|---------|
+| 1-2 | Mundane | "ran npm install" |
+| 3-4 | Routine | "built feature Y" |
+| 5-6 | Notable | "chose Zustand over Redux" |
+| 7-8 | Important | "user prefers terse responses" |
+| 9-10 | Critical | "app must be offline-first" |
+
+## Directory Structure
+
+**Code repo** (this repository):
+
+```
+memoria/
+├── README.md
+├── LICENSE                    # Apache-2.0
+├── SECURITY.md                # Trust model + disclosure
+├── Dockerfile                 # Multi-stage build (Node 22 Alpine, non-root)
+├── docker-compose.yml         # Local/VPS deployment with a persistent volume
+├── .env.example
+├── deploy/gcp/                # Reference Cloud Run deployment (template, CI/CD example, demo)
+├── .github/workflows/ci.yml   # tsc + tests (ubuntu & windows) + coverage gate + shellcheck + gitleaks
+├── integrations/
+│   └── orchestrator_hook.py   # Python /ingest client (buffered, best-effort)
+├── scripts/
+│   ├── lib-union-merge.sh     # Append-union merge for daily logs (multi-device sync)
+│   └── sync-from-claude-memory.sh  # One-way pull from Claude Code's built-in memory
+└── mcp-server/
+    ├── package.json
+    ├── tsconfig.json
+    ├── src/
+        ├── index.ts           # Stdio transport entry point
+        ├── http.ts            # HTTP/SSE transport entry point
+        ├── dashboard.ts       # Web UI + REST API router
+        ├── tools.ts           # Shared tool registration (17 tools)
+        ├── store.ts           # SQLite + FTS5 storage, vector search
+        ├── embeddings.ts      # OpenAI / local MiniLM / n-gram provider
+        ├── chunker.ts         # Markdown -> overlapping chunks
+        ├── optimize.ts        # Decay, promotion, staleness, dedup
+        ├── entities.ts        # Entity-page compilation (compile-don't-retrieve loop)
+        ├── lint.ts            # Contradictions, orphans, gaps, stale refs, index drift, alias/low-confidence
+        ├── __tests__/         # Vitest test suite (~240 tests, incl. HTTP integration)
+        └── collector/
+            ├── crypto.ts      # AES-256-GCM encryption + master key
+            ├── provenance.ts  # Durable append-only raw/provenance archive (data/raw/)
+            ├── registry.ts    # Source registry (enable/disable/agree/custom)
+            ├── buffer.ts      # Encrypted ring buffer (SQLite)
+            ├── daemon.ts      # Poll loop orchestrator with backoff
+            ├── ingestion.ts   # 5-stage core ingestion pipeline
+            ├── fusion.ts      # Cross-source temporal pattern detection
+            └── adapters/
+                ├── base.ts            # SourceAdapter interface + helpers
+                ├── imessage.ts        # macOS iMessage/SMS adapter
+                ├── calendar.ts        # macOS Calendar adapter
+                ├── email.ts           # IMAP email adapter (cross-platform)
+                ├── google-auth.ts     # Shared Google OAuth 2.0 helper
+                ├── google-gmail.ts    # Gmail API adapter
+                ├── google-calendar.ts # Google Calendar API adapter
+                ├── google-drive.ts    # Google Drive folder watcher
+                └── custom.ts          # User-defined source adapter
+    ├── scripts/               # mcp-start.mjs (build-then-serve), demo + demo data generator, prefetch-model
+    └── vitest.config.ts       # Coverage floors enforced in CI
+```
+
+**Memory store** (`MEMORIA_DIR`, default `~/.memoria` — keep it *outside* the code repo, ideally as its own private git repo):
+
+```
+$MEMORIA_DIR/
+├── memories/
+│   ├── MEMORY_INDEX.md        # Master index (auto-refreshed; preserves a curated appendix below the MEMORIA:MANUAL sentinel)
+│   ├── daily/                 # Append-only daily session logs
+│   ├── entities/              # Auto-compiled per-source rollup pages (memory_entities)
+│   ├── user/                  # User identity, preferences
+│   ├── project/               # Project overviews, status
+│   ├── decisions/             # Architectural/product decisions
+│   ├── feedback/              # How Claude should behave
+│   ├── references/            # Pointers to external resources
+│   └── sessions/              # Session summaries and reviews
+└── data/                      # Derived + runtime state (git-ignore this)
+    ├── memoria.sqlite         # FTS5 + vector index (rebuildable)
+    ├── event-buffer.sqlite    # Encrypted collector ring buffer
+    ├── tokens.sqlite          # OAuth tokens
+    ├── collector-config.enc   # Encrypted source credentials
+    ├── collector.key          # AES-256 master key (if not supplied via env)
+    └── raw/<source>/*.jsonl   # Append-only provenance archive
+```
+
+## Three-Tier Memory Architecture
+
+| Tier | Content | Lifespan | Location |
+|------|---------|----------|----------|
+| **Working** | Current session context | Single session | In-context (not persisted) |
+| **Core** | Essential facts, preferences, decisions | Long-term, curated | `memories/user/`, `project/`, `decisions/`, `feedback/` |
+| **Archival** | Daily logs, session summaries | Retained, lower priority | `memories/daily/`, `sessions/` |
+
+## Agentic Behaviors
+
+Memoria is designed for self-managing memory, inspired by research from Generative Agents, Mem0, MemGPT/Letta, and Zep.
+
+> **How "autonomous" works in practice:** most behaviors below are *agent-driven*, not background loops — they are MCP tools (`memory_optimize`, `memory_reflect`, `memory_lint`, `memory_compact`, write-time dedup) that the Claude agent invokes following the cadence in `CLAUDE.md` (e.g. reflect every ~20 entries, self-assess every 5th session). Truly background processes are the collector daemon (polling sources), the periodic reindex sweep (which now also keeps `MEMORY_INDEX.md` fresh), and — when enabled — a daily decay/promote/staleness pass (`MEMORIA_AUTO_OPTIMIZE=true`) and a daily entity-page compile pass (`MEMORIA_AUTO_COMPILE=true`, draining the ingest→compile queue). With both off (the default), they run only when `memory_optimize` / `memory_entities` are called.
+
+- **Consolidation**: Before every write, search for existing memories on the same topic. Decide: ADD, UPDATE, DELETE, or NOOP.
+- **Reflection**: After ~20 daily log entries or 3+ days on the same topic, synthesize higher-level insights as `reflection` type memories.
+- **Self-Assessment**: Every 5th session, review the store for duplicates, stale memories, patterns worth promoting, and gaps.
+- **Promotion/Demotion**: Memories accessed 10+ times get boosted. Memories not accessed in 60+ days get decayed. Both are idempotent *within a day* (a last-run-date guard prevents double-application), but decay still accumulates across distinct run-days — i.e. importance keeps drifting down the longer a memory stays untouched, by design.
+- **Write-time dedup**: The `memory_write` tool checks for similar existing memories before writing, preventing duplicates at the source.
+- **Temporal fusion**: The collector correlates events across data sources within time windows to detect higher-level activities.
+
+## Search Algorithm
+
+```
+retrieval_score = 0.2 * recency + 0.3 * importance + 0.5 * relevance
+```
+
+Where:
+- **recency** = exponential decay, 30-day half-life from whichever is newer of `updated_at` and `last_accessed` — i.e. time since the memory was last *touched* (edited **or** read). A heavily-consulted old memory no longer ranks as permanently stale.
+- **importance** = normalized 1-10 score from frontmatter. Importance is a ranking *prior only* — it is deliberately **not** used to pre-filter candidates (that triple-counted it via filter + weight + access-boost feedback and made the low-importance long tail unreachable).
+- **relevance** = 0.7 * vector_cosine_similarity + 0.3 * keyword_score, where keyword_score is a **fixed saturating transform of the FTS5 BM25 rank** (`-rank / (-rank + 10)`) — an absolute magnitude, comparable across queries (not a per-query rank position). Candidates that FTS didn't match get a capped substring-match fallback so scoring is uniform across the candidate pool.
+
+**Semantic-scan coverage is never silent:** every result carries `scannedChunks/totalChunks`. Under `MEMORIA_VECTOR_SCAN_CAP` (default 5000) the whole store is scanned; past it, an even sample of **exactly cap** rows spans the entire id range — coverage degrades continuously as the store grows (no recall cliff at cap+1), and the sample's offset is derived from the query text, so different queries reach different residues of the store and no row is permanently invisible to the vector path (the same query stays deterministic). `memory_search` appends a coverage note whenever the scan was partial.
+
+Results are position-optimized: high-importance memories placed at the start and end of output to leverage the primacy/recency effect in LLM attention.
+> **Provider caveat:** with the `hash` n-gram provider, `vector_cosine_similarity` is only a lexical approximation — the vector and FTS terms largely measure the same thing, so treat a `hash` deployment as keyword search with extra steps, not semantic search. Use `minilm` (local, default when no OpenAI key) or `openai` for true semantic retrieval; the Docker image pre-bakes the MiniLM model.
+
+## Multi-device sync
+
+Memoria deliberately has **no sync service**. The store is a directory of Markdown files, so the simplest robust setup is:
+
+1. Make `MEMORIA_DIR` a **private git repo** (`git init` in `~/.memoria`, add a private remote). Commit `memories/`; git-ignore `data/` (see the store layout above).
+2. On each machine, pull before a session and commit + push after it. With Claude Code this is two hooks — `SessionStart` → `git pull`, `Stop` → `git add memories && git commit && git push` — both failing soft so a network blip never blocks a session.
+3. Optionally mirror to object storage (S3/GCS/R2) for a hosted instance: the maintainer runs Cloud Run on a GCS FUSE mount and syncs the laptop clone with `gsutil rsync`.
+
+**Conflicts.** Core memories change rarely and conflict rarely. The one file two machines routinely both append to is *today's daily log* — and for an append-only log the correct merge is mechanical: keep both sides' entries. [`scripts/lib-union-merge.sh`](scripts/lib-union-merge.sh) implements exactly that three-way append-union (base = last synced state, ours = local, theirs = remote) and returns non-zero for anything it cannot merge mechanically, so callers can fall back to a loud conflict marker instead of silently dropping entries. Source it from your hooks. Generalizing the maintainer's hook scripts into a drop-in, remote-agnostic pair is on the roadmap.
+
+**From Claude Code's built-in memory.** [`scripts/sync-from-claude-memory.sh`](scripts/sync-from-claude-memory.sh) one-way-pulls `~/.claude/projects/*/memory/*.md` into the store so existing auto-memory is not lost.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for the trust model (single-tenant, one static key perimeter, auto-approving `/authorize`) and how to report a vulnerability. The HTTP transport includes multiple security layers:
+
+| Feature | Detail |
+|---------|--------|
+| **Authentication** | OAuth 2.1 (authorization_code + PKCE, client_credentials) and static Bearer token. 24h token TTL. |
+| **Persistent tokens** | OAuth tokens stored in SQLite (not memory) — survive server restarts without re-auth |
+| **Encryption at rest** | AES-256-GCM for all collector data, configs, and the ring buffer |
+| **Rate limiting** | Per client IP: `/mcp` 30/min, `/token`+`/authorize`+`/register` 20/min, `/ingest`+`/dashboard/api` 120/min (trusts one proxy hop for the real client IP) |
+| **Body size limit** | 5 MB max request body (sized for batched `/ingest` payloads) |
+| **Session management** | Max 10 concurrent sessions, 30-minute idle TTL |
+| **Localhost binding** | HTTP server binds to `127.0.0.1` by default; set `BIND_ALL=true` for Docker/cloud. NOTE: every shipped Docker/Cloud Run config sets `BIND_ALL=true`, so in production the network is open and Bearer auth is the only access control. |
+| **Non-root container** | Docker image runs as unprivileged `memoria` user (UID 1001) |
+| **Object-storage FUSE compatible** | All file permission calls gracefully degrade on cloud storage mounts |
+| **Platform validation** | Source adapters are checked for OS compatibility before enabling |
+| **Path traversal** | Trailing-separator check + symlink resolution blocks escape from `memories/` |
+| **Timing-safe auth** | `crypto.timingSafeEqual` for token comparison |
+| **Filename validation** | Rejects filenames with special characters; 100 KB content limit |
+| **Error sanitization** | Internal errors logged to stderr, not returned in tool output |
+| **Privacy filtering** | Passwords, credit cards, SSNs, API keys auto-classified as `local-only` |
+| **User consent** | Sources require explicit agreement before enabling |
+
+### OAuth Endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/.well-known/oauth-protected-resource` | RFC 9728 resource metadata |
+| `/.well-known/oauth-authorization-server` | RFC 8414 auth server metadata |
+| `/authorize` | Authorization endpoint (auto-approves, redirects with code) |
+| `/token` | Token exchange (authorization_code with PKCE, client_credentials) |
+| `/register` | RFC 7591 dynamic client registration |
+
+### HTTP API
+
+| Endpoint | Method | Auth | Purpose |
+|----------|--------|------|---------|
+| `/mcp` | POST/GET/DELETE | Bearer | MCP protocol (tools, SSE, sessions) |
+| `/dashboard` | GET | None | Web UI (prompts for API key in browser) |
+| `/dashboard/api/*` | GET/POST/DELETE | Bearer | REST API for the dashboard |
+| `/ingest` | POST | Bearer | External sub-memory collectors push events |
+| `/health` | GET | None | Health check |
+
+## Testing
+
+```bash
+cd mcp-server
+npm test            # Run all 240 tests (CI runs them on ubuntu AND windows)
+npm run test:coverage  # Run with coverage (CI gate; per-file floors fail on regression)
+npm run test:watch  # Watch mode for development
+```
+
+Tests cover:
+- **Chunker**: Frontmatter parsing (YAML types, BOM, CRLF), markdown chunking with overlap
+- **Embeddings**: Local n-gram vectors, cosine similarity, batch processing, Unicode text
+- **Store**: Indexing, search (including empty queries/stores), content hashing, access tracking, importance decay/boost idempotency, stats aggregation
+- **Optimizer**: Decay, promotion, stale detection, duplicate finding
+- **Path resolution**: Filename validation, traversal rejection, special character rejection
+- **HTTP integration** (supertest over the real Express `app`): `/health`, the `/` → `/dashboard` redirect, the `/dashboard/api` Bearer auth-gate (401 without/with a wrong key, 200 with the right key), the wiki endpoints (index, render-to-sanitized-HTML, traversal → 400, missing → 404), append-only annotate (+ `MEMORY_INDEX.md` refusal), and the full OAuth flow: `client_credentials`, the `authorization_code`+PKCE exchange end-to-end (issued token actually authorizes the API), PKCE-verifier-mismatch → 400, and a decoupling check that the **API key is rejected as the OAuth client secret**
+- **Wiki rendering**: code-safe `[[wikilink]]` resolution (never fires inside code spans/fences or markdown link labels), stored-XSS escaping, `javascript:` URL blocking
+- **Dashboard**: the generated browser script parses (guards against a syntax error taking down the whole UI)
+
+All tests use the local n-gram embedding provider (no API keys or network required).
+
+## Robustness & Audit Trail
+
+Memoria has been through a critical code review with all findings tracked and fixed. Key hardening:
+
+> **2026-06 multi-agent security review**: a 13-dimension adversarially-verified review produced 79 confirmed findings; all 10 high + 17 medium + 30/31 low were fixed (test suite 57 → 115). Highlights: closed a symlink-leaf arbitrary-read in `resolveMemoryPath`; contained `file_watcher` custom sources so they can't read the collector key/credentials; added **sink-side privacy enforcement** (re-classify + redact `local-only`/truncate `summarize` before any synced/embedded write) with value-pattern secret detection (Luhn, SSN, `sk-`/`AKIA`/JWT/PEM); pinned `MEMORIA_ENCRYPTION_KEY` from Secret Manager with a fail-closed mode; mounted the GCS-FUSE volume + `max-instances 1`; rate-limited `/token`/`/authorize`/`/register`/`/ingest`/`/dashboard/api`; unified the dashboard onto the single collector and escaped all dashboard `innerHTML` sinks; and added an opt-in autonomous decay/promote/staleness scheduler (`MEMORIA_AUTO_OPTIMIZE`).
+
+> **2026-06 ops/security hardening + Wiki**: shipped the dashboard **Wiki** (cross-linked rendered markdown, category/calendar index, `related` + `[[wikilink]]` + computed backlinks, append-only annotations) and a hosted **demo** under a zero-privilege service account. A follow-up critical re-review then drove: an **API-key rotation** after a key was exposed, and **decoupling** the OAuth client secret from the API key (distinct `MEMORIA_OAUTH_CLIENT_SECRET`, asserted by tests) so rotating one no longer rotates the other; GCS object **versioning** on the persistent bucket; the **HTTP integration suite** that finally covers the previously-untested internet-facing surface (the `/dashboard/api` auth gate and the OAuth `authorization_code`+PKCE flow end-to-end); a **CI coverage gate** (`npm run test:coverage`, per-file floors) and a stronger **deploy smoke gate** (redirect + dashboard markup + auth-gate 401, not just `/health`); and a code-safe `[[wikilink]]` renderer (a markdown-it inline rule that never fires inside code spans/fences or markdown link labels, replacing a pre-pass regex that corrupted code). Test suite 115 → 153. See [Known Limitations](#known-limitations) for what remains open.
+
+| Area | What was fixed |
+|------|---------------|
+| **YAML parsing** | Replaced naive `split(":")` parser with `js-yaml`. Now handles quoted strings with colons, multi-line values, special chars in tags, and gracefully recovers from malformed YAML. |
+| **Filename collisions** | `memory_compile` auto-appends `-2`, `-3`, etc. when a slug is taken — was silently overwriting before. |
+| **Embedding API cost** | `memory_lint` contradiction scan capped at top 30 memories by importance, batched 5-in-parallel. Reports coverage in output. |
+| **Silent failures** | All empty `catch {}` blocks in Google adapters now log to stderr. Auth/network errors no longer disappear. |
+| **Ingestion atomicity** | Fusion writes wrapped in try/catch (failure won't poison ingestion). Ingestion errors re-thrown so daemon doesn't mark events synced when the pipeline failed. |
+| **Cloud security** | `chmod 0600` failures (common on GCS FUSE) log a security warning instead of being silent — alerts you to rely on bucket ACLs. |
+| **Search correctness** | Importance score clamped to `[0, 1]` to prevent weight inflation. Empty/symbol-only queries fall back to recency+importance ranking instead of slow full scan. |
+| **Markdown safety** | `MEMORY_INDEX.md` escapes special characters (`]`, `[`, `\`) in link text and encodes spaces/parens in URLs. |
+| **Capacity feedback** | `/ingest` reports `bufferDropped` count when events are dropped at capacity, plus a `nearCapacity` flag at 90% utilization. |
+| **YAML date normalization** | js-yaml auto-parses ISO dates into `Date` objects; we normalize them back to strings so frontmatter round-trips cleanly. |
+| **Concurrent compile safety** | Per-directory locks serialize `memory_compile` calls — no slug collision races even under concurrent requests. |
+| **Strict input validation** | `/ingest` rejects empty/whitespace-only id, source, or content. `memory_compile` enforces a 100KB body limit. |
+| **Markdown safety in links** | Index escapes backticks, asterisks, underscores, tildes (in addition to brackets/backslash) so memory names with markdown syntax don't break links. |
+| **Live access counts** | Lint orphan detection queries the SQLite `file_meta` table instead of stale frontmatter. |
+| **Smart positional ordering** | Search results only reorder for primacy/recency effect when scores are tightly clustered (< 0.15 spread); pure score-ranking otherwise. Reordering is announced in the output. |
+| **Singleton init lock** | Concurrent `ensureCollector()` calls share a single init promise — no duplicate registries, buffers, or daemons. |
+| **Corrupt checkpoint recovery** | Google adapters reset corrupted JSON checkpoints to start fresh instead of looping on the same parse error. |
+| **Deterministic lint output** | Contradiction pairs sorted by similarity then alphabetically — stable across runs and parallel batches. |
+| **Smart fusion** | Cross-source fusion skips clusters where every event shares the same `meta.agent_id` — those are the same execution recorded twice (result + metric), not independent observations. Eliminates ~90% of useless "Activity at X" entries. |
+| **Per-source recent dedup** | Ingestion pipeline drops scheduled-job spam: identical content from the same source within a 10-minute window is deduplicated. Prevents 24 identical "marketing-agent: success" entries per day. |
+| **Importance bump** | When a high-importance event lands in a daily log, the file's frontmatter `importance` is bumped to `max(current, event)` so the chunk is properly weighted in search instead of being flattened to 5. |
+| **Source-aware stats** | `memory_stats` now shows event count by source over the last 7 days and warns when (a) sources flood >50 events/week, (b) all chunks have flat importance, (c) memory is being written but never queried. |
+| **Karpathy compounding** | `memory_compact` reads recent daily logs, deduplicates by source+content fingerprint, and surfaces high-importance events. The agent then synthesizes a reflection via `memory_compile`. Compresses the firehose into compounding knowledge. |
+
+## Known Limitations
+
+Honest accounting of what is *not* hardened or covered yet — tracked for follow-up:
+
+- **Single static key, public ingress.** The reference hosted deployment is `--allow-unauthenticated` with `BIND_ALL=true`, so the network is open and a single static Bearer token (`MEMORIA_API_KEY`) is the only access control on `/mcp`, `/ingest`, and `/dashboard/api`. There is no per-user/per-agent scoping, no IP allowlist, and no key-expiry/rotation automation — rotating the key is a manual Secret Manager + redeploy step. Treat the key as a high-value secret (it leaked once during development and had to be rotated). The OAuth path is now decoupled (`MEMORIA_OAUTH_CLIENT_SECRET`), but OAuth tokens are not shared across instances (moot at `max-instances 1`).
+- **Coverage is partial (~37% lines).** The new integration suite covers the internet-facing HTTP surface (auth gate, OAuth flow, wiki endpoints), but the **MCP tool handlers in `tools.ts` (~9% covered)** and the **dashboard's browser-side JavaScript** are still largely behavior-untested — the browser JS is guarded only by a parse/smoke check, not by DOM tests. The collector adapters (Google/iMessage/email) are tested at their edges, not against live services. Per-file coverage floors prevent regressions but don't fill these gaps.
+- **No staging environment.** Deploys go straight from `main` → production Cloud Run after CI. The post-deploy smoke gate (redirect + dashboard markup + auth-gate 401) is the only pre-promotion check against the live revision; there is no canary, staging, or automated rollback. A bad deploy is caught by the smoke gate failing, not prevented.
+- **Single-writer scaling ceiling.** `max-instances 1` is mandatory because the derived SQLite/FTS5 index lives on the GCS-FUSE volume and concurrent writers across instances corrupt the WAL ("disk I/O error", observed in prod). Horizontal scale requires moving the index off FUSE to a real single-writer or networked store.
+- **~~Hosted search is lexical, not semantic~~ — fixed in Phase 2 (2026-07):** the reference deployment now runs `MEMORIA_EMBEDDINGS=minilm` at 2Gi (true semantic embeddings). Residual caveat: the first startup after the provider switch re-embeds the whole store (one slow cold start), and `hash`-provider deployments remain lexical-only by nature.
+- **~~Dashboard key in `localStorage`~~ — fixed in Phase 3 (2026-07):** the dashboard now exchanges the API key once at `POST /dashboard/login` for an **httpOnly, SameSite=Strict session cookie** scoped to `Path=/dashboard` (never sent to `/mcp`//`/ingest`, unreadable from JS). A legacy key found in localStorage is migrated to a cookie session and removed. Bearer auth is unchanged for API clients.
+- **Wiki edge cases.** `[[wikilinks]]` resolve by name/path/basename; ambiguous names resolve to the first match. A `[[link]]` inside a markdown link label renders as literal text (markdown-it can't nest anchors) rather than a navigable link — by design, to avoid producing invalid HTML.
+
+The last critical re-review confirmed the fixes above are live and left a set of high/medium/low items still open, concentrated in exactly these themes (the single-key perimeter, tool-handler/browser-JS coverage, and the lack of staging). These are tracked in [GitHub issues](https://github.com/Agripp87/memoria/issues).
+
+## Design Decisions
+
+- **File-based over database-first**: Markdown files are human-readable, git-friendly, and survive tool changes. SQLite is a derived index.
+- **Hybrid search over keyword-only**: Vector embeddings capture semantic meaning; FTS5 BM25 captures exact terms. Combined they outperform either alone.
+- **Encrypted ring buffer**: Events are encrypted before touching SQLite, so even if the database file is accessed, content remains protected.
+- **User agreement before collection**: No source can be enabled without explicit consent. This is enforced at the registry level, not just the UI.
+- **Auto-install dependencies**: Reduces friction for enabling sources. The user agrees, and the system handles npm installs automatically.
+- **Per-source isolation**: One failing adapter doesn't affect others. Exponential backoff prevents runaway polling.
+- **Idempotent operations**: Decay and boost track their last run date, preventing double-application.
+- **Content hashing**: SHA-256 hash stored per file means reindex only re-embeds changed files, saving API calls and time.
+- **No graph database**: Flat files with vector search and a `related` field provide 90% of graph benefits at 10% of the complexity.
+- **Compiled knowledge** (inspired by [Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)): Good query results are filed back as core memories via `memory_compile`, so investigations compound rather than disappearing into chat history. The `memory_lint` tool proactively catches contradictions, orphans, and knowledge gaps — maintaining the memory store like a wiki, not a write-only log.
+- **Dual transport**: stdio for Claude Code (zero latency), Streamable HTTP/SSE with OAuth 2.1 for claude.ai and other remote clients.
+
+## Roadmap
+
+Near-term, roughly in order:
+
+- [ ] Publish `@memoria/mcp` to npm (`npx @memoria/mcp`) and `memoria-mcp` on PyPI (name reserved)
+- [ ] Claude Code plugin (MCP server + generic SessionStart/Stop sync hooks, one-command install)
+- [ ] Remote-agnostic sync hook pair (git remote required, object storage optional) built on `lib-union-merge.sh`
+- [ ] `server.json` + listing in the official MCP Registry; Docker MCP Catalog
+- [ ] ESLint + Prettier in CI; raise tool-handler and dashboard-JS coverage
+- [ ] Per-client API keys / scoped tokens (replace the single-key perimeter)
+- [ ] Move the derived index off FUSE so hosted instances can scale past one writer
+
+## Contributing
+
+Issues and PRs are welcome. This is a solo-maintained project run in spare time, so expect asynchronous review. Please:
+
+- open an issue before a large change so we can agree on direction;
+- keep the test suite green (`npm test`) and add tests for behavior changes — coverage floors are enforced in CI;
+- sign off your commits (`git commit -s`) — contributions are accepted under the [Developer Certificate of Origin](https://developercertificate.org/);
+- never include real memory files, keys or personal data in issues, PRs or fixtures (use `npm run demo:gen` to produce realistic fake data).
+
+Security issues: see [SECURITY.md](SECURITY.md) — please do not open public issues for vulnerabilities.
+
+## License
+
+[Apache-2.0](LICENSE). Copyright the Memoria contributors.

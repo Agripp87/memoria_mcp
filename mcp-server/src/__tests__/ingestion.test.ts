@@ -1,0 +1,125 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import os from "os";
+import path from "path";
+import fs from "fs";
+import { IngestionPipeline } from "../collector/ingestion.js";
+import type { RawEvent } from "../collector/adapters/base.js";
+
+let root: string;       // temp Memoria root
+let memoriesDir: string;
+
+function ev(over: Partial<RawEvent> = {}): RawEvent {
+  return {
+    id: over.id ?? `evt-${Math.random().toString(36).slice(2)}`,
+    source: over.source ?? "orchestrator-test",
+    eventType: over.eventType ?? "agent_result",
+    content: over.content ?? "A reasonably detailed event body well over twenty characters long.",
+    timestamp: over.timestamp ?? new Date().toISOString(),
+    meta: over.meta ?? {},
+    importanceEstimate: over.importanceEstimate ?? 5,
+    privacyTier: over.privacyTier ?? "send",
+  };
+}
+
+function todayDailyPath(): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return path.join(memoriesDir, "daily", `${today}.md`);
+}
+
+beforeEach(() => {
+  // Pin the clock so the test's `today` and the pipeline's internally-computed
+  // daily-log date can never disagree across a UTC midnight boundary.
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-06-15T12:00:00Z"));
+  root = fs.mkdtempSync(path.join(os.tmpdir(), "memoria-ingest-"));
+  memoriesDir = path.join(root, "memories");
+  fs.mkdirSync(memoriesDir, { recursive: true });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
+});
+
+describe("IngestionPipeline — H1: never writes into core memories", () => {
+  it("does not modify a curated core file even on a moderate similarity match", async () => {
+    // A curated core memory exists.
+    const coreDir = path.join(memoriesDir, "references");
+    fs.mkdirSync(coreDir, { recursive: true });
+    const corePath = path.join(coreDir, "curated.md");
+    const original = "---\nname: Curated\nimportance: 8\n---\n\nHand-written knowledge.";
+    fs.writeFileSync(corePath, original, "utf-8");
+
+    // searchMemories reports a MODERATE match (0.7) to that core file —
+    // the old code would have appended an "### Update" block to it.
+    const pipeline = new IngestionPipeline({
+      memoriesDir,
+      searchMemories: async () => [
+        { file: "references/curated.md", content: "Hand-written knowledge.", score: 0.7 },
+      ],
+    });
+
+    const result = await pipeline.ingest([ev({ content: "Some automated collector event body that is long enough." })]);
+
+    // The event is written (to the daily log), and the core file is untouched.
+    expect(result.written).toBe(1);
+    expect(fs.readFileSync(corePath, "utf-8")).toBe(original);
+    expect(fs.existsSync(todayDailyPath())).toBe(true);
+  });
+
+  it("reports the distinct sources it wrote (P2 propagation hint)", async () => {
+    const pipeline = new IngestionPipeline({ memoriesDir });
+    const result = await pipeline.ingest([
+      ev({ source: "agent-alpha", content: "First detailed event body, well over twenty chars." }),
+      ev({ source: "agent-alpha", content: "Second detailed event body, distinct from the first." }),
+      ev({ source: "agent-beta", content: "A beta event body that is also nice and long here." }),
+    ]);
+    expect(result.written).toBe(3);
+    expect([...result.writtenSources].sort()).toEqual(["agent-alpha", "agent-beta"]);
+  });
+
+  it("skips an event that is near-identical to an existing memory", async () => {
+    const pipeline = new IngestionPipeline({
+      memoriesDir,
+      searchMemories: async () => [
+        { file: "daily/2026-01-01.md", content: "dup", score: 0.95 },
+      ],
+    });
+    const result = await pipeline.ingest([ev()]);
+    expect(result.written).toBe(0);
+    expect(result.deduplicated).toBe(1);
+  });
+});
+
+describe("IngestionPipeline — M1: dedup survives restart", () => {
+  it("deduplicates identical content across pipeline instances", async () => {
+    const sharedContent = "Hourly health check: all systems nominal, nothing to report here.";
+
+    const a = new IngestionPipeline({ memoriesDir });
+    const r1 = await a.ingest([ev({ id: "a", content: sharedContent })]);
+    expect(r1.written).toBe(1);
+
+    // New instance == simulated restart. The persisted sidecar should make
+    // the identical content (different event id) dedupe.
+    const b = new IngestionPipeline({ memoriesDir });
+    const r2 = await b.ingest([ev({ id: "b", content: sharedContent })]);
+    expect(r2.written).toBe(0);
+    expect(r2.deduplicated).toBe(1);
+  });
+});
+
+describe("IngestionPipeline — M3: daily-log importance only bumps for high-signal", () => {
+  it("keeps importance at 5 for routine events but raises it for >=7 events", async () => {
+    const pipeline = new IngestionPipeline({ memoriesDir });
+
+    // Routine event (rescores to ~5-6) should not push the file above 5.
+    await pipeline.ingest([ev({ id: "r1", importanceEstimate: 5 })]);
+    let fm = fs.readFileSync(todayDailyPath(), "utf-8");
+    expect(fm).toMatch(/^importance: 5$/m);
+
+    // High-signal event (>=7) bumps the file.
+    await pipeline.ingest([ev({ id: "h1", importanceEstimate: 9, content: "Critical: production outage decision recorded here." })]);
+    fm = fs.readFileSync(todayDailyPath(), "utf-8");
+    expect(fm).toMatch(/^importance: 9$/m);
+  });
+});

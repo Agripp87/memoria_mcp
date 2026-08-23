@@ -1,0 +1,36 @@
+# Derived artifacts and local state
+data/*.sqlite
+data/*.sqlite-shm
+data/*.sqlite-wal
+node_modules/
+dist/
+exports/chat-knowledge.md
+.env
+__pycache__/
+*.pyc
+
+# NEVER commit secrets: the AES master key and the encrypted credential store.
+# Committing collector.key would retroactively decrypt any committed/mirrored
+# ciphertext, and the encrypted config holds IMAP passwords / Google refresh tokens.
+data/*.key
+data/collector.key
+data/collector-config.enc
+data/*.corrupt-*
+data/.ingest-dedup.json
+data/.compile-queue.json
+data/.dead-letter.jsonl
+# Durable raw/provenance archive — append-only event records (may contain
+# personal content for `send`-tier events). Runtime state, never committed.
+data/raw/
+*.key
+!*.pub.key
+
+# Generated demo store (npm run demo / generate-demo-data.mjs) — throwaway data
+demo-store/
+
+# Build mutex for the mcp-server watch/build scripts (per-device, transient)
+mcp-server/.build.lock
+
+# Personal memory store — never belongs in the code repo. Point MEMORIA_DIR at
+# a separate directory (or its own private git repo); see README.
+memories/

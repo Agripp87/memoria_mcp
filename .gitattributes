@@ -1,0 +1,4 @@
+# Normalize line endings. Shell scripts run in Linux containers (Alpine sh)
+# and MUST be LF — CRLF causes "set: illegal option" / container start failures.
+*.sh text eol=lf
+*.mjs text eol=lf
