@@ -30,42 +30,60 @@ interface Doc {
 // A miniature but realistic store: core pages + noisy daily logs.
 const DOCS: Doc[] = [
   {
-    file: "user/profile.md", importance: 9, updated: "2026-06-20",
+    file: "user/profile.md",
+    importance: 9,
+    updated: "2026-06-20",
     body: "The user is Alex. They build the Talk & Play toddler speech app and the Memoria memory system. Prefers terse, evidence-first answers.",
   },
   {
-    file: "project/talk-and-play.md", importance: 8, updated: "2026-06-01",
+    file: "project/talk-and-play.md",
+    importance: 8,
+    updated: "2026-06-01",
     body: "Talk & Play is a React Native app helping toddlers learn to speak. Offline-first is a hard requirement. Uses on-device speech models.",
   },
   {
-    file: "decisions/gcp-cloud-run.md", importance: 7, updated: "2026-05-20",
+    file: "decisions/gcp-cloud-run.md",
+    importance: 7,
+    updated: "2026-05-20",
     body: "Decision: deploy Memoria on GCP Cloud Run with a GCS FUSE volume for durable persistence. max-instances 1 because SQLite WAL corrupts with concurrent writers on FUSE.",
   },
   {
-    file: "feedback/core_debugging_principles.md", importance: 9, updated: "2026-05-10",
+    file: "feedback/core_debugging_principles.md",
+    importance: 9,
+    updated: "2026-05-10",
     body: "Debugging principle: ask for evidence before proposing fixes. Request screenshots or logs. Never assume the cause from the symptom description alone.",
   },
   {
-    file: "decisions/embeddings-provider.md", importance: 6, updated: "2026-06-10",
+    file: "decisions/embeddings-provider.md",
+    importance: 6,
+    updated: "2026-06-10",
     body: "Decision: embedding provider order is OpenAI text-embedding-3-small, then local MiniLM all-MiniLM-L6-v2, then n-gram hash fallback for search.",
   },
   {
-    file: "references/orchestrator-ops.md", importance: 5, updated: "2026-04-15",
+    file: "references/orchestrator-ops.md",
+    importance: 5,
+    updated: "2026-04-15",
     body: "The Orchestrator runs 13 agents on a GCE VM. Agent results flow to Memoria via the /ingest endpoint with a bearer key. Marketing-agent runs hourly.",
   },
   // Old, LOW-importance but on-topic memory — the archival long-tail case (B3):
   // must remain retrievable even though it is neither recent nor important.
   {
-    file: "references/ngrok-tunnel-setup.md", importance: 2, updated: "2026-03-27",
+    file: "references/ngrok-tunnel-setup.md",
+    importance: 2,
+    updated: "2026-03-27",
     body: "To expose the local MCP server to claude.ai use an ngrok tunnel: start-tunnel.sh runs ngrok http 3100 and prints the public forwarding URL for the connector.",
   },
   // Distractors: daily-log noise sharing vocabulary with the queries.
   {
-    file: "daily/2026-06-04.md", importance: 5, updated: "2026-06-04",
+    file: "daily/2026-06-04.md",
+    importance: 5,
+    updated: "2026-06-04",
     body: "## 09:00 — orchestrator\n\nmarketing-agent: success. research-agent: success. Deployed new revision to cloud run. Agent results recorded.\n\n*importance: 4 | privacy: send*",
   },
   {
-    file: "daily/2026-06-05.md", importance: 5, updated: "2026-06-05",
+    file: "daily/2026-06-05.md",
+    importance: 5,
+    updated: "2026-06-05",
     body: "## 10:00 — calendar\n\nDentist appointment tomorrow. Toddler speech therapy session moved to Friday.\n\n*importance: 5 | privacy: send*",
   },
 ];
@@ -74,12 +92,28 @@ const DOCS: Doc[] = [
 const FIXTURE: Array<{ query: string; expect: string; k: number }> = [
   { query: "who is the user and what does he prefer", expect: "user/profile.md", k: 3 },
   { query: "toddler speech app offline requirement", expect: "project/talk-and-play.md", k: 3 },
-  { query: "why is cloud run limited to a single instance", expect: "decisions/gcp-cloud-run.md", k: 3 },
-  { query: "how should I debug — what to ask for first", expect: "feedback/core_debugging_principles.md", k: 3 },
-  { query: "which embedding model is used for search", expect: "decisions/embeddings-provider.md", k: 3 },
+  {
+    query: "why is cloud run limited to a single instance",
+    expect: "decisions/gcp-cloud-run.md",
+    k: 3,
+  },
+  {
+    query: "how should I debug — what to ask for first",
+    expect: "feedback/core_debugging_principles.md",
+    k: 3,
+  },
+  {
+    query: "which embedding model is used for search",
+    expect: "decisions/embeddings-provider.md",
+    k: 3,
+  },
   { query: "how do agent results reach memoria", expect: "references/orchestrator-ops.md", k: 3 },
   // The B3 acceptance case: old + importance 2, must still surface.
-  { query: "ngrok tunnel public url for the connector", expect: "references/ngrok-tunnel-setup.md", k: 3 },
+  {
+    query: "ngrok tunnel public url for the connector",
+    expect: "references/ngrok-tunnel-setup.md",
+    k: 3,
+  },
 ];
 
 beforeAll(async () => {
@@ -94,8 +128,12 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  try { store?.close(); } catch {}
-  try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
+  try {
+    store?.close();
+  } catch {}
+  try {
+    fs.rmSync(root, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("relevance fixture (ground truth for ranking changes)", () => {

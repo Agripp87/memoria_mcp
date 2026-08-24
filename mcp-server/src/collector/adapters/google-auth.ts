@@ -45,7 +45,7 @@ export async function getGoogleAuth(config: GoogleAuthConfig): Promise<any> {
   const oauth2 = new google.auth.OAuth2(
     config.clientId,
     config.clientSecret,
-    "urn:ietf:wg:oauth:2.0:oob" // Desktop redirect URI
+    "urn:ietf:wg:oauth:2.0:oob", // Desktop redirect URI
   );
 
   oauth2.setCredentials({
@@ -59,7 +59,8 @@ export async function getGoogleAuth(config: GoogleAuthConfig): Promise<any> {
     throw new Error(
       `Google OAuth failed: ${err.message}. ` +
         "Ensure client_id, client_secret, and refresh_token are correct. " +
-        "You may need to re-authorize if the refresh token has been revoked."
+        "You may need to re-authorize if the refresh token has been revoked.",
+      { cause: err },
     );
   }
 
@@ -72,9 +73,7 @@ export async function getGoogleAuth(config: GoogleAuthConfig): Promise<any> {
  * Extract Google auth config from adapter settings.
  * Validates required fields are present.
  */
-export function extractGoogleAuthConfig(
-  settings: Record<string, any>
-): GoogleAuthConfig {
+export function extractGoogleAuthConfig(settings: Record<string, any>): GoogleAuthConfig {
   const clientId = settings.google_client_id || settings.clientId;
   const clientSecret = settings.google_client_secret || settings.clientSecret;
   const refreshToken = settings.google_refresh_token || settings.refreshToken;
@@ -82,7 +81,7 @@ export function extractGoogleAuthConfig(
   if (!clientId || !clientSecret || !refreshToken) {
     throw new Error(
       "Google adapter requires google_client_id, google_client_secret, and google_refresh_token in settings. " +
-        "See README for setup instructions."
+        "See README for setup instructions.",
     );
   }
 

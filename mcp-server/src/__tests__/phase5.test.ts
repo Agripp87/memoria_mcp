@@ -10,7 +10,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import os from "os";
 import path from "path";
 import fs from "fs";
-import { appendRawArchive, flushRawArchive, readRawArchive, rawArchiveDir } from "../collector/provenance.js";
+import {
+  appendRawArchive,
+  flushRawArchive,
+  readRawArchive,
+  rawArchiveDir,
+} from "../collector/provenance.js";
 import { IngestionPipeline } from "../collector/ingestion.js";
 import { TemporalFusion } from "../collector/fusion.js";
 import type { RawEvent } from "../collector/adapters/base.js";
@@ -45,7 +50,9 @@ beforeEach(() => {
 afterEach(() => {
   flushRawArchive(); // drain cross-test pending state
   vi.useRealTimers();
-  try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(root, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("F4: raw archive batching + rotation", () => {
@@ -99,7 +106,11 @@ describe("A6: sensitive meta is dropped even when content is clean", () => {
   it("keeps innocuous meta", async () => {
     const pipeline = new IngestionPipeline({ memoriesDir });
     await pipeline.ingest([
-      ev({ id: "m2", content: "Another ordinary body long enough to persist.", meta: { from: "Alice" } }),
+      ev({
+        id: "m2",
+        content: "Another ordinary body long enough to persist.",
+        meta: { from: "Alice" },
+      }),
     ]);
     const daily = fs.readFileSync(path.join(memoriesDir, "daily", "2026-07-02.md"), "utf-8");
     expect(daily).toContain("From: Alice");
@@ -112,7 +123,13 @@ describe("A7: fusion keeps clusters with id-less personal events", () => {
     const t = "2026-07-02T12:00:00Z";
     const activities = fusion.fuse([
       ev({ id: "f1", source: "orchestrator", timestamp: t, meta: { agent_id: "agent-1" } }),
-      ev({ id: "f2", source: "calendar", timestamp: t, content: "Team standup meeting body here", meta: {} }),
+      ev({
+        id: "f2",
+        source: "calendar",
+        timestamp: t,
+        content: "Team standup meeting body here",
+        meta: {},
+      }),
     ]);
     expect(activities.length).toBe(1);
   });
@@ -132,7 +149,11 @@ describe("A8: calendar floor respects deliberately-low estimates", () => {
   it("does not resurrect an estimate-1 calendar event to the write threshold", async () => {
     const pipeline = new IngestionPipeline({ memoriesDir });
     const r = await pipeline.ingest([
-      ev({ source: "calendar", importanceEstimate: 1, content: "Declined: cancelled meeting entry body." }),
+      ev({
+        source: "calendar",
+        importanceEstimate: 1,
+        content: "Declined: cancelled meeting entry body.",
+      }),
     ]);
     expect(r.written).toBe(0);
     expect(r.outcomes[0].outcome).toBe("below_threshold");
@@ -141,7 +162,11 @@ describe("A8: calendar floor respects deliberately-low estimates", () => {
   it("still floors a normal calendar event to 4", async () => {
     const pipeline = new IngestionPipeline({ memoriesDir });
     const r = await pipeline.ingest([
-      ev({ source: "calendar", importanceEstimate: 3, content: "Quarterly planning meeting with the team." }),
+      ev({
+        source: "calendar",
+        importanceEstimate: 3,
+        content: "Quarterly planning meeting with the team.",
+      }),
     ]);
     expect(r.written).toBe(1);
   });

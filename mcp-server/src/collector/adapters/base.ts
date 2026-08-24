@@ -103,13 +103,8 @@ export const CORE_DATA_EPOCH = 978307200;
  * Helper: estimate importance for a text-based event.
  * Rule-based heuristic for MVP — can be replaced with a model later.
  */
-export function estimateImportance(
-  content: string,
-  meta: Record<string, unknown> = {}
-): number {
+export function estimateImportance(content: string, meta: Record<string, unknown> = {}): number {
   let score = 3; // default: routine
-
-  const lower = content.toLowerCase();
 
   // Boost for decisions / action items
   if (/\b(decided|decision|agreed|let's go with|action item|todo|deadline)\b/i.test(content))
@@ -124,17 +119,14 @@ export function estimateImportance(
   if (/\b\d{1,2}[:/]\d{2}\b/.test(content)) score += 1; // times
 
   // Boost for emotional content
-  if (/\b(love|miss|worried|excited|sorry|thank|congrat)\b/i.test(content))
-    score += 1;
+  if (/\b(love|miss|worried|excited|sorry|thank|congrat)\b/i.test(content)) score += 1;
 
   // Suppress automated / marketing
-  if (/\b(unsubscribe|no-?reply|automated|do not reply)\b/i.test(content))
-    score -= 3;
+  if (/\b(unsubscribe|no-?reply|automated|do not reply)\b/i.test(content)) score -= 3;
   if (meta.isAutomated) score -= 2;
 
   // Boost for multiple participants (group decision)
-  if (typeof meta.participantCount === "number" && meta.participantCount > 2)
-    score += 1;
+  if (typeof meta.participantCount === "number" && meta.participantCount > 2) score += 1;
 
   return Math.max(1, Math.min(10, score));
 }
@@ -189,12 +181,12 @@ const SECRET_VALUE_PATTERNS: RegExp[] = [
  */
 export function classifyPrivacy(
   content: string,
-  _meta: Record<string, unknown> = {}
+  _meta: Record<string, unknown> = {},
 ): "send" | "summarize" | "local-only" {
   // Financial / sensitive keyword triggers — local only
   if (
     /\b(password|passcode|credit card|ssn|social security|bank account|routing number|cvv)\b/i.test(
-      content
+      content,
     )
   )
     return "local-only";
@@ -222,7 +214,7 @@ const TIER_RANK: Record<RawEvent["privacyTier"], number> = {
 /** Return the more restrictive of two privacy tiers. */
 export function mostRestrictiveTier(
   a: RawEvent["privacyTier"],
-  b: RawEvent["privacyTier"]
+  b: RawEvent["privacyTier"],
 ): RawEvent["privacyTier"] {
   return (TIER_RANK[a] ?? 0) >= (TIER_RANK[b] ?? 0) ? a : b;
 }

@@ -15,7 +15,6 @@ import Database from "better-sqlite3";
 import { Chunk } from "./chunker.js";
 import { embed, embedBatch, cosineSimilarity, getDimension, getProvider } from "./embeddings.js";
 import crypto from "crypto";
-import path from "path";
 
 export interface StoredChunk {
   id: number;
@@ -84,7 +83,7 @@ export function selectEvenSample(
   db: Database.Database,
   cap: number,
   total: number,
-  phase: number
+  phase: number,
 ): Array<{ id: number; embedding: Buffer }> {
   const p = BigInt(phase);
   const c = BigInt(cap);
@@ -95,7 +94,7 @@ export function selectEvenSample(
          SELECT id, embedding, ROW_NUMBER() OVER (ORDER BY id) AS rn
          FROM chunks
        ) WHERE ((rn + ?) * ?) / ? > ((rn - 1 + ?) * ?) / ?
-       LIMIT ?`
+       LIMIT ?`,
     )
     .all(p, c, t, p, c, t, BigInt(cap)) as Array<{ id: number; embedding: Buffer }>;
 }
@@ -111,8 +110,9 @@ export class MemoryStore {
       if (err.message?.includes("Could not locate") || err.code === "MODULE_NOT_FOUND") {
         throw new Error(
           `Failed to load better-sqlite3 native module. ` +
-          `Try running: npm rebuild better-sqlite3\n` +
-          `Original error: ${err.message}`
+            `Try running: npm rebuild better-sqlite3\n` +
+            `Original error: ${err.message}`,
+          { cause: err },
         );
       }
       throw err;
@@ -205,7 +205,7 @@ export class MemoryStore {
         .run();
       if (migrated.changes > 0) {
         process.stderr.write(
-          `Memoria: normalized ${migrated.changes} backslash file key(s) to forward slashes\n`
+          `Memoria: normalized ${migrated.changes} backslash file key(s) to forward slashes\n`,
         );
       }
     } catch {
@@ -224,13 +224,15 @@ export class MemoryStore {
 
     if (storedProvider?.value !== currentProvider || storedDim?.value !== currentDim) {
       process.stderr.write(
-        `Memoria: embedding provider changed (${storedProvider?.value ?? "none"}→${currentProvider}, dim ${storedDim?.value ?? "?"}→${currentDim}). Will reindex.\n`
+        `Memoria: embedding provider changed (${storedProvider?.value ?? "none"}→${currentProvider}, dim ${storedDim?.value ?? "?"}→${currentDim}). Will reindex.\n`,
       );
       this.db.prepare("DELETE FROM chunks").run();
       // Rebuild FTS after clearing chunks
       try {
         this.db.exec("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')");
-      } catch { /* FTS5 not available */ }
+      } catch {
+        /* FTS5 not available */
+      }
       this.db.prepare("DELETE FROM file_meta").run();
       this.needsReindex = true;
     }
@@ -269,7 +271,7 @@ export class MemoryStore {
          ON CONFLICT(file) DO UPDATE SET
            content_hash = ?,
            importance = ?,
-           updated_at = ?`
+           updated_at = ?`,
       )
       .run(file, hash, importance, now, hash, importance, now);
   }
@@ -292,7 +294,7 @@ export class MemoryStore {
 
     const deleteStmt = this.db.prepare("DELETE FROM chunks WHERE file = ?");
     const insertStmt = this.db.prepare(
-      "INSERT INTO chunks (text, file, start_line, end_line, embedding, importance) VALUES (?, ?, ?, ?, ?, ?)"
+      "INSERT INTO chunks (text, file, start_line, end_line, embedding, importance) VALUES (?, ?, ?, ?, ?, ?)",
     );
 
     const transaction = this.db.transaction(() => {
@@ -305,7 +307,7 @@ export class MemoryStore {
           chunks[i].startLine,
           chunks[i].endLine,
           embBuffer,
-          importance
+          importance,
         );
       }
     });
@@ -360,11 +362,14 @@ export class MemoryStore {
   async search(
     query: string,
     maxResults: number = 10,
-    weights = { recency: 0.2, importance: 0.3, relevance: 0.5 }
+    weights = { recency: 0.2, importance: 0.3, relevance: 0.5 },
   ): Promise<SearchResult[]> {
     // Backstop against bad numeric input (float/NaN/huge): SQLite LIMIT needs a
     // sane non-negative integer. Tool schemas also constrain this upstream.
-    maxResults = Math.max(1, Math.min(1000, Math.floor(Number.isFinite(maxResults) ? maxResults : 10)));
+    maxResults = Math.max(
+      1,
+      Math.min(1000, Math.floor(Number.isFinite(maxResults) ? maxResults : 10)),
+    );
 
     // Guard against degenerate queries — fall back to recency/importance only.
     const trimmedQuery = query.trim();
@@ -387,7 +392,7 @@ export class MemoryStore {
         if (ftsQuery) {
           const ftsRows = this.db
             .prepare(
-              `SELECT rowid, rank FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?`
+              `SELECT rowid, rank FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?`,
             )
             .all(ftsQuery, maxResults * 10) as Array<{ rowid: number; rank: number }>;
 
@@ -457,9 +462,10 @@ export class MemoryStore {
       // partial recall is visible, never silent.
       let embRows: Array<{ id: number; embedding: Buffer }>;
       if (totalChunks <= VECTOR_SCAN_CAP) {
-        embRows = this.db
-          .prepare(`SELECT id, embedding FROM chunks ORDER BY id`)
-          .all() as Array<{ id: number; embedding: Buffer }>;
+        embRows = this.db.prepare(`SELECT id, embedding FROM chunks ORDER BY id`).all() as Array<{
+          id: number;
+          embedding: Buffer;
+        }>;
       } else {
         const phase = samplePhase(trimmedQuery, totalChunks);
         embRows = selectEvenSample(this.db, VECTOR_SCAN_CAP, totalChunks, phase);
@@ -470,7 +476,7 @@ export class MemoryStore {
         const storedEmb = new Float32Array(
           row.embedding.buffer,
           row.embedding.byteOffset,
-          row.embedding.byteLength / 4
+          row.embedding.byteLength / 4,
         );
         const sim = cosineSimilarity(queryEmbedding, storedEmb);
         vectorSims.set(row.id, sim);
@@ -482,9 +488,16 @@ export class MemoryStore {
 
     // ── Stage 2: Fetch and score candidates ─────────────────
     let rows: Array<{
-      id: number; text: string; file: string; start_line: number;
-      end_line: number; embedding: Buffer; importance: number;
-      updated_at: string; access_count: number; last_accessed: string;
+      id: number;
+      text: string;
+      file: string;
+      start_line: number;
+      end_line: number;
+      embedding: Buffer;
+      importance: number;
+      updated_at: string;
+      access_count: number;
+      last_accessed: string;
     }>;
 
     if (candidateIds.size > 0) {
@@ -492,7 +505,7 @@ export class MemoryStore {
       rows = this.fetchChunksByIds(
         Array.from(candidateIds),
         `id, text, file, start_line, end_line, embedding,
-         importance, updated_at, access_count, last_accessed`
+         importance, updated_at, access_count, last_accessed`,
       );
     } else {
       // No candidates from FTS/recency — fallback to capped scan. Order
@@ -502,7 +515,7 @@ export class MemoryStore {
         .prepare(
           `SELECT id, text, file, start_line, end_line, embedding,
                   importance, updated_at, access_count, last_accessed
-           FROM chunks ORDER BY importance DESC, last_accessed DESC LIMIT 5000`
+           FROM chunks ORDER BY importance DESC, last_accessed DESC LIMIT 5000`,
         )
         .all() as typeof rows;
     }
@@ -515,7 +528,7 @@ export class MemoryStore {
         const storedEmb = new Float32Array(
           row.embedding.buffer,
           row.embedding.byteOffset,
-          row.embedding.byteLength / 4
+          row.embedding.byteLength / 4,
         );
         vectorSim = cosineSimilarity(queryEmbedding, storedEmb);
       }
@@ -560,7 +573,7 @@ export class MemoryStore {
       const accessedMs = new Date(row.last_accessed).getTime();
       const touchedMs = Math.max(
         Number.isFinite(updatedMs) ? updatedMs : -Infinity,
-        Number.isFinite(accessedMs) ? accessedMs : -Infinity
+        Number.isFinite(accessedMs) ? accessedMs : -Infinity,
       );
       const ageDays = Number.isFinite(touchedMs)
         ? (now - touchedMs) / (24 * 60 * 60 * 1000)
@@ -605,13 +618,19 @@ export class MemoryStore {
                 importance, updated_at, access_count, last_accessed
          FROM chunks
          ORDER BY last_accessed DESC, importance DESC
-         LIMIT ?`
+         LIMIT ?`,
       )
       .all(maxResults) as Array<{
-        id: number; text: string; file: string; start_line: number;
-        end_line: number; importance: number; updated_at: string;
-        access_count: number; last_accessed: string;
-      }>;
+      id: number;
+      text: string;
+      file: string;
+      start_line: number;
+      end_line: number;
+      importance: number;
+      updated_at: string;
+      access_count: number;
+      last_accessed: string;
+    }>;
 
     const now = Date.now();
     const totalChunks = (
@@ -623,7 +642,7 @@ export class MemoryStore {
       const accessedMs = new Date(row.last_accessed).getTime();
       const touchedMs = Math.max(
         Number.isFinite(updatedMs) ? updatedMs : -Infinity,
-        Number.isFinite(accessedMs) ? accessedMs : -Infinity
+        Number.isFinite(accessedMs) ? accessedMs : -Infinity,
       );
       const ageDays = Number.isFinite(touchedMs)
         ? (now - touchedMs) / (24 * 60 * 60 * 1000)
@@ -656,9 +675,8 @@ export class MemoryStore {
    * Returns 0 if the file has never been tracked.
    */
   getAccessCount(file: string): number {
-    const row = this.db
-      .prepare("SELECT access_count FROM file_meta WHERE file = ?")
-      .get(file) as { access_count: number } | undefined;
+    const row = this.db.prepare("SELECT access_count FROM file_meta WHERE file = ?").get(file) as
+      { access_count: number } | undefined;
     return row?.access_count ?? 0;
   }
 
@@ -666,7 +684,7 @@ export class MemoryStore {
     const now = new Date().toISOString().split("T")[0];
     this.db
       .prepare(
-        "UPDATE chunks SET access_count = access_count + 1, last_accessed = ? WHERE file = ?"
+        "UPDATE chunks SET access_count = access_count + 1, last_accessed = ? WHERE file = ?",
       )
       .run(now, file);
 
@@ -676,7 +694,7 @@ export class MemoryStore {
          VALUES (?, 1, ?)
          ON CONFLICT(file) DO UPDATE SET
            access_count = access_count + 1,
-           last_accessed = ?`
+           last_accessed = ?`,
       )
       .run(file, now, now);
   }
@@ -690,14 +708,14 @@ export class MemoryStore {
     if (files.length === 0) return;
     const now = new Date().toISOString().split("T")[0];
     const updChunks = this.db.prepare(
-      "UPDATE chunks SET access_count = access_count + 1, last_accessed = ? WHERE file = ?"
+      "UPDATE chunks SET access_count = access_count + 1, last_accessed = ? WHERE file = ?",
     );
     const upsertMeta = this.db.prepare(
       `INSERT INTO file_meta (file, access_count, last_accessed)
        VALUES (?, 1, ?)
        ON CONFLICT(file) DO UPDATE SET
          access_count = access_count + 1,
-         last_accessed = ?`
+         last_accessed = ?`,
     );
     const tx = this.db.transaction((list: string[]) => {
       for (const f of list) {
@@ -720,9 +738,9 @@ export class MemoryStore {
    * Get all indexed files.
    */
   getIndexedFiles(): string[] {
-    const rows = this.db
-      .prepare("SELECT DISTINCT file FROM chunks")
-      .all() as Array<{ file: string }>;
+    const rows = this.db.prepare("SELECT DISTINCT file FROM chunks").all() as Array<{
+      file: string;
+    }>;
     return rows.map((r) => r.file);
   }
 
@@ -748,15 +766,18 @@ export class MemoryStore {
       }
     ).cnt;
 
-    const avgImportance = (
-      this.db.prepare("SELECT AVG(importance) as avg FROM chunks").get() as {
-        avg: number | null;
-      }
-    ).avg ?? 0;
+    const avgImportance =
+      (
+        this.db.prepare("SELECT AVG(importance) as avg FROM chunks").get() as {
+          avg: number | null;
+        }
+      ).avg ?? 0;
 
     // Importance distribution (count per level 1-10)
     const distRows = this.db
-      .prepare("SELECT importance, COUNT(*) as cnt FROM chunks GROUP BY importance ORDER BY importance")
+      .prepare(
+        "SELECT importance, COUNT(*) as cnt FROM chunks GROUP BY importance ORDER BY importance",
+      )
       .all() as Array<{ importance: number; cnt: number }>;
     const importanceDistribution: Record<number, number> = {};
     for (const row of distRows) {
@@ -767,9 +788,10 @@ export class MemoryStore {
     const allImportances = this.db
       .prepare("SELECT importance FROM chunks ORDER BY importance")
       .all() as Array<{ importance: number }>;
-    const medianImportance = allImportances.length > 0
-      ? allImportances[Math.floor(allImportances.length / 2)].importance
-      : 0;
+    const medianImportance =
+      allImportances.length > 0
+        ? allImportances[Math.floor(allImportances.length / 2)].importance
+        : 0;
 
     // Staleness: use last_accessed (not updated_at) — a frequently-read memory isn't stale
     const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
@@ -778,14 +800,14 @@ export class MemoryStore {
     const staleCount = (
       this.db
         .prepare(
-          "SELECT COUNT(DISTINCT file) as cnt FROM chunks WHERE last_accessed < ? AND importance <= 5"
+          "SELECT COUNT(DISTINCT file) as cnt FROM chunks WHERE last_accessed < ? AND importance <= 5",
         )
         .get(ninetyDaysAgo) as { cnt: number }
     ).cnt;
 
     const topAccessed = this.db
       .prepare(
-        "SELECT file, SUM(access_count) as access_count FROM chunks GROUP BY file ORDER BY access_count DESC LIMIT 5"
+        "SELECT file, SUM(access_count) as access_count FROM chunks GROUP BY file ORDER BY access_count DESC LIMIT 5",
       )
       .all() as Array<{ file: string; access_count: number }>;
 
@@ -803,7 +825,10 @@ export class MemoryStore {
   /**
    * Find potentially stale memories (based on last_accessed, not updated_at).
    */
-  findStale(daysThreshold: number = 90, importanceThreshold: number = 5): Array<{
+  findStale(
+    daysThreshold: number = 90,
+    importanceThreshold: number = 5,
+  ): Array<{
     file: string;
     importance: number;
     lastAccessed: string;
@@ -818,14 +843,14 @@ export class MemoryStore {
         `SELECT DISTINCT file, importance, last_accessed as lastAccessed, access_count as accessCount
          FROM chunks
          WHERE last_accessed < ? AND importance <= ?
-         ORDER BY importance ASC, last_accessed ASC`
+         ORDER BY importance ASC, last_accessed ASC`,
       )
       .all(cutoff, importanceThreshold) as Array<{
-        file: string;
-        importance: number;
-        lastAccessed: string;
-        accessCount: number;
-      }>;
+      file: string;
+      importance: number;
+      lastAccessed: string;
+      accessCount: number;
+    }>;
   }
 
   /**
@@ -848,7 +873,7 @@ export class MemoryStore {
 
     const result = this.db
       .prepare(
-        "UPDATE chunks SET importance = MAX(1, importance - 1) WHERE last_accessed < ? AND importance > 1"
+        "UPDATE chunks SET importance = MAX(1, importance - 1) WHERE last_accessed < ? AND importance > 1",
       )
       .run(cutoff);
 
@@ -875,7 +900,7 @@ export class MemoryStore {
 
     const result = this.db
       .prepare(
-        "UPDATE chunks SET importance = MIN(10, importance + 1) WHERE access_count >= ? AND importance < 10"
+        "UPDATE chunks SET importance = MIN(10, importance + 1) WHERE access_count >= ? AND importance < 10",
       )
       .run(accessThreshold);
 
@@ -891,25 +916,35 @@ export class MemoryStore {
    * Uses candidate pre-filtering to avoid full scan.
    * Returns top-N most similar chunks with their file paths.
    */
-  async findSimilar(text: string, topN: number = 3): Promise<Array<{
-    file: string;
-    text: string;
-    similarity: number;
-  }>> {
+  async findSimilar(
+    text: string,
+    topN: number = 3,
+  ): Promise<
+    Array<{
+      file: string;
+      text: string;
+      similarity: number;
+    }>
+  > {
     const queryEmbedding = await embed(text);
 
     // Pre-filter candidates using FTS5 if available
     const candidateIds = new Set<number>();
     if (this.hasFts5()) {
       try {
-        const ftsQuery = text.replace(/[^\w\s]/g, " ").trim().slice(0, 200);
+        const ftsQuery = text
+          .replace(/[^\w\s]/g, " ")
+          .trim()
+          .slice(0, 200);
         if (ftsQuery) {
           const ftsRows = this.db
             .prepare(`SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? LIMIT ?`)
             .all(ftsQuery, topN * 20) as Array<{ rowid: number }>;
           for (const row of ftsRows) candidateIds.add(row.rowid);
         }
-      } catch { /* FTS query failed */ }
+      } catch {
+        /* FTS query failed */
+      }
     }
 
     // Also include recent chunks as candidates
@@ -924,7 +959,9 @@ export class MemoryStore {
     } else {
       // Fallback to capped scan
       rows = this.db
-        .prepare(`SELECT id, file, text, embedding FROM chunks ORDER BY last_accessed DESC LIMIT 2000`)
+        .prepare(
+          `SELECT id, file, text, embedding FROM chunks ORDER BY last_accessed DESC LIMIT 2000`,
+        )
         .all() as typeof rows;
     }
 
@@ -932,7 +969,7 @@ export class MemoryStore {
       const storedEmb = new Float32Array(
         row.embedding.buffer,
         row.embedding.byteOffset,
-        row.embedding.byteLength / 4
+        row.embedding.byteLength / 4,
       );
       return {
         file: row.file,

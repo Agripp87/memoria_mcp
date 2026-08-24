@@ -9,15 +9,24 @@ let store: MemoryStore;
 let dbPath: string;
 
 beforeEach(() => {
-  dbPath = path.join(os.tmpdir(), `memoria-test-${Date.now()}-${Math.random().toString(36).slice(2)}.sqlite`);
+  dbPath = path.join(
+    os.tmpdir(),
+    `memoria-test-${Date.now()}-${Math.random().toString(36).slice(2)}.sqlite`,
+  );
   store = new MemoryStore(dbPath);
 });
 
 afterEach(() => {
   store.close();
-  try { fs.unlinkSync(dbPath); } catch {}
-  try { fs.unlinkSync(dbPath + "-wal"); } catch {}
-  try { fs.unlinkSync(dbPath + "-shm"); } catch {}
+  try {
+    fs.unlinkSync(dbPath);
+  } catch {}
+  try {
+    fs.unlinkSync(dbPath + "-wal");
+  } catch {}
+  try {
+    fs.unlinkSync(dbPath + "-shm");
+  } catch {}
 });
 
 describe("MemoryStore", () => {
@@ -52,7 +61,8 @@ This is a test memory about TypeScript programming.`;
   });
 
   it("search returns results sorted by score descending", async () => {
-    const content1 = "---\nname: TS\nimportance: 8\n---\nTypeScript is a typed superset of JavaScript.";
+    const content1 =
+      "---\nname: TS\nimportance: 8\n---\nTypeScript is a typed superset of JavaScript.";
     const content2 = "---\nname: Cooking\nimportance: 5\n---\nHow to cook pasta with tomato sauce.";
 
     const chunks1 = chunkMarkdown(content1, "ts.md");
@@ -102,7 +112,7 @@ This is a test memory about TypeScript programming.`;
     const chunks = chunkMarkdown(sampleContent, "decay.md");
     await store.indexChunks(chunks, 7, sampleContent);
 
-    const first = store.decayImportance(0); // 0 days = all chunks eligible
+    store.decayImportance(0); // first call: 0 days = all chunks eligible
     const second = store.decayImportance(0);
     // Second call on same day should return 0 (idempotent)
     expect(second).toBe(0);
@@ -112,7 +122,7 @@ This is a test memory about TypeScript programming.`;
     const chunks = chunkMarkdown(sampleContent, "boost.md");
     await store.indexChunks(chunks, 7, sampleContent);
 
-    const first = store.boostImportance(0); // threshold 0 = all eligible
+    store.boostImportance(0); // first call: threshold 0 = all eligible
     const second = store.boostImportance(0);
     expect(second).toBe(0);
   });

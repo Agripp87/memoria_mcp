@@ -23,18 +23,82 @@ function writeMemory(rel: string, fm: Record<string, unknown>, body: string) {
 beforeAll(async () => {
   fs.mkdirSync(MEM, { recursive: true });
   // Two spellings of the same entity (rule VIII alias drift).
-  writeMemory("project/tap.md", { name: "Talk & Play", description: "app", type: "project", importance: 7, updated: "2026-06-01" }, "The flagship app.");
-  writeMemory("project/tap2.md", { name: "talk-and-play", description: "app dup", type: "project", importance: 6, updated: "2026-06-02" }, "Same app, different file.");
+  writeMemory(
+    "project/tap.md",
+    {
+      name: "Talk & Play",
+      description: "app",
+      type: "project",
+      importance: 7,
+      updated: "2026-06-01",
+    },
+    "The flagship app.",
+  );
+  writeMemory(
+    "project/tap2.md",
+    {
+      name: "talk-and-play",
+      description: "app dup",
+      type: "project",
+      importance: 6,
+      updated: "2026-06-02",
+    },
+    "Same app, different file.",
+  );
   // A hedged / low-confidence curated memory.
-  writeMemory("decisions/db.md", { name: "Datastore choice", description: "db", type: "decision", importance: 7, updated: "2026-06-03" }, "We probably want SQLite, but TODO: confirm with the team. Not sure about scaling.");
+  writeMemory(
+    "decisions/db.md",
+    {
+      name: "Datastore choice",
+      description: "db",
+      type: "decision",
+      importance: 7,
+      updated: "2026-06-03",
+    },
+    "We probably want SQLite, but TODO: confirm with the team. Not sure about scaling.",
+  );
   // A clean memory with no hedges and a unique name.
-  writeMemory("user/profile.md", { name: "User profile", description: "who", type: "user", importance: 9, updated: "2026-06-04" }, "The user is Alex. Offline-first is required.");
+  writeMemory(
+    "user/profile.md",
+    {
+      name: "User profile",
+      description: "who",
+      type: "user",
+      importance: 9,
+      updated: "2026-06-04",
+    },
+    "The user is Alex. Offline-first is required.",
+  );
   // A daily log — must be ignored by both new checks.
-  writeMemory("daily/2026-06-05.md", { name: "Daily", description: "d", type: "session", importance: 3, updated: "2026-06-05" }, "## 10:00 — agent\n\nmaybe did a thing, probably");
+  writeMemory(
+    "daily/2026-06-05.md",
+    { name: "Daily", description: "d", type: "session", importance: 3, updated: "2026-06-05" },
+    "## 10:00 — agent\n\nmaybe did a thing, probably",
+  );
   // A stray sibling directory (the real reference/-vs-references/ split) and a
   // loose file at the memories root — both outside the documented layout.
-  writeMemory("reference/stray.md", { name: "Stray runbook", description: "misfiled", type: "reference", importance: 6, updated: "2026-06-06" }, "Written directly to disk, wrong directory.");
-  writeMemory("loose-note.md", { name: "Loose note", description: "rootfile", type: "reference", importance: 4, updated: "2026-06-07" }, "A file at the memories root.");
+  writeMemory(
+    "reference/stray.md",
+    {
+      name: "Stray runbook",
+      description: "misfiled",
+      type: "reference",
+      importance: 6,
+      updated: "2026-06-06",
+    },
+    "Written directly to disk, wrong directory.",
+  );
+  writeMemory(
+    "loose-note.md",
+    {
+      name: "Loose note",
+      description: "rootfile",
+      type: "reference",
+      importance: 4,
+      updated: "2026-06-07",
+    },
+    "A file at the memories root.",
+  );
 
   tools = await import("../tools.js");
   ({ runLint } = await import("../lint.js"));
@@ -44,8 +108,12 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  try { store?.close(); } catch {}
-  try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {}
+  try {
+    store?.close();
+  } catch {}
+  try {
+    fs.rmSync(ROOT, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("lint: entity alias collisions (P4)", () => {

@@ -14,17 +14,9 @@
  * Requires: googleapis npm package (auto-installed)
  */
 
-import type {
-  SourceAdapter,
-  AdapterInfo,
-  AdapterConfig,
-  RawEvent,
-} from "./base.js";
+import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
 import { estimateImportance, classifyPrivacy } from "./base.js";
-import {
-  getGoogleAuth,
-  extractGoogleAuthConfig,
-} from "./google-auth.js";
+import { getGoogleAuth, extractGoogleAuthConfig } from "./google-auth.js";
 
 // MIME types we can extract text content from
 const TEXT_EXPORTABLE: Record<string, string> = {
@@ -78,9 +70,7 @@ export class GoogleDriveAdapter implements SourceAdapter {
 
   async init(config: AdapterConfig): Promise<void> {
     this.config = config;
-    const authConfig = extractGoogleAuthConfig(
-      config.settings as Record<string, any>
-    );
+    const authConfig = extractGoogleAuthConfig(config.settings as Record<string, any>);
     const auth = await getGoogleAuth(authConfig);
 
     const { google } = await import("googleapis");
@@ -93,7 +83,9 @@ export class GoogleDriveAdapter implements SourceAdapter {
         this.startPageToken = parsed.pageToken || "";
         this.seenFiles = new Set(parsed.seenFiles || []);
       } catch (err) {
-        process.stderr.write(`Memoria google-drive: invalid checkpoint, starting fresh: ${(err as Error).message}\n`);
+        process.stderr.write(
+          `Memoria google-drive: invalid checkpoint, starting fresh: ${(err as Error).message}\n`,
+        );
         // Clear corrupted checkpoint so we don't retry it on every poll
         this.checkpoint = "";
         this.startPageToken = "";
@@ -105,14 +97,14 @@ export class GoogleDriveAdapter implements SourceAdapter {
     if (!this.startPageToken) {
       try {
         const response = await this.drive.changes.getStartPageToken({
-          supportsAllDrives:
-            this.config.settings?.includeSharedDrives === true,
+          supportsAllDrives: this.config.settings?.includeSharedDrives === true,
         });
         this.startPageToken = response.data.startPageToken || "";
       } catch (err: any) {
         throw new Error(
           `Google Drive API connection failed: ${err.message}. ` +
-            "Ensure the Google Drive API is enabled in your Google Cloud Console."
+            "Ensure the Google Drive API is enabled in your Google Cloud Console.",
+          { cause: err },
         );
       }
     }
@@ -123,8 +115,7 @@ export class GoogleDriveAdapter implements SourceAdapter {
 
     const folderIds = (this.config.settings?.folderIds as string[]) ?? [];
     const includeContent = this.config.settings?.includeContent !== false;
-    const includeSharedDrives =
-      this.config.settings?.includeSharedDrives === true;
+    const includeSharedDrives = this.config.settings?.includeSharedDrives === true;
 
     const events: RawEvent[] = [];
 
@@ -160,16 +151,11 @@ export class GoogleDriveAdapter implements SourceAdapter {
           // Filter by folder if specified
           if (folderIds.length > 0) {
             const parents = change.file.parents || [];
-            const inWatchedFolder = parents.some((p: string) =>
-              folderIds.includes(p)
-            );
+            const inWatchedFolder = parents.some((p: string) => folderIds.includes(p));
             if (!inWatchedFolder) continue;
           }
 
-          const event = await this.convertFileChange(
-            change.file,
-            includeContent
-          );
+          const event = await this.convertFileChange(change.file, includeContent);
           if (event) events.push(event);
         }
 
@@ -183,9 +169,7 @@ export class GoogleDriveAdapter implements SourceAdapter {
     } catch (err: any) {
       // Page token expired — get a fresh one
       if (err.code === 404 || err.message?.includes("pageToken")) {
-        process.stderr.write(
-          "Memoria: Drive pageToken expired, resetting\n"
-        );
+        process.stderr.write("Memoria: Drive pageToken expired, resetting\n");
         try {
           const response = await this.drive.changes.getStartPageToken({
             supportsAllDrives: includeSharedDrives,
@@ -193,23 +177,18 @@ export class GoogleDriveAdapter implements SourceAdapter {
           this.startPageToken = response.data.startPageToken || "";
         } catch (resetErr) {
           process.stderr.write(
-            `Memoria google-drive: failed to reset pageToken: ${(resetErr as Error).message}\n`
+            `Memoria google-drive: failed to reset pageToken: ${(resetErr as Error).message}\n`,
           );
         }
       } else {
-        process.stderr.write(
-          `Memoria: Google Drive poll error: ${err.message}\n`
-        );
+        process.stderr.write(`Memoria: Google Drive poll error: ${err.message}\n`);
       }
     }
 
     return events;
   }
 
-  private async convertFileChange(
-    file: any,
-    includeContent: boolean
-  ): Promise<RawEvent | null> {
+  private async convertFileChange(file: any, includeContent: boolean): Promise<RawEvent | null> {
     if (!file.name || !file.id) return null;
 
     const isNew = !this.seenFiles.has(file.id);
@@ -225,25 +204,16 @@ export class GoogleDriveAdapter implements SourceAdapter {
     const isTextExportable = mimeType in TEXT_EXPORTABLE;
     const modifiedTime = file.modifiedTime || new Date().toISOString();
     const lastModifier =
-      file.lastModifyingUser?.displayName ||
-      file.lastModifyingUser?.emailAddress ||
-      "unknown";
-    const owner =
-      file.owners?.[0]?.displayName ||
-      file.owners?.[0]?.emailAddress ||
-      "unknown";
+      file.lastModifyingUser?.displayName || file.lastModifyingUser?.emailAddress || "unknown";
+    const owner = file.owners?.[0]?.displayName || file.owners?.[0]?.emailAddress || "unknown";
 
     // Build content description
     let content = `${isNew ? "New file" : "Modified"}: ${file.name}`;
-    let extractedText = "";
-
     if (includeContent && isTextExportable) {
       const sizeBytes = file.size ? parseInt(file.size) : null;
-      extractedText = await this.extractContent(file.id, mimeType, sizeBytes);
+      const extractedText = await this.extractContent(file.id, mimeType, sizeBytes);
       if (extractedText) {
-        const maxChars =
-          (this.config.settings?.maxContentChars as number) ??
-          MAX_CONTENT_LENGTH;
+        const maxChars = (this.config.settings?.maxContentChars as number) ?? MAX_CONTENT_LENGTH;
         const preview = extractedText.slice(0, maxChars);
         content += ` — ${preview}`;
       }
@@ -306,7 +276,7 @@ export class GoogleDriveAdapter implements SourceAdapter {
   private async extractContent(
     fileId: string,
     mimeType: string,
-    sizeBytes?: number | null
+    sizeBytes?: number | null,
   ): Promise<string> {
     // Skip whole-file download for large binaries — only a short text preview is
     // ever kept, so pulling a multi-MB file into memory is wasteful and risky.
@@ -316,7 +286,7 @@ export class GoogleDriveAdapter implements SourceAdapter {
     if (typeof sizeBytes === "number" && sizeBytes > MAX_DOWNLOAD_BYTES) {
       process.stderr.write(
         `Memoria: Drive skipping content extraction for ${fileId} ` +
-          `(${sizeBytes} bytes exceeds ${MAX_DOWNLOAD_BYTES} cap)\n`
+          `(${sizeBytes} bytes exceeds ${MAX_DOWNLOAD_BYTES} cap)\n`,
       );
       return "";
     }
@@ -330,23 +300,19 @@ export class GoogleDriveAdapter implements SourceAdapter {
           fileId,
           mimeType: exportMime,
         });
-        return typeof response.data === "string"
-          ? response.data
-          : JSON.stringify(response.data);
+        return typeof response.data === "string" ? response.data : JSON.stringify(response.data);
       } else {
         // Regular files — download content
         const response = await this.drive.files.get({
           fileId,
           alt: "media",
         });
-        return typeof response.data === "string"
-          ? response.data
-          : JSON.stringify(response.data);
+        return typeof response.data === "string" ? response.data : JSON.stringify(response.data);
       }
     } catch (err: any) {
       // Content extraction is best-effort
       process.stderr.write(
-        `Memoria: Drive content extraction failed for ${fileId}: ${err.message}\n`
+        `Memoria: Drive content extraction failed for ${fileId}: ${err.message}\n`,
       );
       return "";
     }
@@ -354,9 +320,7 @@ export class GoogleDriveAdapter implements SourceAdapter {
 
   // ── List watched folders (utility for the user) ────────────
 
-  async listAvailableFolders(): Promise<
-    Array<{ id: string; name: string; path: string }>
-  > {
+  async listAvailableFolders(): Promise<Array<{ id: string; name: string; path: string }>> {
     if (!this.drive) return [];
 
     try {
@@ -376,7 +340,7 @@ export class GoogleDriveAdapter implements SourceAdapter {
       // Don't disguise an auth/permission/network failure as "no folders" —
       // log it so the operator can tell the difference.
       process.stderr.write(
-        `Memoria google-drive: listAvailableFolders failed: ${(err as Error).message}\n`
+        `Memoria google-drive: listAvailableFolders failed: ${(err as Error).message}\n`,
       );
       return [];
     }
@@ -399,7 +363,7 @@ export class GoogleDriveAdapter implements SourceAdapter {
       // Corrupt checkpoint — reset to a full re-sync, but say so (otherwise a
       // persistently-bad checkpoint silently re-scans every poll).
       process.stderr.write(
-        `Memoria google-drive: corrupt checkpoint, resetting to full sync: ${(err as Error).message}\n`
+        `Memoria google-drive: corrupt checkpoint, resetting to full sync: ${(err as Error).message}\n`,
       );
       this.startPageToken = "";
       this.seenFiles = new Set();

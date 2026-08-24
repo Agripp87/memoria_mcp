@@ -67,7 +67,7 @@ const FLUSH_MAX_RECORDS = parseInt(process.env.MEMORIA_RAW_ARCHIVE_BATCH || "20"
 const FLUSH_MAX_AGE_MS = parseInt(process.env.MEMORIA_RAW_ARCHIVE_FLUSH_MS || "60000", 10);
 const ROTATE_MAX_BYTES = parseInt(
   process.env.MEMORIA_RAW_ARCHIVE_ROTATE_BYTES || String(5 * 1024 * 1024),
-  10
+  10,
 );
 
 interface PendingBatch {
@@ -84,7 +84,8 @@ function targetFile(dir: string, month: string): string {
   let file = path.join(dir, `${month}.jsonl`);
   // Find the highest existing part, then roll if it's over the cap.
   for (;;) {
-    const next = part === 1 ? path.join(dir, `${month}.jsonl`) : path.join(dir, `${month}-p${part}.jsonl`);
+    const next =
+      part === 1 ? path.join(dir, `${month}.jsonl`) : path.join(dir, `${month}-p${part}.jsonl`);
     if (!fs.existsSync(next)) break;
     file = next;
     part++;
@@ -110,7 +111,7 @@ function flushKey(key: string): void {
     fs.appendFileSync(targetFile(dir, month), batch.lines.join("\n") + "\n", "utf-8");
   } catch (err) {
     process.stderr.write(
-      `Memoria: raw archive flush failed (non-fatal, ${batch.lines.length} records dropped): ${(err as Error).message}\n`
+      `Memoria: raw archive flush failed (non-fatal, ${batch.lines.length} records dropped): ${(err as Error).message}\n`,
     );
   }
 }
@@ -129,7 +130,7 @@ export function flushRawArchive(): void {
 export function appendRawArchive(
   dataDir: string,
   safeEvent: RawEvent,
-  originalContent: string
+  originalContent: string,
 ): void {
   try {
     const tier = safeEvent.privacyTier;
@@ -144,10 +145,9 @@ export function appendRawArchive(
     // local-only: store the fingerprint only, never the content.
     if (tier !== "local-only") rec.content = safeEvent.content;
 
-    const month =
-      /^\d{4}-\d{2}/.test(safeEvent.timestamp || "")
-        ? safeEvent.timestamp.slice(0, 7)
-        : new Date().toISOString().slice(0, 7);
+    const month = /^\d{4}-\d{2}/.test(safeEvent.timestamp || "")
+      ? safeEvent.timestamp.slice(0, 7)
+      : new Date().toISOString().slice(0, 7);
     const key = `${dataDir}|${sanitizeSegment(safeEvent.source)}|${month}`;
 
     const now = Date.now();
@@ -163,7 +163,7 @@ export function appendRawArchive(
     }
   } catch (err) {
     process.stderr.write(
-      `Memoria: raw archive append failed (non-fatal): ${(err as Error).message}\n`
+      `Memoria: raw archive append failed (non-fatal): ${(err as Error).message}\n`,
     );
   }
 }
@@ -172,11 +172,7 @@ export function appendRawArchive(
  * Read provenance records for a source (most recent month files first), newest
  * record first. Used to trace a daily-log entry / compiled fact back to source.
  */
-export function readRawArchive(
-  dataDir: string,
-  source: string,
-  limit = 100
-): ProvenanceRecord[] {
+export function readRawArchive(dataDir: string, source: string, limit = 100): ProvenanceRecord[] {
   // Read-your-writes: fold any buffered batches in before reading.
   flushRawArchive();
   const dir = path.join(rawArchiveDir(dataDir), sanitizeSegment(source));
@@ -185,7 +181,11 @@ export function readRawArchive(
   try {
     // Rotated parts (-p2, -p3, …) sort after the base month file, so
     // sort().reverse() still yields newest-month, newest-part first.
-    files = fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).sort().reverse();
+    files = fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith(".jsonl"))
+      .sort()
+      .reverse();
   } catch {
     return out;
   }

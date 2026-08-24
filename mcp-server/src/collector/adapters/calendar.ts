@@ -9,12 +9,7 @@
 import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
-import type {
-  SourceAdapter,
-  AdapterInfo,
-  AdapterConfig,
-  RawEvent,
-} from "./base.js";
+import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
 import { estimateImportance, classifyPrivacy, CORE_DATA_EPOCH } from "./base.js";
 
 export class CalendarAdapter implements SourceAdapter {
@@ -47,14 +42,11 @@ export class CalendarAdapter implements SourceAdapter {
     this.config = config;
 
     // macOS Calendar Cache database
-    const cachePath = path.join(
-      os.homedir(),
-      "Library/Calendars/Calendar Cache"
-    );
+    const cachePath = path.join(os.homedir(), "Library/Calendars/Calendar Cache");
 
     if (!fs.existsSync(cachePath)) {
       throw new Error(
-        "Calendar database not found. Ensure macOS Calendar app has been opened at least once."
+        "Calendar database not found. Ensure macOS Calendar app has been opened at least once.",
       );
     }
 
@@ -68,7 +60,8 @@ export class CalendarAdapter implements SourceAdapter {
     } catch (err: any) {
       throw new Error(
         `Cannot open Calendar database: ${err.message}. ` +
-          "You may need to grant Full Disk Access."
+          "You may need to grant Full Disk Access.",
+        { cause: err },
       );
     }
   }
@@ -116,14 +109,9 @@ export class CalendarAdapter implements SourceAdapter {
           WHERE ci.ZSTARTDATE BETWEEN ? AND ?
             AND (? IS NULL OR ci.ZMODIFIEDDATE > ?)
           ORDER BY ci.ZSTARTDATE ASC
-          LIMIT 200`
+          LIMIT 200`,
         )
-        .all(
-          startCoreData,
-          endCoreData,
-          modifiedSinceCoreData,
-          modifiedSinceCoreData
-        ) as any[];
+        .all(startCoreData, endCoreData, modifiedSinceCoreData, modifiedSinceCoreData) as any[];
     } catch {
       // Table structure might differ between macOS versions
       return [];
@@ -136,9 +124,7 @@ export class CalendarAdapter implements SourceAdapter {
       if (!includeAllDay && row.all_day) continue;
 
       const startTime = new Date((row.start_date + CORE_DATA_EPOCH) * 1000);
-      const endTime = row.end_date
-        ? new Date((row.end_date + CORE_DATA_EPOCH) * 1000)
-        : null;
+      const endTime = row.end_date ? new Date((row.end_date + CORE_DATA_EPOCH) * 1000) : null;
 
       const meta: Record<string, unknown> = {
         calendarName: row.calendar_name ?? "default",

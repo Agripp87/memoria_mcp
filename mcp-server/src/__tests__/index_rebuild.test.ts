@@ -26,9 +26,39 @@ function writeMemory(rel: string, frontmatter: Record<string, unknown>, body: st
 
 beforeAll(async () => {
   fs.mkdirSync(MEM, { recursive: true });
-  writeMemory("user/profile.md", { name: "User profile", description: "Who the user is", type: "user", importance: 9, updated: "2026-06-01" }, "The user is Alex.");
-  writeMemory("decisions/use-sqlite.md", { name: "Use SQLite", description: "Index store choice", type: "decision", importance: 7, updated: "2026-06-02" }, "We chose SQLite for the derived index.");
-  writeMemory("daily/2026-06-05.md", { name: "Daily log", description: "log", type: "session", importance: 3, updated: "2026-06-05" }, "## 10:00 — orchestrator\n\nran a job");
+  writeMemory(
+    "user/profile.md",
+    {
+      name: "User profile",
+      description: "Who the user is",
+      type: "user",
+      importance: 9,
+      updated: "2026-06-01",
+    },
+    "The user is Alex.",
+  );
+  writeMemory(
+    "decisions/use-sqlite.md",
+    {
+      name: "Use SQLite",
+      description: "Index store choice",
+      type: "decision",
+      importance: 7,
+      updated: "2026-06-02",
+    },
+    "We chose SQLite for the derived index.",
+  );
+  writeMemory(
+    "daily/2026-06-05.md",
+    {
+      name: "Daily log",
+      description: "log",
+      type: "session",
+      importance: 3,
+      updated: "2026-06-05",
+    },
+    "## 10:00 — orchestrator\n\nran a job",
+  );
 
   tools = await import("../tools.js");
   rebuildMarkdownIndex = tools.rebuildMarkdownIndex;
@@ -38,8 +68,12 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  try { store?.close(); } catch {}
-  try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {}
+  try {
+    store?.close();
+  } catch {}
+  try {
+    fs.rmSync(ROOT, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("rebuildMarkdownIndex (P1)", () => {
@@ -69,7 +103,17 @@ describe("rebuildMarkdownIndex (P1)", () => {
     const curated = `${sentinel}\n\n## Cross-store pointers\n\n- Project store lives elsewhere.\n`;
     fs.appendFileSync(indexPath(), "\n" + curated, "utf-8");
     // Add a new memory so the generated part definitely changes and a write happens.
-    writeMemory("references/note.md", { name: "A note", description: "ref", type: "reference", importance: 5, updated: "2026-06-10" }, "reference body");
+    writeMemory(
+      "references/note.md",
+      {
+        name: "A note",
+        description: "ref",
+        type: "reference",
+        importance: 5,
+        updated: "2026-06-10",
+      },
+      "reference body",
+    );
     rebuildMarkdownIndex();
     const txt = fs.readFileSync(indexPath(), "utf-8");
     expect(txt).toContain("references/note.md"); // regenerated section
@@ -81,7 +125,17 @@ describe("rebuildMarkdownIndex (P1)", () => {
 describe("lint index drift (P1)", () => {
   it("flags a core memory that is missing from the index", async () => {
     // Write a brand-new core memory but DON'T rebuild the index.
-    writeMemory("feedback/be-terse.md", { name: "Be terse", description: "style", type: "feedback", importance: 7, updated: "2026-06-11" }, "Prefer terse answers.");
+    writeMemory(
+      "feedback/be-terse.md",
+      {
+        name: "Be terse",
+        description: "style",
+        type: "feedback",
+        importance: 7,
+        updated: "2026-06-11",
+      },
+      "Prefer terse answers.",
+    );
     const result = await runLint(store, MEM, tools.getAllMemoryFiles, tools.getRelativePath);
     expect(result.indexDrift.missingFromIndex).toContain("feedback/be-terse.md");
   });

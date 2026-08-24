@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import os from "os";
 import path from "path";
 import fs from "fs";
-import { appendRawArchive, flushRawArchive, readRawArchive, rawArchiveDir, rawArchiveEnabled } from "../collector/provenance.js";
+import {
+  appendRawArchive,
+  flushRawArchive,
+  readRawArchive,
+  rawArchiveDir,
+  rawArchiveEnabled,
+} from "../collector/provenance.js";
 import { IngestionPipeline } from "../collector/ingestion.js";
 import type { RawEvent } from "../collector/adapters/base.js";
 
@@ -35,7 +41,9 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   delete process.env.MEMORIA_RAW_ARCHIVE;
-  try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(root, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("provenance archive (P3)", () => {
@@ -58,7 +66,7 @@ describe("provenance archive (P3)", () => {
     // and the raw file must not contain the secret text.
     const file = fs.readFileSync(
       path.join(rawArchiveDir(dataDir), "test-src", "2026-06.jsonl"),
-      "utf-8"
+      "utf-8",
     );
     expect(file).not.toContain("123-45-6789");
   });
@@ -87,7 +95,9 @@ describe("provenance archive (P3)", () => {
 
   it("ingestion writes an archive record and a ref pointer in the daily entry", async () => {
     const pipeline = new IngestionPipeline({ memoriesDir });
-    await pipeline.ingest([ev({ id: "trace-me", content: "An ingested fact long enough to be written." })]);
+    await pipeline.ingest([
+      ev({ id: "trace-me", content: "An ingested fact long enough to be written." }),
+    ]);
 
     // Archive record exists under data/raw/.
     const recs = readRawArchive(dataDir, "test-src");

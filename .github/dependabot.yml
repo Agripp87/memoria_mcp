@@ -1,0 +1,45 @@
+version: 2
+updates:
+  # npm — the MCP server. Grouped so a solo maintainer gets one PR to review a
+  # week rather than a dozen; security updates still arrive as their own PRs.
+  - package-ecosystem: npm
+    directory: /mcp-server
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: ["minor", "patch"]
+      production-minor-patch:
+        dependency-type: production
+        update-types: ["minor", "patch"]
+    ignore:
+      # better-sqlite3 majors need a native rebuild and a Docker image check;
+      # bump it deliberately, not automatically.
+      - dependency-name: better-sqlite3
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps(dev)"
+
+  # GitHub Actions — all actions are pinned to commit shas, so this is how they
+  # get updated at all.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+
+  # Base image for the runtime container.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "docker"

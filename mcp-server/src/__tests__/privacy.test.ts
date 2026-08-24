@@ -89,13 +89,17 @@ describe("Ingestion sink-side privacy enforcement", () => {
   });
   afterEach(() => {
     vi.useRealTimers();
-    try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
+    try {
+      fs.rmSync(root, { recursive: true, force: true });
+    } catch {}
   });
 
   it("redacts a secret even when the adapter mislabeled it 'send'", async () => {
     const secret = "sk-abcdEFGH1234ijklMNOP5678";
     const pipeline = new IngestionPipeline({ memoriesDir });
-    const r = await pipeline.ingest([ev({ content: `my api key is ${secret}`, privacyTier: "send" })]);
+    const r = await pipeline.ingest([
+      ev({ content: `my api key is ${secret}`, privacyTier: "send" }),
+    ]);
     expect(r.written).toBe(1);
 
     const written = fs.readFileSync(dailyFile(), "utf-8");

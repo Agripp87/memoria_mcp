@@ -22,8 +22,12 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  try { store?.close(); } catch {}
-  try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {}
+  try {
+    store?.close();
+  } catch {}
+  try {
+    fs.rmSync(ROOT, { recursive: true, force: true });
+  } catch {}
 });
 
 /** Render the dashboard page ("/") by invoking the router with a mock req/res. */
@@ -32,15 +36,32 @@ function renderDashboardHtml(): string {
   let html = "";
   const req: any = { method: "GET", url: "/", headers: {} };
   const res: any = {
-    send(s: string) { html = String(s); return res; },
-    set() { return res; },
-    setHeader() { return res; },
-    type() { return res; },
-    status() { return res; },
-    json() { return res; },
-    end() { return res; },
+    send(s: string) {
+      html = String(s);
+      return res;
+    },
+    set() {
+      return res;
+    },
+    setHeader() {
+      return res;
+    },
+    type() {
+      return res;
+    },
+    status() {
+      return res;
+    },
+    json() {
+      return res;
+    },
+    end() {
+      return res;
+    },
   };
-  router(req, res, (err?: any) => { if (err) throw err; });
+  router(req, res, (err?: any) => {
+    if (err) throw err;
+  });
   return html;
 }
 

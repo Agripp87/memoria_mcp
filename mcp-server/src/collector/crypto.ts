@@ -12,13 +12,7 @@
  * callers that want it, but the master-key bootstrap does not use a passphrase.)
  */
 
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  randomBytes,
-  scryptSync,
-} from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -29,7 +23,6 @@ const TAG_LEN = 16; // 128-bit auth tag
 const SCRYPT_N = 16384;
 const SCRYPT_R = 8;
 const SCRYPT_P = 1;
-const SALT_LEN = 16;
 
 // ── Key management ─────────────────────────────────────────
 
@@ -68,9 +61,7 @@ export function initMasterKey(dataDir: string): Buffer {
   if (envKey) {
     const buf = Buffer.from(envKey, "hex");
     if (buf.length !== KEY_LEN) {
-      throw new Error(
-        `MEMORIA_ENCRYPTION_KEY must be ${KEY_LEN * 2} hex chars (${KEY_LEN} bytes)`
-      );
+      throw new Error(`MEMORIA_ENCRYPTION_KEY must be ${KEY_LEN * 2} hex chars (${KEY_LEN} bytes)`);
     }
     _masterKey = buf;
     return _masterKey;
@@ -82,7 +73,7 @@ export function initMasterKey(dataDir: string): Buffer {
       "MEMORIA_REQUIRE_ENCRYPTION_KEY=true but MEMORIA_ENCRYPTION_KEY is unset. " +
         "Supply the 64-hex-char master key from a secret manager — refusing to read " +
         "or auto-generate a key on shared storage (it would sit next to the ciphertext " +
-        "and be lost on restart)."
+        "and be lost on restart).",
     );
   }
 
@@ -100,7 +91,7 @@ export function initMasterKey(dataDir: string): Buffer {
       "Memoria SECURITY: auto-generating an encryption key on disk in a container. " +
         "On a shared/cloud volume the key ends up beside the ciphertext it protects. " +
         "Set MEMORIA_ENCRYPTION_KEY (from a secret manager) and " +
-        "MEMORIA_REQUIRE_ENCRYPTION_KEY=true for production.\n"
+        "MEMORIA_REQUIRE_ENCRYPTION_KEY=true for production.\n",
     );
   }
   _masterKey = randomBytes(KEY_LEN);
@@ -111,12 +102,10 @@ export function initMasterKey(dataDir: string): Buffer {
   } catch (err) {
     process.stderr.write(
       `Memoria: chmod 0600 on encryption key file ${keyFile} failed (${(err as Error).message}). ` +
-      `SECURITY: ensure bucket/volume ACLs restrict access — the master key is at risk if the storage is readable.\n`
+        `SECURITY: ensure bucket/volume ACLs restrict access — the master key is at risk if the storage is readable.\n`,
     );
   }
-  process.stderr.write(
-    `Memoria: generated encryption key at ${keyFile}\n`
-  );
+  process.stderr.write(`Memoria: generated encryption key at ${keyFile}\n`);
 
   return _masterKey;
 }
@@ -135,16 +124,12 @@ export function getMasterKey(): Buffer {
  * Encrypt a buffer or string with AES-256-GCM.
  * Returns: iv (12B) || authTag (16B) || ciphertext
  */
-export function encrypt(
-  plaintext: Buffer | string,
-  key?: Buffer
-): Buffer {
+export function encrypt(plaintext: Buffer | string, key?: Buffer): Buffer {
   const k = key ?? getMasterKey();
   const iv = randomBytes(IV_LEN);
   const cipher = createCipheriv(ALGO, k, iv);
 
-  const input =
-    typeof plaintext === "string" ? Buffer.from(plaintext, "utf-8") : plaintext;
+  const input = typeof plaintext === "string" ? Buffer.from(plaintext, "utf-8") : plaintext;
 
   const encrypted = Buffer.concat([cipher.update(input), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -157,10 +142,7 @@ export function encrypt(
  * Decrypt a buffer produced by encrypt().
  * Input format: iv (12B) || authTag (16B) || ciphertext
  */
-export function decrypt(
-  data: Buffer,
-  key?: Buffer
-): Buffer {
+export function decrypt(data: Buffer, key?: Buffer): Buffer {
   const k = key ?? getMasterKey();
 
   if (data.length < IV_LEN + TAG_LEN) {

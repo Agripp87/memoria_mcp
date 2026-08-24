@@ -1,0 +1,81 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before you write anything: no personal data.** No real memory files, daily logs, API keys, bearer tokens, refresh tokens, or your deployment's hostname. Redact log output. If you need a repro store, generate a fake one with `npm run demo:gen -- --out /tmp/store`.
+
+        Security vulnerabilities do **not** belong here — use [private reporting](https://github.com/Agripp87/memoria/security/advisories/new).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start the server with `...`
+        2. Call `memory_search` with `...`
+        3. Observe `...`
+    validations:
+      required: true
+
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      options:
+        - stdio (Claude Code)
+        - HTTP / remote MCP (claude.ai or other client)
+        - Dashboard (web UI)
+        - Collector daemon
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Memoria version / commit
+      placeholder: "0.1.0, or the commit sha you built from"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Node version and OS
+      placeholder: "Node 22.11 on macOS 15 / Docker node:22-alpine / Windows 11"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: embeddings
+    attributes:
+      label: Embedding provider
+      description: The startup log line says which one is active.
+      options:
+        - "auto (default)"
+        - openai
+        - minilm
+        - hash
+        - Not sure
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Server stderr. **Redact keys, tokens, hostnames and memory content.**
+      render: text
+    validations:
+      required: false

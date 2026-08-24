@@ -22,9 +22,7 @@ export function isAllowedRedirect(uri: string, allowedHosts: string[]): boolean 
   const isLocal = host === "localhost" || host === "127.0.0.1";
   // Require https for anything non-local to prevent code leakage over plaintext.
   if (!isLocal && url.protocol !== "https:") return false;
-  return allowedHosts.some(
-    (allowed) => host === allowed || host.endsWith(`.${allowed}`)
-  );
+  return allowedHosts.some((allowed) => host === allowed || host.endsWith(`.${allowed}`));
 }
 
 /**
@@ -36,13 +34,12 @@ export function validateClientCredentials(
   clientId: unknown,
   clientSecret: unknown,
   expectedId: string,
-  expectedSecret: string
+  expectedSecret: string,
 ): boolean {
   const id = String(clientId ?? "");
   const secret = String(clientSecret ?? "");
   const idMatch =
-    id.length === expectedId.length &&
-    timingSafeEqual(Buffer.from(id), Buffer.from(expectedId));
+    id.length === expectedId.length && timingSafeEqual(Buffer.from(id), Buffer.from(expectedId));
   const secretMatch =
     secret.length === expectedSecret.length &&
     timingSafeEqual(Buffer.from(secret), Buffer.from(expectedSecret));

@@ -14,17 +14,9 @@
  * Requires: googleapis npm package (auto-installed)
  */
 
-import type {
-  SourceAdapter,
-  AdapterInfo,
-  AdapterConfig,
-  RawEvent,
-} from "./base.js";
+import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
 import { estimateImportance, classifyPrivacy } from "./base.js";
-import {
-  getGoogleAuth,
-  extractGoogleAuthConfig,
-} from "./google-auth.js";
+import { getGoogleAuth, extractGoogleAuthConfig } from "./google-auth.js";
 
 export class GoogleCalendarAdapter implements SourceAdapter {
   readonly info: AdapterInfo = {
@@ -63,9 +55,7 @@ export class GoogleCalendarAdapter implements SourceAdapter {
 
   async init(config: AdapterConfig): Promise<void> {
     this.config = config;
-    const authConfig = extractGoogleAuthConfig(
-      config.settings as Record<string, any>
-    );
+    const authConfig = extractGoogleAuthConfig(config.settings as Record<string, any>);
     const auth = await getGoogleAuth(authConfig);
 
     const { google } = await import("googleapis");
@@ -77,7 +67,9 @@ export class GoogleCalendarAdapter implements SourceAdapter {
         const parsed = JSON.parse(this.checkpoint);
         this.syncTokens = parsed.syncTokens || {};
       } catch (err) {
-        process.stderr.write(`Memoria google-calendar: invalid checkpoint, starting fresh: ${(err as Error).message}\n`);
+        process.stderr.write(
+          `Memoria google-calendar: invalid checkpoint, starting fresh: ${(err as Error).message}\n`,
+        );
         // Clear corrupted checkpoint so the next poll starts fresh
         this.checkpoint = "";
         this.syncTokens = {};
@@ -90,7 +82,8 @@ export class GoogleCalendarAdapter implements SourceAdapter {
     } catch (err: any) {
       throw new Error(
         `Google Calendar API connection failed: ${err.message}. ` +
-          "Ensure the Google Calendar API is enabled in your Google Cloud Console."
+          "Ensure the Google Calendar API is enabled in your Google Cloud Console.",
+        { cause: err },
       );
     }
   }
@@ -98,9 +91,7 @@ export class GoogleCalendarAdapter implements SourceAdapter {
   async poll(): Promise<RawEvent[]> {
     if (!this.calendar) return [];
 
-    const calendarIds = (this.config.settings?.calendarIds as string[]) ?? [
-      "primary",
-    ];
+    const calendarIds = (this.config.settings?.calendarIds as string[]) ?? ["primary"];
     const lookAhead = (this.config.settings?.lookAheadDays as number) ?? 7;
     const lookBehind = (this.config.settings?.lookBehindDays as number) ?? 1;
     const includeAllDay = this.config.settings?.includeAllDayEvents !== false;
@@ -115,7 +106,7 @@ export class GoogleCalendarAdapter implements SourceAdapter {
           lookAhead,
           lookBehind,
           includeAllDay,
-          includeDeclined
+          includeDeclined,
         );
         events.push(...calEvents);
       } catch (err: any) {
@@ -128,18 +119,16 @@ export class GoogleCalendarAdapter implements SourceAdapter {
               lookAhead,
               lookBehind,
               includeAllDay,
-              includeDeclined
+              includeDeclined,
             );
             events.push(...calEvents);
           } catch (retryErr: any) {
             process.stderr.write(
-              `Memoria: Google Calendar poll error (${calId}): ${retryErr.message}\n`
+              `Memoria: Google Calendar poll error (${calId}): ${retryErr.message}\n`,
             );
           }
         } else {
-          process.stderr.write(
-            `Memoria: Google Calendar poll error (${calId}): ${err.message}\n`
-          );
+          process.stderr.write(`Memoria: Google Calendar poll error (${calId}): ${err.message}\n`);
         }
       }
     }
@@ -152,7 +141,7 @@ export class GoogleCalendarAdapter implements SourceAdapter {
     lookAhead: number,
     lookBehind: number,
     includeAllDay: boolean,
-    includeDeclined: boolean
+    includeDeclined: boolean,
   ): Promise<RawEvent[]> {
     const events: RawEvent[] = [];
     const syncToken = this.syncTokens[calendarId];
@@ -170,12 +159,8 @@ export class GoogleCalendarAdapter implements SourceAdapter {
     } else {
       // Full sync with time window
       const now = new Date();
-      params.timeMin = new Date(
-        now.getTime() - lookBehind * 86400_000
-      ).toISOString();
-      params.timeMax = new Date(
-        now.getTime() + lookAhead * 86400_000
-      ).toISOString();
+      params.timeMin = new Date(now.getTime() - lookBehind * 86400_000).toISOString();
+      params.timeMax = new Date(now.getTime() + lookAhead * 86400_000).toISOString();
     }
 
     let pageToken: string | undefined;
@@ -186,12 +171,7 @@ export class GoogleCalendarAdapter implements SourceAdapter {
       const items = response.data.items || [];
 
       for (const item of items) {
-        const event = this.convertEvent(
-          item,
-          calendarId,
-          includeAllDay,
-          includeDeclined
-        );
+        const event = this.convertEvent(item, calendarId, includeAllDay, includeDeclined);
         if (event) events.push(event);
       }
 
@@ -210,7 +190,7 @@ export class GoogleCalendarAdapter implements SourceAdapter {
     item: any,
     calendarId: string,
     includeAllDay: boolean,
-    includeDeclined: boolean
+    includeDeclined: boolean,
   ): RawEvent | null {
     if (!item.summary) return null;
     if (item.status === "cancelled") return null;
@@ -228,9 +208,7 @@ export class GoogleCalendarAdapter implements SourceAdapter {
     // Parse times
     const startTime = item.start?.dateTime || item.start?.date;
     const endTime = item.end?.dateTime || item.end?.date;
-    const timestamp = startTime
-      ? new Date(startTime).toISOString()
-      : new Date().toISOString();
+    const timestamp = startTime ? new Date(startTime).toISOString() : new Date().toISOString();
 
     // Attendee info
     const attendees = (item.attendees || [])
@@ -241,9 +219,7 @@ export class GoogleCalendarAdapter implements SourceAdapter {
     // Detect video meeting link
     const meetingLink =
       item.hangoutLink ||
-      item.conferenceData?.entryPoints?.find(
-        (e: any) => e.entryPointType === "video"
-      )?.uri ||
+      item.conferenceData?.entryPoints?.find((e: any) => e.entryPointType === "video")?.uri ||
       null;
 
     // Build content
@@ -306,7 +282,7 @@ export class GoogleCalendarAdapter implements SourceAdapter {
     } catch (err) {
       // Corrupt checkpoint — reset to a full re-sync, but log it.
       process.stderr.write(
-        `Memoria google-calendar: corrupt checkpoint, resetting sync tokens: ${(err as Error).message}\n`
+        `Memoria google-calendar: corrupt checkpoint, resetting sync tokens: ${(err as Error).message}\n`,
       );
       this.syncTokens = {};
     }

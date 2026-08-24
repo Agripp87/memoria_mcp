@@ -9,8 +9,22 @@ import {
 } from "../wiki.js";
 
 const STORE: StoreEntry[] = [
-  { file: "user/profile.md", name: "Profile", type: "user", importance: 9, related: [], wikilinks: [] },
-  { file: "project/talk.md", name: "Talk & Play", type: "project", importance: 8, related: ["user/profile.md"], wikilinks: [] },
+  {
+    file: "user/profile.md",
+    name: "Profile",
+    type: "user",
+    importance: 9,
+    related: [],
+    wikilinks: [],
+  },
+  {
+    file: "project/talk.md",
+    name: "Talk & Play",
+    type: "project",
+    importance: 8,
+    related: ["user/profile.md"],
+    wikilinks: [],
+  },
 ];
 
 describe("escHtml", () => {
@@ -49,7 +63,10 @@ describe("resolveLink", () => {
 
 describe("renderMemoryHtml — sanitization (no stored XSS)", () => {
   it("escapes raw HTML instead of passing it through", () => {
-    const html = renderMemoryHtml("<script>alert(1)</script>\n\n<img src=x onerror=alert(2)>", STORE);
+    const html = renderMemoryHtml(
+      "<script>alert(1)</script>\n\n<img src=x onerror=alert(2)>",
+      STORE,
+    );
     // No raw HTML elements survive — everything becomes escaped text. (The
     // literal substring "onerror=" may appear, but only inside &lt;img...&gt;,
     // which is inert text, not an attribute.)

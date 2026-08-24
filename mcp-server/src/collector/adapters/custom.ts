@@ -16,12 +16,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
-import type {
-  SourceAdapter,
-  AdapterInfo,
-  AdapterConfig,
-  RawEvent,
-} from "./base.js";
+import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
 import { estimateImportance, classifyPrivacy } from "./base.js";
 import { contentHash } from "../crypto.js";
 
@@ -133,17 +128,14 @@ function isInside(child: string, parent: string): boolean {
  *
  * Throws with an explanatory message when the path is not allowed.
  */
-export function assertWatchPathAllowed(
-  watchPath: string,
-  opts: { dataDir?: string } = {}
-): void {
+export function assertWatchPathAllowed(watchPath: string, opts: { dataDir?: string } = {}): void {
   if (!watchPath) return;
   const real = resolveWatchRealPath(watchPath);
 
   if (opts.dataDir && isInside(real, opts.dataDir)) {
     throw new Error(
       `Watch path not allowed: "${watchPath}" resolves inside the collector data ` +
-        `directory, which holds the encryption key and credentials.`
+        `directory, which holds the encryption key and credentials.`,
     );
   }
 
@@ -158,14 +150,14 @@ export function assertWatchPathAllowed(
     throw new Error(
       `Watch path not allowed: "${watchPath}". file_watcher sources are disabled by ` +
         `default. Set MEMORIA_FILE_WATCHER_ROOTS to a comma-separated allowlist of ` +
-        `directories to enable them.`
+        `directories to enable them.`,
     );
   }
   const ok = roots.some((root) => isInside(real, resolveWatchRealPath(root)));
   if (!ok) {
     throw new Error(
       `Watch path not in allowlist (MEMORIA_FILE_WATCHER_ROOTS): "${watchPath}". ` +
-        `Allowed roots: ${roots.join(", ")}.`
+        `Allowed roots: ${roots.join(", ")}.`,
     );
   }
 }
@@ -209,9 +201,7 @@ export class CustomAdapter implements SourceAdapter {
       // guard existed.
       assertWatchPathAllowed(this.definition.watchPath, { dataDir: this.dataDir });
       if (!fs.existsSync(this.definition.watchPath)) {
-        throw new Error(
-          `Watch path does not exist: ${this.definition.watchPath}`
-        );
+        throw new Error(`Watch path does not exist: ${this.definition.watchPath}`);
       }
     }
   }
@@ -254,7 +244,7 @@ export class CustomAdapter implements SourceAdapter {
     if (process.env.MEMORIA_ALLOW_SHELL_SOURCES !== "true") {
       process.stderr.write(
         `Memoria custom adapter "${this.definition.id}": shell_command execution is disabled ` +
-          `(set MEMORIA_ALLOW_SHELL_SOURCES=true to allow). Skipping.\n`
+          `(set MEMORIA_ALLOW_SHELL_SOURCES=true to allow). Skipping.\n`,
       );
       return [];
     }
@@ -273,7 +263,7 @@ export class CustomAdapter implements SourceAdapter {
       return this.parseRawData(output);
     } catch (err: any) {
       process.stderr.write(
-        `Memoria custom adapter "${this.definition.id}" command error: ${err.message}\n`
+        `Memoria custom adapter "${this.definition.id}" command error: ${err.message}\n`,
       );
       return [];
     }
@@ -285,9 +275,7 @@ export class CustomAdapter implements SourceAdapter {
 
   /** Called by the HTTP server when a webhook POST arrives */
   pushWebhookEvent(body: unknown): void {
-    const events = this.parseRawData(
-      typeof body === "string" ? body : JSON.stringify(body)
-    );
+    const events = this.parseRawData(typeof body === "string" ? body : JSON.stringify(body));
     this.webhookQueue.push(...events);
   }
 
@@ -352,14 +340,12 @@ export class CustomAdapter implements SourceAdapter {
       }
     } catch (err: any) {
       process.stderr.write(
-        `Memoria custom adapter "${this.definition.id}" parse error: ${err.message}\n`
+        `Memoria custom adapter "${this.definition.id}" parse error: ${err.message}\n`,
       );
     }
 
     // Apply importance filter
-    return events.filter(
-      (e) => e.importanceEstimate >= this.config.importanceThreshold
-    );
+    return events.filter((e) => e.importanceEstimate >= this.config.importanceThreshold);
   }
 
   private mapToEvent(item: any): RawEvent | null {

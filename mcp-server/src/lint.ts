@@ -31,7 +31,7 @@ function isAutoCompiledPath(relPath: string): boolean {
 export interface LintResult {
   contradictions: Array<{ fileA: string; fileB: string; similarity: number }>;
   contradictionScanned: number; // how many files were actually scanned
-  contradictionTotal: number;   // total core files (helps explain coverage)
+  contradictionTotal: number; // total core files (helps explain coverage)
   orphans: Array<{ file: string; accessCount: number; importance: number }>;
   staleCrossRefs: Array<{ file: string; brokenRef: string }>;
   missingSummaries: string[];
@@ -57,12 +57,15 @@ export async function runLint(
   store: MemoryStore,
   memoriesDir: string,
   getAllMemoryFiles: () => string[],
-  getRelativePath: (abs: string) => string
+  getRelativePath: (abs: string) => string,
 ): Promise<LintResult> {
   const files = getAllMemoryFiles();
 
-  const { pairs: contradictions, scanned: contradictionScanned, totalCore: contradictionTotal } =
-    await findContradictions(store, files, memoriesDir, getRelativePath);
+  const {
+    pairs: contradictions,
+    scanned: contradictionScanned,
+    totalCore: contradictionTotal,
+  } = await findContradictions(store, files, memoriesDir, getRelativePath);
   const orphans = findOrphans(store, files, memoriesDir, getRelativePath);
   const staleCrossRefs = findStaleCrossRefs(files, memoriesDir, getRelativePath);
   const missingSummaries = findMissingSummaries(files, getRelativePath);
@@ -85,9 +88,18 @@ export async function runLint(
     unknownDirs.length;
 
   return {
-    contradictions, contradictionScanned, contradictionTotal,
-    orphans, staleCrossRefs, missingSummaries, gapTopics, indexDrift,
-    aliasCollisions, lowConfidence, unknownDirs, totalIssues,
+    contradictions,
+    contradictionScanned,
+    contradictionTotal,
+    orphans,
+    staleCrossRefs,
+    missingSummaries,
+    gapTopics,
+    indexDrift,
+    aliasCollisions,
+    lowConfidence,
+    unknownDirs,
+    totalIssues,
   };
 }
 
@@ -98,13 +110,19 @@ export async function runLint(
 // splits the store and hides memories from type-filtered listing.
 
 const KNOWN_TOP_DIRS = new Set([
-  "daily", "entities", "user", "project", "decisions",
-  "feedback", "references", "sessions",
+  "daily",
+  "entities",
+  "user",
+  "project",
+  "decisions",
+  "feedback",
+  "references",
+  "sessions",
 ]);
 
 function findUnknownDirs(
   files: string[],
-  getRelativePath: (abs: string) => string
+  getRelativePath: (abs: string) => string,
 ): Array<{ dir: string; files: string[] }> {
   const byDir = new Map<string, string[]>();
   for (const file of files) {
@@ -134,14 +152,14 @@ function normalizeName(name: string): string {
   return name
     .toLowerCase()
     .normalize("NFKD")
-    .replace(/&/g, "and")        // "Talk & Play" === "talk and play"
+    .replace(/&/g, "and") // "Talk & Play" === "talk and play"
     .replace(/[^a-z0-9]+/g, "") // drop spaces, punctuation, - etc.
-    .replace(/s$/, "");          // collapse trivial plural
+    .replace(/s$/, ""); // collapse trivial plural
 }
 
 function findAliasCollisions(
   files: string[],
-  getRelativePath: (abs: string) => string
+  getRelativePath: (abs: string) => string,
 ): Array<{ normalized: string; variants: Array<{ file: string; name: string }> }> {
   const byKey = new Map<string, Array<{ file: string; name: string }>>();
 
@@ -159,13 +177,17 @@ function findAliasCollisions(
     byKey.set(key, list);
   }
 
-  const collisions: Array<{ normalized: string; variants: Array<{ file: string; name: string }> }> = [];
+  const collisions: Array<{ normalized: string; variants: Array<{ file: string; name: string }> }> =
+    [];
   for (const [key, variants] of byKey) {
     // Only a collision if the RAW names actually differ (same name in two files
     // is a contradiction/duplicate concern, handled elsewhere).
     const distinctNames = new Set(variants.map((v) => v.name));
     if (distinctNames.size > 1) {
-      collisions.push({ normalized: key, variants: variants.sort((a, b) => a.file.localeCompare(b.file)) });
+      collisions.push({
+        normalized: key,
+        variants: variants.sort((a, b) => a.file.localeCompare(b.file)),
+      });
     }
   }
   collisions.sort((a, b) => a.normalized.localeCompare(b.normalized));
@@ -181,13 +203,27 @@ function findAliasCollisions(
 // flagged — ordinary prose hedges too often for a single weak marker to be
 // signal (F5: measured false-positive reduction).
 const STRONG_HEDGES: RegExp[] = [
-  /\bnot sure\b/i, /\bunverified\b/i, /\bunconfirmed\b/i,
-  /\bto be confirmed\b/i, /\btbd\b/i, /\btodo\b/i, /\bfixme\b/i, /\?\?+/,
+  /\bnot sure\b/i,
+  /\bunverified\b/i,
+  /\bunconfirmed\b/i,
+  /\bto be confirmed\b/i,
+  /\btbd\b/i,
+  /\btodo\b/i,
+  /\bfixme\b/i,
+  /\?\?+/,
 ];
 const WEAK_HEDGES: RegExp[] = [
-  /\bunsure\b/i, /\bi think\b/i, /\bi believe\b/i, /\bprobably\b/i,
-  /\bpossibly\b/i, /\bpresumably\b/i, /\bmight be\b/i, /\bmaybe\b/i,
-  /\bafaik\b/i, /\bguess(?:ing)?\b/i, /\bassum(?:e|ing|ption)\b/i,
+  /\bunsure\b/i,
+  /\bi think\b/i,
+  /\bi believe\b/i,
+  /\bprobably\b/i,
+  /\bpossibly\b/i,
+  /\bpresumably\b/i,
+  /\bmight be\b/i,
+  /\bmaybe\b/i,
+  /\bafaik\b/i,
+  /\bguess(?:ing)?\b/i,
+  /\bassum(?:e|ing|ption)\b/i,
 ];
 
 /** Strip inline code and fenced blocks — "TODO" inside a code sample is not a
@@ -198,7 +234,7 @@ function stripCode(body: string): string {
 
 function findLowConfidence(
   files: string[],
-  getRelativePath: (abs: string) => string
+  getRelativePath: (abs: string) => string,
 ): Array<{ file: string; markers: string[] }> {
   const results: Array<{ file: string; markers: string[] }> = [];
 
@@ -206,7 +242,8 @@ function findLowConfidence(
     const relPath = getRelativePath(file);
     // Only curated memories — daily logs and auto-compiled rollups are expected
     // to be raw/hedged and would just create noise.
-    if (isDailyPath(relPath) || isAutoCompiledPath(relPath) || relPath === "MEMORY_INDEX.md") continue;
+    if (isDailyPath(relPath) || isAutoCompiledPath(relPath) || relPath === "MEMORY_INDEX.md")
+      continue;
     const content = fs.readFileSync(file, "utf-8");
     const body = stripCode(parseFrontmatter(content).body);
 
@@ -238,7 +275,7 @@ function findLowConfidence(
 function findIndexDrift(
   files: string[],
   memoriesDir: string,
-  getRelativePath: (abs: string) => string
+  getRelativePath: (abs: string) => string,
 ): { missingFromIndex: string[]; staleInIndex: string[] } {
   const indexPath = path.join(memoriesDir, "MEMORY_INDEX.md");
   let indexText: string;
@@ -286,7 +323,7 @@ async function findContradictions(
   store: MemoryStore,
   files: string[],
   memoriesDir: string,
-  getRelativePath: (abs: string) => string
+  getRelativePath: (abs: string) => string,
 ): Promise<{
   pairs: Array<{ fileA: string; fileB: string; similarity: number }>;
   scanned: number;
@@ -339,10 +376,12 @@ async function findContradictions(
           const similar = await store.findSimilar(body, 5);
           return { relPath, similar };
         } catch (err) {
-          process.stderr.write(`Memoria lint: findSimilar failed for ${relPath}: ${(err as Error).message}\n`);
+          process.stderr.write(
+            `Memoria lint: findSimilar failed for ${relPath}: ${(err as Error).message}\n`,
+          );
           return { relPath, similar: [] };
         }
-      })
+      }),
     );
 
     for (const { relPath, similar } of batchResults) {
@@ -386,7 +425,7 @@ function findOrphans(
   store: MemoryStore,
   files: string[],
   memoriesDir: string,
-  getRelativePath: (abs: string) => string
+  getRelativePath: (abs: string) => string,
 ): Array<{ file: string; accessCount: number; importance: number }> {
   // Build set of all referenced files
   const referenced = new Set<string>();
@@ -407,7 +446,8 @@ function findOrphans(
 
   for (const file of files) {
     const relPath = getRelativePath(file);
-    if (isDailyPath(relPath) || isAutoCompiledPath(relPath) || relPath === "MEMORY_INDEX.md") continue;
+    if (isDailyPath(relPath) || isAutoCompiledPath(relPath) || relPath === "MEMORY_INDEX.md")
+      continue;
 
     if (!referenced.has(relPath)) {
       const content = fs.readFileSync(file, "utf-8");
@@ -432,7 +472,7 @@ function findOrphans(
 function findStaleCrossRefs(
   files: string[],
   memoriesDir: string,
-  getRelativePath: (abs: string) => string
+  getRelativePath: (abs: string) => string,
 ): Array<{ file: string; brokenRef: string }> {
   const results: Array<{ file: string; brokenRef: string }> = [];
 
@@ -456,10 +496,7 @@ function findStaleCrossRefs(
 
 // ── Check 4: Missing summaries ──────────────────────────────
 
-function findMissingSummaries(
-  files: string[],
-  getRelativePath: (abs: string) => string
-): string[] {
+function findMissingSummaries(files: string[], getRelativePath: (abs: string) => string): string[] {
   const results: string[] = [];
 
   for (const file of files) {
@@ -483,32 +520,147 @@ function findMissingSummaries(
 // ── Check 5: Gap analysis ───────────────────────────────────
 
 const STOP_WORDS = new Set([
-  "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-  "have", "has", "had", "do", "does", "did", "will", "would", "could",
-  "should", "may", "might", "shall", "can", "to", "of", "in", "for",
-  "on", "with", "at", "by", "from", "as", "into", "through", "during",
-  "before", "after", "above", "below", "between", "out", "off", "up",
-  "down", "and", "but", "or", "nor", "not", "so", "yet", "both", "each",
-  "few", "more", "most", "other", "some", "such", "no", "only", "own",
-  "same", "than", "too", "very", "just", "about", "also", "then", "this",
-  "that", "these", "those", "it", "its", "i", "me", "my", "we", "our",
-  "you", "your", "he", "she", "they", "them", "their", "what", "which",
-  "who", "when", "where", "how", "all", "if", "there", "here", "new",
-  "one", "two", "like", "time", "make", "made", "get", "got", "log",
-  "daily", "session", "importance", "privacy", "send", "pm", "am",
-  "agent", "orchestrator", "memory", "memories",
+  "the",
+  "a",
+  "an",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "been",
+  "being",
+  "have",
+  "has",
+  "had",
+  "do",
+  "does",
+  "did",
+  "will",
+  "would",
+  "could",
+  "should",
+  "may",
+  "might",
+  "shall",
+  "can",
+  "to",
+  "of",
+  "in",
+  "for",
+  "on",
+  "with",
+  "at",
+  "by",
+  "from",
+  "as",
+  "into",
+  "through",
+  "during",
+  "before",
+  "after",
+  "above",
+  "below",
+  "between",
+  "out",
+  "off",
+  "up",
+  "down",
+  "and",
+  "but",
+  "or",
+  "nor",
+  "not",
+  "so",
+  "yet",
+  "both",
+  "each",
+  "few",
+  "more",
+  "most",
+  "other",
+  "some",
+  "such",
+  "no",
+  "only",
+  "own",
+  "same",
+  "than",
+  "too",
+  "very",
+  "just",
+  "about",
+  "also",
+  "then",
+  "this",
+  "that",
+  "these",
+  "those",
+  "it",
+  "its",
+  "i",
+  "me",
+  "my",
+  "we",
+  "our",
+  "you",
+  "your",
+  "he",
+  "she",
+  "they",
+  "them",
+  "their",
+  "what",
+  "which",
+  "who",
+  "when",
+  "where",
+  "how",
+  "all",
+  "if",
+  "there",
+  "here",
+  "new",
+  "one",
+  "two",
+  "like",
+  "time",
+  "make",
+  "made",
+  "get",
+  "got",
+  "log",
+  "daily",
+  "session",
+  "importance",
+  "privacy",
+  "send",
+  "pm",
+  "am",
+  "agent",
+  "orchestrator",
+  "memory",
+  "memories",
   // Collector metric-line vocabulary ("Agent X: success | 553ms | $0.0000").
   // The first real-store lint run (2026-07-25) surfaced these as top "gap
   // topics" with thousands of mentions — they are pipeline framing, not
   // knowledge the user is missing.
-  "success", "status", "task", "result", "error", "failed", "correct",
-  "cost", "duration", "true", "false", "none", "null",
+  "success",
+  "status",
+  "task",
+  "result",
+  "error",
+  "failed",
+  "correct",
+  "cost",
+  "duration",
+  "true",
+  "false",
+  "none",
+  "null",
 ]);
 
-async function findGaps(
-  store: MemoryStore,
-  memoriesDir: string
-): Promise<string[]> {
+async function findGaps(store: MemoryStore, memoriesDir: string): Promise<string[]> {
   const dailyDir = path.join(memoriesDir, "daily");
   if (!fs.existsSync(dailyDir)) return [];
 
@@ -563,8 +715,7 @@ async function findGaps(
     if (!rel.endsWith(".md") || isDailyPath(rel) || rel === "MEMORY_INDEX.md") continue;
     coreBasenames.push(path.basename(rel, ".md").toLowerCase());
   }
-  const coveredByName = (term: string): boolean =>
-    coreBasenames.some((b) => b.includes(term));
+  const coveredByName = (term: string): boolean => coreBasenames.some((b) => b.includes(term));
 
   // Check which terms have no corresponding core memory
   const gaps: string[] = [];
@@ -574,9 +725,7 @@ async function findGaps(
     // chunks, the covering core page routinely ranks below a page of daily
     // hits without being absent.
     const results = await store.search(term, 10);
-    const hasCoreMemory = results.some(
-      (r) => !isDailyPath(r.file) && r.score > 0.4
-    );
+    const hasCoreMemory = results.some((r) => !isDailyPath(r.file) && r.score > 0.4);
     if (!hasCoreMemory) {
       gaps.push(`"${term}" (${wordCounts.get(term)} mentions in daily logs, no core memory)`);
     }
@@ -596,13 +745,21 @@ export function formatLintReport(result: LintResult): string {
   // Contradictions
   if (result.contradictions.length > 0) {
     sections.push(`### Potential Contradictions (${result.contradictions.length})`);
-    sections.push(`*Scanned top ${result.contradictionScanned} of ${result.contradictionTotal} core memories by importance.*\n`);
+    sections.push(
+      `*Scanned top ${result.contradictionScanned} of ${result.contradictionTotal} core memories by importance.*\n`,
+    );
     for (const c of result.contradictions) {
-      sections.push(`- **${c.fileA}** ↔ **${c.fileB}** (${(c.similarity * 100).toFixed(1)}% similar)`);
+      sections.push(
+        `- **${c.fileA}** ↔ **${c.fileB}** (${(c.similarity * 100).toFixed(1)}% similar)`,
+      );
     }
-    sections.push("*Review these pairs for conflicting information. Consider merging or adding `supersedes` metadata.*\n");
+    sections.push(
+      "*Review these pairs for conflicting information. Consider merging or adding `supersedes` metadata.*\n",
+    );
   } else if (result.contradictionScanned < result.contradictionTotal) {
-    sections.push(`*(Contradiction scan covered ${result.contradictionScanned}/${result.contradictionTotal} core memories — top by importance.)*\n`);
+    sections.push(
+      `*(Contradiction scan covered ${result.contradictionScanned}/${result.contradictionTotal} core memories — top by importance.)*\n`,
+    );
   }
 
   // Orphans
@@ -611,7 +768,9 @@ export function formatLintReport(result: LintResult): string {
     for (const o of result.orphans) {
       sections.push(`- **${o.file}** (importance: ${o.importance}, accesses: ${o.accessCount})`);
     }
-    sections.push("*These memories are never referenced by other memories. Consider adding `related` links or archiving if obsolete.*\n");
+    sections.push(
+      "*These memories are never referenced by other memories. Consider adding `related` links or archiving if obsolete.*\n",
+    );
   }
 
   // Stale cross-refs
@@ -629,7 +788,9 @@ export function formatLintReport(result: LintResult): string {
     for (const m of result.missingSummaries) {
       sections.push(`- **${m}**`);
     }
-    sections.push("*Add a `description` to the frontmatter for better search and index quality.*\n");
+    sections.push(
+      "*Add a `description` to the frontmatter for better search and index quality.*\n",
+    );
   }
 
   // Gap topics
@@ -638,7 +799,9 @@ export function formatLintReport(result: LintResult): string {
     for (const g of result.gapTopics) {
       sections.push(`- ${g}`);
     }
-    sections.push("*These topics appear frequently in daily logs but have no dedicated core memory. Consider using `memory_compile` to create one.*\n");
+    sections.push(
+      "*These topics appear frequently in daily logs but have no dedicated core memory. Consider using `memory_compile` to create one.*\n",
+    );
   }
 
   // Index drift
@@ -646,14 +809,18 @@ export function formatLintReport(result: LintResult): string {
   if (drift.missingFromIndex.length > 0 || drift.staleInIndex.length > 0) {
     sections.push(`### Index Drift (${drift.missingFromIndex.length + drift.staleInIndex.length})`);
     if (drift.missingFromIndex.length > 0) {
-      sections.push(`*Core memories missing from MEMORY_INDEX.md (${drift.missingFromIndex.length}):*`);
+      sections.push(
+        `*Core memories missing from MEMORY_INDEX.md (${drift.missingFromIndex.length}):*`,
+      );
       for (const f of drift.missingFromIndex) sections.push(`- **${f}**`);
     }
     if (drift.staleInIndex.length > 0) {
       sections.push(`*Index links to files that no longer exist (${drift.staleInIndex.length}):*`);
       for (const f of drift.staleInIndex) sections.push(`- \`${f}\``);
     }
-    sections.push("*The index has drifted from the territory (Karpathy rule VII). Run `memory_index` to rebuild it.*\n");
+    sections.push(
+      "*The index has drifted from the territory (Karpathy rule VII). Run `memory_index` to rebuild it.*\n",
+    );
   }
 
   // Alias collisions
@@ -663,7 +830,9 @@ export function formatLintReport(result: LintResult): string {
       const variants = c.variants.map((v) => `"${v.name}" (${v.file})`).join(" ↔ ");
       sections.push(`- ${variants}`);
     }
-    sections.push("*The same entity drifted into multiple spellings (Karpathy rule VIII). Pick one canonical name and `supersedes` the rest.*\n");
+    sections.push(
+      "*The same entity drifted into multiple spellings (Karpathy rule VIII). Pick one canonical name and `supersedes` the rest.*\n",
+    );
   }
 
   // Low-confidence claims
@@ -672,7 +841,9 @@ export function formatLintReport(result: LintResult): string {
     for (const lc of result.lowConfidence) {
       sections.push(`- **${lc.file}** — ${lc.markers.map((m) => `\`${m}\``).join(", ")}`);
     }
-    sections.push("*These curated memories hedge or flag uncertainty. Verify and source them, or remove the hedge.*\n");
+    sections.push(
+      "*These curated memories hedge or flag uncertainty. Verify and source them, or remove the hedge.*\n",
+    );
   }
 
   // Unknown directories
@@ -680,9 +851,13 @@ export function formatLintReport(result: LintResult): string {
     sections.push(`### Unknown Directories (${result.unknownDirs.length})`);
     for (const u of result.unknownDirs) {
       const label = u.dir === "." ? "(memories root)" : `${u.dir}/`;
-      sections.push(`- **${label}** — ${u.files.length} file(s): ${u.files.map((f) => `\`${f}\``).join(", ")}`);
+      sections.push(
+        `- **${label}** — ${u.files.length} file(s): ${u.files.map((f) => `\`${f}\``).join(", ")}`,
+      );
     }
-    sections.push("*These files sit outside the documented layout (usually a direct-to-disk write that bypassed `memory_write`). Move them into a known directory.*\n");
+    sections.push(
+      "*These files sit outside the documented layout (usually a direct-to-disk write that bypassed `memory_write`). Move them into a known directory.*\n",
+    );
   }
 
   if (result.totalIssues === 0) {

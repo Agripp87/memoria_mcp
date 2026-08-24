@@ -232,7 +232,12 @@ export class IngestionPipeline {
         }
       } catch (err: any) {
         result.errors.push(`${event.source}/${event.id}: ${err.message}`);
-        result.outcomes.push({ id: event.id, source: event.source, outcome: "error", error: err.message });
+        result.outcomes.push({
+          id: event.id,
+          source: event.source,
+          outcome: "error",
+          error: err.message,
+        });
       }
     }
 
@@ -332,9 +337,7 @@ export class IngestionPipeline {
 
   // ── Stage 4: Consolidation Decision ────────────────────────
 
-  private async decideAction(
-    event: RawEvent
-  ): Promise<{ type: "create" | "skip" }> {
+  private async decideAction(event: RawEvent): Promise<{ type: "create" | "skip" }> {
     // If no search function, always create (write to today's daily log).
     if (!this.config.searchMemories) {
       return { type: "create" };
@@ -342,10 +345,7 @@ export class IngestionPipeline {
 
     try {
       // Search for similar existing memories
-      const similar = await this.config.searchMemories(
-        event.content.slice(0, 200),
-        3
-      );
+      const similar = await this.config.searchMemories(event.content.slice(0, 200), 3);
 
       if (similar.length === 0) {
         return { type: "create" };
@@ -408,8 +408,7 @@ export class IngestionPipeline {
 
     if (tier === "summarize" && event.content.length > SUMMARIZE_MAX_CHARS) {
       const truncated =
-        event.content.slice(0, SUMMARIZE_MAX_CHARS).trimEnd() +
-        " … [truncated for privacy]";
+        event.content.slice(0, SUMMARIZE_MAX_CHARS).trimEnd() + " … [truncated for privacy]";
       return { ...event, privacyTier: tier, content: truncated, meta };
     }
 
@@ -489,23 +488,16 @@ export class IngestionPipeline {
     });
 
     const sourceLabel = this.getSourceLabel(event.source);
-    const privacyNote =
-      event.privacyTier === "summarize" ? " *(summarized)*" : "";
+    const privacyNote = event.privacyTier === "summarize" ? " *(summarized)*" : "";
 
-    const lines = [
-      `## ${time} — ${sourceLabel}${privacyNote}`,
-      "",
-      event.content,
-      "",
-    ];
+    const lines = [`## ${time} — ${sourceLabel}${privacyNote}`, "", event.content, ""];
 
     // Add relevant metadata
     const metaLines: string[] = [];
     if (event.meta?.from) metaLines.push(`From: ${event.meta.from}`);
     if (event.meta?.chatName && event.meta.chatName !== "direct")
       metaLines.push(`Chat: ${event.meta.chatName}`);
-    if (event.meta?.calendarName)
-      metaLines.push(`Calendar: ${event.meta.calendarName}`);
+    if (event.meta?.calendarName) metaLines.push(`Calendar: ${event.meta.calendarName}`);
     if (event.meta?.location) metaLines.push(`Location: ${event.meta.location}`);
 
     if (metaLines.length > 0) {

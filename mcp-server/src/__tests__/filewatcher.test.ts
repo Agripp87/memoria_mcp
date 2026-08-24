@@ -23,10 +23,10 @@ afterEach(() => {
 describe("assertWatchPathAllowed", () => {
   it("blocks the collector key/credential store unconditionally", () => {
     expect(() =>
-      assertWatchPathAllowed(path.join(DATA_DIR, "collector.key"), { dataDir: DATA_DIR })
+      assertWatchPathAllowed(path.join(DATA_DIR, "collector.key"), { dataDir: DATA_DIR }),
     ).toThrow(/collector data directory/i);
     expect(() =>
-      assertWatchPathAllowed(path.join(DATA_DIR, "collector-config.enc"), { dataDir: DATA_DIR })
+      assertWatchPathAllowed(path.join(DATA_DIR, "collector-config.enc"), { dataDir: DATA_DIR }),
     ).toThrow(/collector data directory/i);
   });
 
@@ -35,24 +35,24 @@ describe("assertWatchPathAllowed", () => {
     // authenticated/prompt-injected caller could watch an arbitrary host file.
     delete process.env.MEMORIA_FILE_WATCHER_ROOTS;
     expect(() =>
-      assertWatchPathAllowed(path.join(ALLOWED, "fitbit.json"), { dataDir: DATA_DIR })
+      assertWatchPathAllowed(path.join(ALLOWED, "fitbit.json"), { dataDir: DATA_DIR }),
     ).toThrow(/disabled by default|allowlist/i);
   });
 
   it("enforces the allowlist when MEMORIA_FILE_WATCHER_ROOTS is set", () => {
     process.env.MEMORIA_FILE_WATCHER_ROOTS = ALLOWED;
     expect(() =>
-      assertWatchPathAllowed(path.join(ALLOWED, "fitbit.json"), { dataDir: DATA_DIR })
+      assertWatchPathAllowed(path.join(ALLOWED, "fitbit.json"), { dataDir: DATA_DIR }),
     ).not.toThrow();
     expect(() =>
-      assertWatchPathAllowed(path.join(OUTSIDE, "secret.txt"), { dataDir: DATA_DIR })
+      assertWatchPathAllowed(path.join(OUTSIDE, "secret.txt"), { dataDir: DATA_DIR }),
     ).toThrow(/allowlist/i);
   });
 
   it("denies all file_watcher paths when the allowlist is empty", () => {
     process.env.MEMORIA_FILE_WATCHER_ROOTS = "";
     expect(() =>
-      assertWatchPathAllowed(path.join(ALLOWED, "fitbit.json"), { dataDir: DATA_DIR })
+      assertWatchPathAllowed(path.join(ALLOWED, "fitbit.json"), { dataDir: DATA_DIR }),
     ).toThrow(/allowlist/i);
   });
 
@@ -61,7 +61,7 @@ describe("assertWatchPathAllowed", () => {
     // block must still win.
     process.env.MEMORIA_FILE_WATCHER_ROOTS = TMP;
     expect(() =>
-      assertWatchPathAllowed(path.join(DATA_DIR, "collector.key"), { dataDir: DATA_DIR })
+      assertWatchPathAllowed(path.join(DATA_DIR, "collector.key"), { dataDir: DATA_DIR }),
     ).toThrow(/collector data directory/i);
   });
 });

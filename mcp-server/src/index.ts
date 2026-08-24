@@ -25,7 +25,8 @@ const store = new MemoryStore(DB_PATH);
 const server = new McpServer({
   name: "memoria",
   version: "1.0.0",
-  description: "Persistent, plain-text memory for Claude. MANDATORY: Every session MUST produce at least one daily log entry via memory_daily. At session start, read today's daily log. Before session ends, write a session summary. A session without a daily log entry is a failed session.",
+  description:
+    "Persistent, plain-text memory for Claude. MANDATORY: Every session MUST produce at least one daily log entry via memory_daily. At session start, read today's daily log. Before session ends, write a session summary. A session without a daily log entry is a failed session.",
 });
 
 registerTools(server, store);
@@ -39,14 +40,12 @@ async function main(): Promise<void> {
   for (const f of files) {
     await reindexFile(store, f);
   }
-  process.stderr.write(
-    `Memoria MCP server started. Indexed ${files.length} files.\n`
-  );
+  process.stderr.write(`Memoria MCP server started. Indexed ${files.length} files.\n`);
 
   setupWatcher(store);
   setupPeriodicReindex(store);
   setupPeriodicOptimize(store); // no-op unless MEMORIA_AUTO_OPTIMIZE=true
-  setupPeriodicCompile(store);  // no-op unless MEMORIA_AUTO_COMPILE=true
+  setupPeriodicCompile(store); // no-op unless MEMORIA_AUTO_COMPILE=true
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

@@ -18,7 +18,9 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(ROOT, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("compile queue (P2)", () => {

@@ -85,8 +85,7 @@ export class TemporalFusion {
 
     // Sort by timestamp
     const sorted = [...events].sort(
-      (a, b) =>
-        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
     );
 
     // Build temporal clusters using sliding window
@@ -106,7 +105,7 @@ export class TemporalFusion {
       const agentIds = new Set(
         cluster
           .map((e) => (e.meta as Record<string, unknown> | undefined)?.agent_id)
-          .filter((v): v is string => typeof v === "string")
+          .filter((v): v is string => typeof v === "string"),
       );
       // Skip ONLY when EVERY event carries an agent_id and they are all equal
       // — that's one agent's result + metric recorded twice, not independent
@@ -115,7 +114,7 @@ export class TemporalFusion {
       // cross-source clusters (one agent event + a personal calendar/message
       // event with no id) — the exact fusion the feature exists to catch.
       const everyHasAgentId = cluster.every(
-        (e) => typeof (e.meta as Record<string, unknown> | undefined)?.agent_id === "string"
+        (e) => typeof (e.meta as Record<string, unknown> | undefined)?.agent_id === "string",
       );
       const allSameAgent = everyHasAgentId && agentIds.size === 1;
 
@@ -164,10 +163,7 @@ export class TemporalFusion {
 
   // ── Activity Construction ──────────────────────────────────
 
-  private buildActivity(
-    events: RawEvent[],
-    sources: Set<string>
-  ): FusedActivity {
+  private buildActivity(events: RawEvent[], sources: Set<string>): FusedActivity {
     const timestamps = events.map((e) => new Date(e.timestamp).getTime());
     const startTime = new Date(Math.min(...timestamps)).toISOString();
     const endTime = new Date(Math.max(...timestamps)).toISOString();
@@ -179,8 +175,7 @@ export class TemporalFusion {
     const description = this.buildDescription(events);
 
     // Calculate fused importance (boosted by multi-source confirmation)
-    const baseImportance =
-      events.reduce((sum, e) => sum + e.importanceEstimate, 0) / events.length;
+    const baseImportance = events.reduce((sum, e) => sum + e.importanceEstimate, 0) / events.length;
     const sourceBoost = Math.min(sources.size - 1, 3); // up to +3 for 4 sources
     const importance = Math.min(10, Math.round(baseImportance + sourceBoost));
 

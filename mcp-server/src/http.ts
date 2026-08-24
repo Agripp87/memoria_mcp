@@ -73,8 +73,8 @@ const CLEANUP_INTERVAL_MS = 60 * 1000; // 1 minute
 if (!API_KEY) {
   process.stderr.write(
     "FATAL: MEMORIA_API_KEY environment variable is required.\n" +
-    "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"\n" +
-    "Then set it in your .env file.\n"
+      "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('base64url'))\"\n" +
+      "Then set it in your .env file.\n",
   );
   process.exit(1);
 }
@@ -88,8 +88,7 @@ if (!API_KEY) {
 // Localhost-only runs (BIND_ALL unset) keep the old warn-and-continue.
 // Exported as a pure function so the gating is unit-testable.
 export function prodPostureFatal(env: Record<string, string | undefined>): string | null {
-  const prodPosture =
-    env.BIND_ALL === "true" && env.MEMORIA_INSECURE_ALLOW_FALLBACKS !== "true";
+  const prodPosture = env.BIND_ALL === "true" && env.MEMORIA_INSECURE_ALLOW_FALLBACKS !== "true";
   if (!prodPosture) return null;
   if (!env.MEMORIA_OAUTH_CLIENT_SECRET) {
     return (
@@ -133,7 +132,7 @@ export function prodPostureFatal(env: Record<string, string | undefined>): strin
 if (!process.env.MEMORIA_OAUTH_CLIENT_SECRET) {
   process.stderr.write(
     "Memoria: MEMORIA_OAUTH_CLIENT_SECRET unset — OAuth client secret is defaulting to MEMORIA_API_KEY. " +
-    "Set a distinct secret so rotating one credential doesn't silently rotate the other.\n"
+      "Set a distinct secret so rotating one credential doesn't silently rotate the other.\n",
   );
 }
 
@@ -145,7 +144,7 @@ function validateClientCredentials(clientId: unknown, clientSecret: unknown): bo
     clientId,
     clientSecret,
     OAUTH_CLIENT_ID!,
-    OAUTH_CLIENT_SECRET!
+    OAUTH_CLIENT_SECRET!,
   );
 }
 
@@ -180,7 +179,7 @@ try {
   // Common on cloud storage (GCS FUSE, etc.). Log so it's not silent.
   process.stderr.write(
     `Memoria: chmod 0600 on ${TOKEN_DB_PATH} failed (${(err as Error).message}). ` +
-    `On cloud storage, ensure bucket-level ACLs restrict access.\n`
+      `On cloud storage, ensure bucket-level ACLs restrict access.\n`,
   );
 }
 tokenDb.pragma("journal_mode = WAL");
@@ -205,10 +204,13 @@ tokenDb.prepare("DELETE FROM auth_codes WHERE expires_at < ?").run(Date.now());
 
 const tokenOps = {
   set(token: string, expiresAt: number) {
-    tokenDb.prepare("INSERT OR REPLACE INTO tokens (token, expires_at) VALUES (?, ?)").run(token, expiresAt);
+    tokenDb
+      .prepare("INSERT OR REPLACE INTO tokens (token, expires_at) VALUES (?, ?)")
+      .run(token, expiresAt);
   },
   get(token: string): number | undefined {
-    const row = tokenDb.prepare("SELECT expires_at FROM tokens WHERE token = ?").get(token) as { expires_at: number } | undefined;
+    const row = tokenDb.prepare("SELECT expires_at FROM tokens WHERE token = ?").get(token) as
+      { expires_at: number } | undefined;
     return row?.expires_at;
   },
   delete(token: string) {
@@ -221,9 +223,17 @@ const tokenOps = {
 
 const codeOps = {
   set(code: string, entry: AuthCodeEntry) {
-    tokenDb.prepare(
-      "INSERT OR REPLACE INTO auth_codes (code, redirect_uri, code_challenge, code_challenge_method, expires_at) VALUES (?, ?, ?, ?, ?)"
-    ).run(code, entry.redirectUri, entry.codeChallenge ?? null, entry.codeChallengeMethod ?? null, entry.expiresAt);
+    tokenDb
+      .prepare(
+        "INSERT OR REPLACE INTO auth_codes (code, redirect_uri, code_challenge, code_challenge_method, expires_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(
+        code,
+        entry.redirectUri,
+        entry.codeChallenge ?? null,
+        entry.codeChallengeMethod ?? null,
+        entry.expiresAt,
+      );
   },
   get(code: string): AuthCodeEntry | undefined {
     const row = tokenDb.prepare("SELECT * FROM auth_codes WHERE code = ?").get(code) as any;
@@ -256,7 +266,8 @@ function createServer(): McpServer {
   const server = new McpServer({
     name: "memoria",
     version: "1.0.0",
-    description: "Persistent, plain-text memory for Claude. MANDATORY: Every session MUST produce at least one daily log entry via memory_daily. At session start, read today's daily log. Before session ends, write a session summary. A session without a daily log entry is a failed session.",
+    description:
+      "Persistent, plain-text memory for Claude. MANDATORY: Every session MUST produce at least one daily log entry via memory_daily. At session start, read today's daily log. Before session ends, write a session summary. A session without a daily log entry is a failed session.",
   });
   registerTools(server, store);
   registerCollectorTools(server, store);
@@ -297,7 +308,7 @@ app.use(
     legacyHeaders: false,
     skip: (req) => req.path === "/health",
     message: { error: "Rate limit exceeded. Try again in a minute." },
-  })
+  }),
 );
 
 // Body parsing
@@ -313,7 +324,7 @@ app.use(
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Rate limit exceeded. Try again in a minute." },
-  })
+  }),
 );
 
 // Stricter limiter for credential / OAuth endpoints. These accept the client
@@ -384,16 +395,11 @@ app.post("/token", (req, res) => {
       res.status(400).json({ error: "invalid_grant", error_description: "code_verifier required" });
       return;
     }
-    const expected = createHash("sha256")
-      .update(codeVerifier)
-      .digest("base64url");
+    const expected = createHash("sha256").update(codeVerifier).digest("base64url");
     // Constant-time compare to avoid leaking the challenge via timing.
     const expectedBuf = Buffer.from(expected);
     const challengeBuf = Buffer.from(entry.codeChallenge);
-    if (
-      expectedBuf.length !== challengeBuf.length ||
-      !timingSafeEqual(expectedBuf, challengeBuf)
-    ) {
+    if (expectedBuf.length !== challengeBuf.length || !timingSafeEqual(expectedBuf, challengeBuf)) {
       res.status(400).json({ error: "invalid_grant", error_description: "code_verifier mismatch" });
       return;
     }
@@ -503,7 +509,9 @@ app.get("/authorize", (req, res) => {
 
   // Only deliver codes to allowlisted redirect targets (prevents code exfil).
   if (!isAllowedRedirect(redirectUri)) {
-    res.status(400).json({ error: "invalid_request", error_description: "redirect_uri not allowed" });
+    res
+      .status(400)
+      .json({ error: "invalid_request", error_description: "redirect_uri not allowed" });
     return;
   }
 
@@ -579,7 +587,10 @@ function issueDashboardSession(): string {
     let oldest: string | null = null;
     let oldestExp = Infinity;
     for (const [t, exp] of dashboardSessions) {
-      if (exp < oldestExp) { oldestExp = exp; oldest = t; }
+      if (exp < oldestExp) {
+        oldestExp = exp;
+        oldest = t;
+      }
     }
     if (oldest === null) break;
     dashboardSessions.delete(oldest);
@@ -594,7 +605,7 @@ function issueDashboardSession(): string {
 function authenticate(
   req: express.Request,
   res: express.Response,
-  next: express.NextFunction
+  next: express.NextFunction,
 ): void {
   const baseUrl = getBaseUrl(req);
   const resourceMetadataUrl = `${baseUrl}/.well-known/oauth-protected-resource`;
@@ -613,7 +624,8 @@ function authenticate(
       next();
       return;
     }
-    res.status(401)
+    res
+      .status(401)
       .set("WWW-Authenticate", `Bearer resource_metadata="${resourceMetadataUrl}"`)
       .json({
         jsonrpc: "2.0",
@@ -630,8 +642,12 @@ function authenticate(
   if (tokenExpiry !== undefined) {
     if (Date.now() > tokenExpiry) {
       tokenOps.delete(provided);
-      res.status(401)
-        .set("WWW-Authenticate", `Bearer error="invalid_token", resource_metadata="${resourceMetadataUrl}"`)
+      res
+        .status(401)
+        .set(
+          "WWW-Authenticate",
+          `Bearer error="invalid_token", resource_metadata="${resourceMetadataUrl}"`,
+        )
         .json({
           jsonrpc: "2.0",
           error: { code: -32001, message: "Unauthorized: token expired" },
@@ -646,9 +662,16 @@ function authenticate(
 
   // Check 2: Is it the static API key? (for direct Bearer auth)
   const expected = API_KEY!;
-  if (provided.length !== expected.length || !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) {
-    res.status(401)
-      .set("WWW-Authenticate", `Bearer error="invalid_token", resource_metadata="${resourceMetadataUrl}"`)
+  if (
+    provided.length !== expected.length ||
+    !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))
+  ) {
+    res
+      .status(401)
+      .set(
+        "WWW-Authenticate",
+        `Bearer error="invalid_token", resource_metadata="${resourceMetadataUrl}"`,
+      )
       .json({
         jsonrpc: "2.0",
         error: { code: -32001, message: "Unauthorized: invalid token" },
@@ -679,7 +702,7 @@ const cleanupTimer = setInterval(() => {
   for (const [sid, info] of Object.entries(sessions)) {
     if (now - info.lastActivity > SESSION_TTL_MS) {
       process.stderr.write(`Memoria: expiring idle session ${sid.slice(0, 8)}...\n`);
-      info.transport.close?.();
+      void info.transport.close?.();
       delete sessions[sid];
     }
   }
@@ -734,7 +757,7 @@ app.post("/mcp", async (req, res) => {
     }
 
     await transport.handleRequest(req, res, req.body);
-  } catch (error) {
+  } catch {
     if (!res.headersSent) {
       res.status(500).json({
         jsonrpc: "2.0",
@@ -792,19 +815,17 @@ app.post("/dashboard/login", authLimiter, express.json(), (req, res) => {
   const expected = API_KEY as string;
   const keyBuf = Buffer.from(key);
   const expectedBuf = Buffer.from(expected);
-  const ok =
-    keyBuf.length === expectedBuf.length && timingSafeEqual(keyBuf, expectedBuf);
+  const ok = keyBuf.length === expectedBuf.length && timingSafeEqual(keyBuf, expectedBuf);
   if (!ok) {
     res.status(401).json({ error: "invalid key" });
     return;
   }
   const token = issueDashboardSession();
-  const secure =
-    req.secure || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
+  const secure = req.secure || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
   res.setHeader(
     "Set-Cookie",
     `memoria_session=${token}; HttpOnly; SameSite=Strict; Path=/dashboard; ` +
-      `Max-Age=${Math.floor(DASHBOARD_SESSION_TTL_MS / 1000)}${secure}`
+      `Max-Age=${Math.floor(DASHBOARD_SESSION_TTL_MS / 1000)}${secure}`,
   );
   res.json({ ok: true });
 });
@@ -892,8 +913,9 @@ app.post("/ingest", writeLimiter, authenticate, async (req, res) => {
 
     process.stderr.write(
       `Memoria: /ingest received ${events.length} events, buffered ${buffered}, ` +
-      `written ${result.written}, deduped ${result.deduplicated}` +
-      (bufferDropped > 0 ? `, BUFFER FULL: ${bufferDropped} dropped` : "") + "\n"
+        `written ${result.written}, deduped ${result.deduplicated}` +
+        (bufferDropped > 0 ? `, BUFFER FULL: ${bufferDropped} dropped` : "") +
+        "\n",
     );
 
     // Warn the caller if buffer is near capacity
@@ -909,7 +931,9 @@ app.post("/ingest", writeLimiter, authenticate, async (req, res) => {
       rateLimited: result.rateLimited,
       bufferDropped,
       bufferUsage: { current: total, max: cap, nearCapacity },
-      ...(bufferDropped > 0 && { warning: `${bufferDropped} oldest events dropped due to buffer capacity` }),
+      ...(bufferDropped > 0 && {
+        warning: `${bufferDropped} oldest events dropped due to buffer capacity`,
+      }),
     });
   } catch (err: any) {
     process.stderr.write(`Memoria: /ingest error: ${err.message}\n`);
@@ -933,21 +957,18 @@ async function main(): Promise<void> {
   // to pick up memory files changed by `git pull` from other devices.
   setupPeriodicReindex(store);
   setupPeriodicOptimize(store); // no-op unless MEMORIA_AUTO_OPTIMIZE=true
-  setupPeriodicCompile(store);  // no-op unless MEMORIA_AUTO_COMPILE=true
+  setupPeriodicCompile(store); // no-op unless MEMORIA_AUTO_COMPILE=true
 
   // Bind to 0.0.0.0 when BIND_ALL=true (for cloud/Docker), else localhost only
   const host = process.env.BIND_ALL === "true" ? "0.0.0.0" : "127.0.0.1";
   app.listen(PORT, host, () => {
-    process.stderr.write(
-      `Memoria HTTP server listening on http://${host}:${PORT}/mcp\n`
-    );
+    process.stderr.write(`Memoria HTTP server listening on http://${host}:${PORT}/mcp\n`);
   });
 }
 
 // Only start the server when run as the entry point (node dist/http.js).
 // When imported (e.g. by integration tests), do NOT reindex/listen.
-const isEntryPoint =
-  !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isEntryPoint = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isEntryPoint) {
   main().catch((err) => {
     process.stderr.write(`Fatal error: ${err}\n`);

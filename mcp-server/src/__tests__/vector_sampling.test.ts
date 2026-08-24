@@ -17,10 +17,7 @@ let dbPath: string;
 beforeAll(async () => {
   ({ MemoryStore, samplePhase, selectEvenSample } = await import("../store.js"));
   ({ chunkMarkdown } = await import("../chunker.js"));
-  dbPath = path.join(
-    fs.mkdtempSync(path.join(os.tmpdir(), "memoria-sample-")),
-    "sample.sqlite"
-  );
+  dbPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "memoria-sample-")), "sample.sqlite");
   store = new MemoryStore(dbPath);
   // 15 one-chunk files against a cap of 10 → the store is over the cap.
   for (let i = 0; i < 15; i++) {
@@ -30,7 +27,9 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  try { store?.close(); } catch {}
+  try {
+    store?.close();
+  } catch {}
 });
 
 describe("over-cap vector sampling", () => {
@@ -96,7 +95,7 @@ describe("samplePhase", () => {
     // queries see different residues; any given row is reachable.
     const total = 5000;
     const phases = new Set(
-      ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"].map((q) => samplePhase(q, total))
+      ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"].map((q) => samplePhase(q, total)),
     );
     expect(phases.size).toBeGreaterThan(1);
   });

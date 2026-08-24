@@ -10,18 +10,28 @@ let store: MemoryStore;
 let dbPath: string;
 
 beforeEach(() => {
-  dbPath = path.join(os.tmpdir(), `memoria-opt-${Date.now()}-${Math.random().toString(36).slice(2)}.sqlite`);
+  dbPath = path.join(
+    os.tmpdir(),
+    `memoria-opt-${Date.now()}-${Math.random().toString(36).slice(2)}.sqlite`,
+  );
   store = new MemoryStore(dbPath);
 });
 
 afterEach(() => {
   store.close();
-  try { fs.unlinkSync(dbPath); } catch {}
-  try { fs.unlinkSync(dbPath + "-wal"); } catch {}
-  try { fs.unlinkSync(dbPath + "-shm"); } catch {}
+  try {
+    fs.unlinkSync(dbPath);
+  } catch {}
+  try {
+    fs.unlinkSync(dbPath + "-wal");
+  } catch {}
+  try {
+    fs.unlinkSync(dbPath + "-shm");
+  } catch {}
 });
 
-const sampleContent = "---\nname: Opt Test\nimportance: 6\n---\nOptimization test content about memory management.";
+const sampleContent =
+  "---\nname: Opt Test\nimportance: 6\n---\nOptimization test content about memory management.";
 
 describe("runOptimize", () => {
   it("decay action returns result with affected count", async () => {

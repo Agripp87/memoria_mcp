@@ -64,7 +64,7 @@ export class EventBuffer {
     options?: {
       maxEvents?: number;
       retentionHours?: number;
-    }
+    },
   ) {
     this.dbPath = path.join(dataDir, "event-buffer.sqlite");
     this.deadLetterPath = path.join(dataDir, ".dead-letter.jsonl");
@@ -72,7 +72,7 @@ export class EventBuffer {
     if (requestedMax < 100) {
       process.stderr.write(
         `Memoria buffer: maxEvents=${requestedMax} is too low; using minimum 100. ` +
-        `A small buffer will drop events constantly.\n`
+          `A small buffer will drop events constantly.\n`,
       );
     }
     this.maxEvents = Math.max(100, requestedMax);
@@ -91,7 +91,7 @@ export class EventBuffer {
     } catch (err) {
       process.stderr.write(
         `Memoria buffer: chmod 0600 on ${this.dbPath} failed (${(err as Error).message}). ` +
-        `Rely on bucket ACLs for cloud storage.\n`
+          `Rely on bucket ACLs for cloud storage.\n`,
       );
     }
 
@@ -147,15 +147,9 @@ export class EventBuffer {
       .prepare(
         `INSERT OR IGNORE INTO events
           (source, event_id, encrypted_data, importance, privacy_tier)
-        VALUES (?, ?, ?, ?, ?)`
+        VALUES (?, ?, ?, ?, ?)`,
       )
-      .run(
-        event.source,
-        event.id,
-        encrypted,
-        event.importanceEstimate,
-        event.privacyTier
-      );
+      .run(event.source, event.id, encrypted, event.importanceEstimate, event.privacyTier);
 
     // Enforce max buffer size
     this.enforceCapacity();
@@ -171,7 +165,7 @@ export class EventBuffer {
     const insert = this.db.prepare(
       `INSERT OR IGNORE INTO events
         (source, event_id, encrypted_data, importance, privacy_tier)
-      VALUES (?, ?, ?, ?, ?)`
+      VALUES (?, ?, ?, ?, ?)`,
     );
 
     let inserted = 0;
@@ -186,7 +180,7 @@ export class EventBuffer {
           event.id,
           encrypted,
           event.importanceEstimate,
-          event.privacyTier
+          event.privacyTier,
         );
 
         if (result.changes > 0) inserted++;
@@ -214,7 +208,7 @@ export class EventBuffer {
         FROM events
         WHERE synced = 0
         ORDER BY importance DESC, buffered_at ASC
-        LIMIT ?`
+        LIMIT ?`,
       )
       .all(batchSize) as any[];
 
@@ -248,7 +242,7 @@ export class EventBuffer {
        FROM events
        WHERE synced = 0 AND source = ?
        ORDER BY importance DESC, buffered_at ASC
-       LIMIT ?`
+       LIMIT ?`,
     );
     for (const { source } of sources) {
       for (const row of perSourceStmt.all(source, perSource) as any[]) {
@@ -266,7 +260,7 @@ export class EventBuffer {
                   privacy_tier, buffered_at, synced, synced_at
            FROM events WHERE synced = 0
            ORDER BY importance DESC, buffered_at ASC
-           LIMIT ?`
+           LIMIT ?`,
         )
         .all(batchSize) as any[];
       for (const row of filler) {
@@ -284,10 +278,7 @@ export class EventBuffer {
   /**
    * Fetch unsynced events for a specific source.
    */
-  fetchUnsyncedBySource(
-    source: string,
-    batchSize: number = DEFAULT_BATCH_SIZE
-  ): BufferedEvent[] {
+  fetchUnsyncedBySource(source: string, batchSize: number = DEFAULT_BATCH_SIZE): BufferedEvent[] {
     if (!this.db) return [];
 
     const rows = this.db
@@ -297,7 +288,7 @@ export class EventBuffer {
         FROM events
         WHERE synced = 0 AND source = ?
         ORDER BY importance DESC, buffered_at ASC
-        LIMIT ?`
+        LIMIT ?`,
       )
       .all(source, batchSize) as any[];
 
@@ -321,7 +312,7 @@ export class EventBuffer {
         });
       } catch (err) {
         process.stderr.write(
-          `Memoria buffer: skipping undecryptable event row ${row.rowid}: ${(err as Error).message}\n`
+          `Memoria buffer: skipping undecryptable event row ${row.rowid}: ${(err as Error).message}\n`,
         );
       }
     }
@@ -337,7 +328,7 @@ export class EventBuffer {
     if (!this.db || rowids.length === 0) return;
 
     const update = this.db.prepare(
-      `UPDATE events SET synced = 1, synced_at = datetime('now') WHERE rowid = ?`
+      `UPDATE events SET synced = 1, synced_at = datetime('now') WHERE rowid = ?`,
     );
 
     const tx = this.db.transaction(() => {
@@ -359,19 +350,17 @@ export class EventBuffer {
    */
   recordFailedAttempts(
     rowids: number[],
-    maxAttempts: number = 3
+    maxAttempts: number = 3,
   ): { retried: number; deadLettered: number } {
     if (!this.db || rowids.length === 0) return { retried: 0, deadLettered: 0 };
 
-    const bump = this.db.prepare(
-      `UPDATE events SET attempts = attempts + 1 WHERE rowid = ?`
-    );
+    const bump = this.db.prepare(`UPDATE events SET attempts = attempts + 1 WHERE rowid = ?`);
     const read = this.db.prepare(
       `SELECT rowid, source, event_id, importance, attempts, buffered_at
-       FROM events WHERE rowid = ?`
+       FROM events WHERE rowid = ?`,
     );
     const kill = this.db.prepare(
-      `UPDATE events SET synced = 1, synced_at = datetime('now') WHERE rowid = ?`
+      `UPDATE events SET synced = 1, synced_at = datetime('now') WHERE rowid = ?`,
     );
 
     const dead: Array<Record<string, unknown>> = [];
@@ -379,7 +368,14 @@ export class EventBuffer {
       for (const rowid of rowids) {
         bump.run(rowid);
         const row = read.get(rowid) as
-          | { rowid: number; source: string; event_id: string; importance: number; attempts: number; buffered_at: string }
+          | {
+              rowid: number;
+              source: string;
+              event_id: string;
+              importance: number;
+              attempts: number;
+              buffered_at: string;
+            }
           | undefined;
         if (row && row.attempts >= maxAttempts) {
           kill.run(rowid);
@@ -402,17 +398,17 @@ export class EventBuffer {
         fs.appendFileSync(
           this.deadLetterPath,
           dead.map((d) => JSON.stringify(d)).join("\n") + "\n",
-          "utf-8"
+          "utf-8",
         );
       } catch (err) {
         process.stderr.write(
-          `Memoria buffer: dead-letter sidecar write failed (non-fatal): ${(err as Error).message}\n`
+          `Memoria buffer: dead-letter sidecar write failed (non-fatal): ${(err as Error).message}\n`,
         );
       }
       process.stderr.write(
         `Memoria buffer: DEAD-LETTERED ${dead.length} event(s) after ${maxAttempts} failed ingest attempts ` +
           `(cumulative: ${this.deadLettered}). Metadata in ${path.basename(this.deadLetterPath)}; ` +
-          `the events themselves were not written to memory.\n`
+          `the events themselves were not written to memory.\n`,
       );
     }
 
@@ -422,9 +418,9 @@ export class EventBuffer {
   /** Count of unsynced events — cheap accessor for backpressure decisions. */
   unsyncedCount(): number {
     if (!this.db) return 0;
-    const row = this.db
-      .prepare("SELECT COUNT(*) as cnt FROM events WHERE synced = 0")
-      .get() as { cnt: number };
+    const row = this.db.prepare("SELECT COUNT(*) as cnt FROM events WHERE synced = 0").get() as {
+      cnt: number;
+    };
     return row.cnt;
   }
 
@@ -442,7 +438,7 @@ export class EventBuffer {
     const result = this.db
       .prepare(
         `DELETE FROM events
-        WHERE synced = 1 AND synced_at < ?`
+        WHERE synced = 1 AND synced_at < ?`,
       )
       .run(cutoff);
 
@@ -459,9 +455,7 @@ export class EventBuffer {
    * Returns the number of events dropped (0 if under capacity).
    */
   private enforceCapacity(): number {
-    const count = this.db
-      .prepare("SELECT COUNT(*) as cnt FROM events")
-      .get() as { cnt: number };
+    const count = this.db.prepare("SELECT COUNT(*) as cnt FROM events").get() as { cnt: number };
 
     if (count.cnt <= this.maxEvents) return 0;
 
@@ -473,7 +467,9 @@ export class EventBuffer {
     // full of un-ingested events because the sync/ingestion path has stalled.
     // That is real data loss, so account for it separately and loudly.
     const syncedCount = (
-      this.db.prepare("SELECT COUNT(*) as cnt FROM events WHERE synced = 1").get() as { cnt: number }
+      this.db.prepare("SELECT COUNT(*) as cnt FROM events WHERE synced = 1").get() as {
+        cnt: number;
+      }
     ).cnt;
     const unsyncedToDrop = Math.max(0, excess - syncedCount);
 
@@ -484,13 +480,13 @@ export class EventBuffer {
           SELECT rowid FROM events
           ORDER BY synced DESC, importance ASC, buffered_at ASC
           LIMIT ?
-        )`
+        )`,
       )
       .run(excess);
 
     if (result.changes > 0) {
       process.stderr.write(
-        `Memoria buffer: dropped ${result.changes} oldest event(s) to stay under capacity (${this.maxEvents})\n`
+        `Memoria buffer: dropped ${result.changes} oldest event(s) to stay under capacity (${this.maxEvents})\n`,
       );
     }
     if (unsyncedToDrop > 0) {
@@ -499,7 +495,7 @@ export class EventBuffer {
         `Memoria buffer: WARNING — dropped ${unsyncedToDrop} UNSYNCED event(s) at capacity; ` +
           `ingestion is not keeping up and these personal events were lost before reaching ` +
           `core memory. Cumulative unsynced dropped: ${this.droppedUnsynced}. ` +
-          `Check the ingestion pipeline / increase capacity.\n`
+          `Check the ingestion pipeline / increase capacity.\n`,
       );
     }
     return result.changes;
@@ -532,18 +528,14 @@ export class EventBuffer {
       };
     }
 
-    const total = this.db
-      .prepare("SELECT COUNT(*) as cnt FROM events")
-      .get() as { cnt: number };
+    const total = this.db.prepare("SELECT COUNT(*) as cnt FROM events").get() as { cnt: number };
 
     const unsynced = this.db
       .prepare("SELECT COUNT(*) as cnt FROM events WHERE synced = 0")
       .get() as { cnt: number };
 
     const oldest = this.db
-      .prepare(
-        "SELECT buffered_at FROM events WHERE synced = 0 ORDER BY buffered_at ASC LIMIT 1"
-      )
+      .prepare("SELECT buffered_at FROM events WHERE synced = 0 ORDER BY buffered_at ASC LIMIT 1")
       .get() as { buffered_at: string } | undefined;
 
     const newest = this.db

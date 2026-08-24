@@ -1,0 +1,45 @@
+name: Feature request
+description: Propose a change or an addition
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Memoria is maintained by one person in spare time. A proposal that explains the *problem* — and why the existing tools do not solve it — is far more likely to land than a proposal that only describes a solution.
+
+        Please check the [Roadmap](https://github.com/Agripp87/memoria#roadmap) first; the near-term list is already planned.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that Memoria makes hard or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: A sketch is fine. If it adds a dependency, changes the memory file format, alters search scoring, or touches auth, say so explicitly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including "I tried X and it did not work because Y".
+    validations:
+      required: false
+
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you be willing to implement it?
+      options:
+        - "Yes, if the direction is agreed"
+        - "Maybe, with guidance"
+        - "No, just proposing"
+    validations:
+      required: true

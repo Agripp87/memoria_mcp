@@ -28,14 +28,16 @@ beforeAll(async () => {
   fs.mkdirSync(path.join(ROOT, "tok"), { recursive: true });
   fs.writeFileSync(
     path.join(ROOT, "memories", "user", "demo.md"),
-    "---\nname: Demo\ntype: user\nimportance: 7\n---\n\n# Demo\nHello **world** and [[Demo]].\n"
+    "---\nname: Demo\ntype: user\nimportance: 7\n---\n\n# Demo\nHello **world** and [[Demo]].\n",
   );
   request = (await import("supertest")).default;
   app = (await import("../http.js")).app;
 });
 
 afterAll(() => {
-  try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(ROOT, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("http app — smoke + routing", () => {
@@ -138,10 +140,11 @@ describe("http app — OAuth token endpoint", () => {
   });
 
   it("accepts client_credentials with the configured OAuth secret", async () => {
-    const r = await request(app)
-      .post("/token")
-      .type("form")
-      .send({ grant_type: "client_credentials", client_id: "memoria", client_secret: OAUTH_SECRET });
+    const r = await request(app).post("/token").type("form").send({
+      grant_type: "client_credentials",
+      client_id: "memoria",
+      client_secret: OAUTH_SECRET,
+    });
     expect(r.status).toBe(200);
     expect(r.body.access_token).toBeTruthy();
     expect(r.body.token_type).toBe("Bearer");
@@ -227,20 +230,25 @@ describe("http app — OAuth authorization_code + PKCE flow", () => {
     expect(token).toBeTruthy();
 
     // The issued token must work as a Bearer credential on the gated API.
-    const gated = await request(app).get("/dashboard/api/stats").set("Authorization", `Bearer ${token}`);
+    const gated = await request(app)
+      .get("/dashboard/api/stats")
+      .set("Authorization", `Bearer ${token}`);
     expect(gated.status).toBe(200);
   });
 
   it("rejects the code exchange when the PKCE verifier is wrong -> 400", async () => {
     const code = await getCode();
-    const r = await request(app).post("/token").type("form").send({
-      grant_type: "authorization_code",
-      code,
-      code_verifier: randomBytes(32).toString("base64url"), // not the real verifier
-      redirect_uri: REDIRECT,
-      client_id: "memoria",
-      client_secret: OAUTH_SECRET,
-    });
+    const r = await request(app)
+      .post("/token")
+      .type("form")
+      .send({
+        grant_type: "authorization_code",
+        code,
+        code_verifier: randomBytes(32).toString("base64url"), // not the real verifier
+        redirect_uri: REDIRECT,
+        client_id: "memoria",
+        client_secret: OAUTH_SECRET,
+      });
     expect(r.status).toBe(400);
     expect(r.body.error).toBe("invalid_grant");
   });
@@ -294,7 +302,7 @@ describe("prod-posture fail-closed gating (C2/C8)", () => {
         MEMORIA_OAUTH_CLIENT_SECRET: "s",
         MEMORIA_ENCRYPTION_KEY: "x".repeat(64),
         MEMORIA_PUBLIC_URL: "https://memoria.example.run.app",
-      })
+      }),
     ).toBeNull();
   });
 
@@ -304,7 +312,7 @@ describe("prod-posture fail-closed gating (C2/C8)", () => {
 
   it("the explicit escape hatch disables the gate", () => {
     expect(
-      prodPostureFatal({ BIND_ALL: "true", MEMORIA_INSECURE_ALLOW_FALLBACKS: "true" })
+      prodPostureFatal({ BIND_ALL: "true", MEMORIA_INSECURE_ALLOW_FALLBACKS: "true" }),
     ).toBeNull();
   });
 });
@@ -361,7 +369,9 @@ describe("dashboard httpOnly cookie session (C6)", () => {
   it("trims surrounding whitespace on the submitted key (terminal copy-paste)", async () => {
     // The secret is stored without a trailing newline, so terminal copies
     // routinely pick up a stray newline/space. Login must tolerate that.
-    const r = await request(app).post("/dashboard/login").send({ key: `  ${KEY}\n` });
+    const r = await request(app)
+      .post("/dashboard/login")
+      .send({ key: `  ${KEY}\n` });
     expect(r.status).toBe(200);
     expect((r.headers["set-cookie"] || [])[0] || "").toContain("memoria_session=");
   });

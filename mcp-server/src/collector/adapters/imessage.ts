@@ -6,12 +6,7 @@
 
 import * as path from "node:path";
 import * as os from "node:os";
-import type {
-  SourceAdapter,
-  AdapterInfo,
-  AdapterConfig,
-  RawEvent,
-} from "./base.js";
+import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
 import { estimateImportance, classifyPrivacy } from "./base.js";
 
 export class IMessageAdapter implements SourceAdapter {
@@ -42,10 +37,7 @@ export class IMessageAdapter implements SourceAdapter {
   async init(config: AdapterConfig): Promise<void> {
     this.config = config;
 
-    const dbPath = path.join(
-      os.homedir(),
-      "Library/Messages/chat.db"
-    );
+    const dbPath = path.join(os.homedir(), "Library/Messages/chat.db");
 
     try {
       // Dynamic import — better-sqlite3 is already a project dependency
@@ -55,16 +47,16 @@ export class IMessageAdapter implements SourceAdapter {
 
       // Get the latest ROWID as initial checkpoint (don't replay history)
       if (this.checkpoint === 0) {
-        const row = this.db
-          .prepare("SELECT MAX(ROWID) as maxid FROM message")
-          .get() as { maxid: number } | undefined;
+        const row = this.db.prepare("SELECT MAX(ROWID) as maxid FROM message").get() as
+          { maxid: number } | undefined;
         this.checkpoint = row?.maxid ?? 0;
       }
     } catch (err: any) {
       if (err.code === "SQLITE_CANTOPEN" || err.message?.includes("unable to open")) {
         throw new Error(
           "Cannot open iMessage database. Grant Full Disk Access to this app in " +
-            "System Preferences > Privacy & Security > Full Disk Access."
+            "System Preferences > Privacy & Security > Full Disk Access.",
+          { cause: err },
         );
       }
       throw err;
@@ -91,7 +83,7 @@ export class IMessageAdapter implements SourceAdapter {
         LEFT JOIN chat c ON cmj.chat_id = c.ROWID
         WHERE m.ROWID > ?
         ORDER BY m.ROWID ASC
-        LIMIT 100`
+        LIMIT 100`,
       )
       .all(this.checkpoint) as any[];
 
@@ -108,8 +100,7 @@ export class IMessageAdapter implements SourceAdapter {
       // Apply contact filter
       if (contactFilter.length > 0) {
         const matchesFilter = contactFilter.some(
-          (f: string) =>
-            row.handle_id?.includes(f) || row.chat_name?.includes(f)
+          (f: string) => row.handle_id?.includes(f) || row.chat_name?.includes(f),
         );
         if (!matchesFilter) continue;
       }

@@ -29,8 +29,12 @@ afterEach(() => {
 });
 
 afterAll(() => {
-  try { store?.close(); } catch {}
-  try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {}
+  try {
+    store?.close();
+  } catch {}
+  try {
+    fs.rmSync(ROOT, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("setupPeriodicOptimize gating (I21)", () => {

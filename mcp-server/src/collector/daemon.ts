@@ -63,11 +63,7 @@ export class CollectorDaemon {
   private lastBackpressureLog = 0;
   private onIngest?: (events: RawEvent[]) => Promise<IngestionResult | void>;
 
-  constructor(
-    registry: SourceRegistry,
-    buffer: EventBuffer,
-    config?: DaemonConfig
-  ) {
+  constructor(registry: SourceRegistry, buffer: EventBuffer, config?: DaemonConfig) {
     this.registry = registry;
     this.buffer = buffer;
     this.config = {
@@ -79,7 +75,10 @@ export class CollectorDaemon {
         Math.max(1, parseInt(process.env.MEMORIA_INGEST_MAX_ATTEMPTS || "3", 10) || 3),
       backpressureThreshold:
         config?.backpressureThreshold ??
-        Math.min(0.99, Math.max(0.1, parseFloat(process.env.MEMORIA_BACKPRESSURE_THRESHOLD || "0.8") || 0.8)),
+        Math.min(
+          0.99,
+          Math.max(0.1, parseFloat(process.env.MEMORIA_BACKPRESSURE_THRESHOLD || "0.8") || 0.8),
+        ),
     };
   }
 
@@ -101,8 +100,7 @@ export class CollectorDaemon {
    */
   backpressured(): boolean {
     return (
-      this.buffer.unsyncedCount() >=
-      this.buffer.maxCapacity() * this.config.backpressureThreshold
+      this.buffer.unsyncedCount() >= this.buffer.maxCapacity() * this.config.backpressureThreshold
     );
   }
 
@@ -121,20 +119,12 @@ export class CollectorDaemon {
     this.syncPollTimers();
 
     // Ingestion loop — pull from buffer and send to core
-    this.ingestionTimer = setInterval(
-      () => this.runIngestion(),
-      this.config.ingestionIntervalMs
-    );
+    this.ingestionTimer = setInterval(() => this.runIngestion(), this.config.ingestionIntervalMs);
 
     // Periodic buffer cleanup
-    this.cleanupTimer = setInterval(
-      () => this.runCleanup(),
-      CLEANUP_INTERVAL_MS
-    );
+    this.cleanupTimer = setInterval(() => this.runCleanup(), CLEANUP_INTERVAL_MS);
 
-    process.stderr.write(
-      `Memoria: daemon started with ${this.pollTimers.size} active source(s)\n`
-    );
+    process.stderr.write(`Memoria: daemon started with ${this.pollTimers.size} active source(s)\n`);
   }
 
   /**
@@ -212,8 +202,10 @@ export class CollectorDaemon {
       // Start the poll loop
       pt.timer = setInterval(() => this.pollSource(sourceId), intervalMs);
 
-      // Run first poll immediately
-      this.pollSource(sourceId);
+      // Run first poll immediately. Fire-and-forget on purpose: pollSource
+      // handles its own failures (error counter + exponential backoff), so it
+      // never rejects, and start() must not block on a slow first poll.
+      void this.pollSource(sourceId);
 
       this.pollTimers.set(sourceId, pt);
     }
@@ -242,7 +234,6 @@ export class CollectorDaemon {
   }
 
   private async pollSourceInner(sourceId: string, pt: PollTimer): Promise<void> {
-
     // Backpressure: when the unsynced backlog nears buffer capacity, pause
     // polling so ingestion can catch up — collecting more right now would
     // evict UNSYNCED (personal) events at capacity, which is permanent loss.
@@ -254,7 +245,7 @@ export class CollectorDaemon {
         process.stderr.write(
           `Memoria: BACKPRESSURE — pausing source polling; unsynced backlog ` +
             `(${this.buffer.unsyncedCount()}) is at ≥${Math.round(this.config.backpressureThreshold * 100)}% ` +
-            `of buffer capacity (${this.buffer.maxCapacity()}). Ingestion must drain before collection resumes.\n`
+            `of buffer capacity (${this.buffer.maxCapacity()}). Ingestion must drain before collection resumes.\n`,
         );
       }
       return;
@@ -275,9 +266,7 @@ export class CollectorDaemon {
 
         if (inserted > 0) {
           const dropMsg = dropped > 0 ? ` (capacity hit: ${dropped} oldest dropped)` : "";
-          process.stderr.write(
-            `Memoria: ${sourceId} collected ${inserted} event(s)${dropMsg}\n`
-          );
+          process.stderr.write(`Memoria: ${sourceId} collected ${inserted} event(s)${dropMsg}\n`);
         }
       }
 
@@ -291,14 +280,14 @@ export class CollectorDaemon {
       // Exponential backoff with jitter
       const backoff = Math.min(
         BASE_BACKOFF_MS * Math.pow(2, pt.consecutiveErrors - 1),
-        MAX_BACKOFF_MS
+        MAX_BACKOFF_MS,
       );
       const jitter = Math.random() * backoff * 0.2;
       pt.backoffUntil = Date.now() + backoff + jitter;
 
       process.stderr.write(
         `Memoria: ${sourceId} poll error (attempt ${pt.consecutiveErrors}, ` +
-          `backoff ${Math.round(backoff / 1000)}s): ${err.message}\n`
+          `backoff ${Math.round(backoff / 1000)}s): ${err.message}\n`,
       );
     }
   }
@@ -362,7 +351,7 @@ export class CollectorDaemon {
       if (errored.length > 0) {
         deadLettered = this.buffer.recordFailedAttempts(
           errored,
-          this.config.maxIngestAttempts
+          this.config.maxIngestAttempts,
         ).deadLettered;
       }
 
@@ -371,12 +360,10 @@ export class CollectorDaemon {
           (deferred > 0 ? `, ${deferred} deferred (rate limit)` : "") +
           (errored.length > 0 ? `, ${errored.length} errored (will retry)` : "") +
           (deadLettered > 0 ? `, ${deadLettered} dead-lettered` : "") +
-          `\n`
+          `\n`,
       );
     } catch (err: any) {
-      process.stderr.write(
-        `Memoria: ingestion error: ${err.message}\n`
-      );
+      process.stderr.write(`Memoria: ingestion error: ${err.message}\n`);
       // Events remain unsynced — will retry next cycle
     }
   }
@@ -387,14 +374,10 @@ export class CollectorDaemon {
     try {
       const deleted = this.buffer.cleanup();
       if (deleted > 0) {
-        process.stderr.write(
-          `Memoria: buffer cleanup removed ${deleted} synced event(s)\n`
-        );
+        process.stderr.write(`Memoria: buffer cleanup removed ${deleted} synced event(s)\n`);
       }
     } catch (err: any) {
-      process.stderr.write(
-        `Memoria: buffer cleanup error: ${err.message}\n`
-      );
+      process.stderr.write(`Memoria: buffer cleanup error: ${err.message}\n`);
     }
   }
 

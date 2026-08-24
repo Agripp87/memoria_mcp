@@ -54,7 +54,7 @@ function detectProvider(): Provider {
       return minilmInstalled() ? "minilm" : "local";
     default:
       process.stderr.write(
-        `Memoria: unknown MEMORIA_EMBEDDINGS="${forced}", falling back to auto detection\n`
+        `Memoria: unknown MEMORIA_EMBEDDINGS="${forced}", falling back to auto detection\n`,
       );
       if (hasOpenAI) return "openai";
       return minilmInstalled() ? "minilm" : "local";
@@ -71,13 +71,13 @@ switch (provider) {
     break;
   case "minilm":
     process.stderr.write(
-      `Memoria: using local ${MINILM_MODEL} (384-dim). First run downloads the model (~23MB).\n`
+      `Memoria: using local ${MINILM_MODEL} (384-dim). First run downloads the model (~23MB).\n`,
     );
     break;
   case "local":
     process.stderr.write(
       "Memoria: using local n-gram hash embeddings (384-dim, lexical approximation). " +
-        "Install @xenova/transformers or set OPENAI_API_KEY for semantic search.\n"
+        "Install @xenova/transformers or set OPENAI_API_KEY for semantic search.\n",
     );
     break;
 }
@@ -102,7 +102,9 @@ async function openaiEmbed(texts: string[]): Promise<Float32Array[]> {
     const body = await res.text();
     // Log full error to stderr but throw sanitized message (no API key leaks)
     process.stderr.write(`Memoria: OpenAI API error ${res.status}: ${body}\n`);
-    throw new Error(`OpenAI embedding API error (status ${res.status}). Check server logs for details.`);
+    throw new Error(
+      `OpenAI embedding API error (status ${res.status}). Check server logs for details.`,
+    );
   }
 
   const json = (await res.json()) as {
@@ -117,7 +119,9 @@ async function openaiEmbed(texts: string[]): Promise<Float32Array[]> {
 // ─── Local transformer embeddings (all-MiniLM-L6-v2) ────────
 
 // Lazy singleton — the model (~23MB) is loaded on first use and reused.
-let extractorPromise: Promise<(input: string[], opts: object) => Promise<{ data: Float32Array; dims: number[] }>> | null = null;
+let extractorPromise: Promise<
+  (input: string[], opts: object) => Promise<{ data: Float32Array; dims: number[] }>
+> | null = null;
 
 // Hand-written structural type for the slice of @xenova/transformers we use.
 // The package is an OPTIONAL dependency, so the build must not depend on its
@@ -125,11 +129,7 @@ let extractorPromise: Promise<(input: string[], opts: object) => Promise<{ data:
 // approach) makes tsc resolve the package at compile time and hard-fails any
 // install where the optional dep was skipped (offline, --omit=optional).
 interface TransformersModule {
-  pipeline: (
-    task: string,
-    model?: string,
-    opts?: Record<string, unknown>
-  ) => Promise<unknown>;
+  pipeline: (task: string, model?: string, opts?: Record<string, unknown>) => Promise<unknown>;
   env: { cacheDir?: string; allowRemoteModels?: boolean };
 }
 
@@ -147,7 +147,8 @@ function loadExtractor() {
       } catch (err) {
         throw new Error(
           `MEMORIA_EMBEDDINGS=minilm but @xenova/transformers is not installed ` +
-            `(${(err as Error).message}). Run \`npm install\` or set MEMORIA_EMBEDDINGS=hash.`
+            `(${(err as Error).message}). Run \`npm install\` or set MEMORIA_EMBEDDINGS=hash.`,
+          { cause: err },
         );
       }
       const { pipeline, env } = mod as TransformersModule;
@@ -163,7 +164,7 @@ function loadExtractor() {
         process.stderr.write(`Memoria: loaded ${MINILM_MODEL}\n`);
         return extractor as unknown as (
           input: string[],
-          opts: object
+          opts: object,
         ) => Promise<{ data: Float32Array; dims: number[] }>;
       } catch (err) {
         // Fail loudly: the store committed to the "minilm" vector space, so we
@@ -173,7 +174,8 @@ function loadExtractor() {
         throw new Error(
           `Failed to load local embedding model ${MINILM_MODEL}: ${(err as Error).message}. ` +
             `Ensure network access for the one-time download, pre-bake the model into the image, ` +
-            `or set MEMORIA_EMBEDDINGS=hash to use the lexical fallback.`
+            `or set MEMORIA_EMBEDDINGS=hash to use the lexical fallback.`,
+          { cause: err },
         );
       }
     })();
@@ -295,7 +297,7 @@ export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
       warnedDimMismatch = true;
       process.stderr.write(
         `Memoria: embedding dimension mismatch (${a.length} vs ${b.length}) — ` +
-          `treating as similarity 0. Run memory_index to rebuild the affected rows.\n`
+          `treating as similarity 0. Run memory_index to rebuild the affected rows.\n`,
       );
     }
     return 0;

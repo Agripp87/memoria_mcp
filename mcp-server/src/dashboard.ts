@@ -53,9 +53,7 @@ const SCAN_TTL_MS = 15_000;
 function sendServerError(res: Response, err: unknown): void {
   const correlationId = randomUUID();
   const message = err instanceof Error ? err.message : String(err);
-  process.stderr.write(
-    `Memoria dashboard error [${correlationId}]: ${message}\n`
-  );
+  process.stderr.write(`Memoria dashboard error [${correlationId}]: ${message}\n`);
   res.status(500).json({ error: "Internal server error", correlationId });
 }
 
@@ -111,7 +109,10 @@ function scanGraph(): ScanGraph {
       const t = resolveLink(w, entries);
       if (t) targets.set(t, byFile.get(t)?.name || w);
     }
-    outgoing.set(e.file, Array.from(targets, ([file, name]) => ({ file, name })));
+    outgoing.set(
+      e.file,
+      Array.from(targets, ([file, name]) => ({ file, name })),
+    );
     // Reverse edges → backlinks. Only edges that resolve to a real store file
     // (and not the memory itself) produce a backlink.
     for (const t of targets.keys()) {
@@ -182,7 +183,10 @@ export function createDashboardRouter(store: MemoryStore): Router {
 
   router.get("/api/search", async (req, res) => {
     const query = req.query.q as string;
-    if (!query) { res.json([]); return; }
+    if (!query) {
+      res.json([]);
+      return;
+    }
     try {
       const results = await store.search(query, 20);
       res.json(results);
@@ -243,7 +247,10 @@ export function createDashboardRouter(store: MemoryStore): Router {
   router.get("/api/wiki/index", (_req, res) => {
     try {
       const store = scanStore();
-      const categories: Record<string, Array<{ file: string; name: string; importance: number }>> = {};
+      const categories: Record<
+        string,
+        Array<{ file: string; name: string; importance: number }>
+      > = {};
       const daily: Array<{ date: string; file: string }> = [];
       for (const e of store) {
         if (e.file === "MEMORY_INDEX.md") continue;
@@ -256,9 +263,7 @@ export function createDashboardRouter(store: MemoryStore): Router {
         categories[cat].push({ file: e.file, name: e.name, importance: e.importance });
       }
       for (const cat of Object.keys(categories)) {
-        categories[cat].sort(
-          (a, b) => b.importance - a.importance || a.name.localeCompare(b.name)
-        );
+        categories[cat].sort((a, b) => b.importance - a.importance || a.name.localeCompare(b.name));
       }
       daily.sort((a, b) => b.date.localeCompare(a.date));
       res.json({ categories, daily });
@@ -279,7 +284,9 @@ export function createDashboardRouter(store: MemoryStore): Router {
       // MEMORY_INDEX.md is auto-generated (memory_index rebuilds it from
       // scratch), so a note appended there would be silently wiped — refuse it.
       if (file === "MEMORY_INDEX.md" || file.endsWith("/MEMORY_INDEX.md")) {
-        res.status(400).json({ error: "MEMORY_INDEX.md is auto-generated and cannot be annotated" });
+        res
+          .status(400)
+          .json({ error: "MEMORY_INDEX.md is auto-generated and cannot be annotated" });
         return;
       }
       if (!text) {
@@ -309,7 +316,7 @@ export function createDashboardRouter(store: MemoryStore): Router {
       const block = `\n\n> **Note — ${today} (via dashboard):** ${quoted}\n`;
       fs.appendFileSync(fullPath, block, "utf-8");
       bustScanCache(); // file changed on disk — invalidate now, before the index
-                       // rebuild (which can fail), so the wiki reflects the note
+      // rebuild (which can fail), so the wiki reflects the note
       await reindexFile(store, fullPath);
       res.json({ success: true });
     } catch (err: any) {
@@ -409,9 +416,13 @@ export function createDashboardRouter(store: MemoryStore): Router {
   router.get("/api/journal", (_req, res) => {
     try {
       const dailyDir = path.join(MEMORIES_DIR, "daily");
-      if (!fs.existsSync(dailyDir)) { res.json([]); return; }
+      if (!fs.existsSync(dailyDir)) {
+        res.json([]);
+        return;
+      }
 
-      const files = fs.readdirSync(dailyDir)
+      const files = fs
+        .readdirSync(dailyDir)
         .filter((f) => f.endsWith(".md"))
         .sort()
         .reverse()
@@ -443,7 +454,10 @@ export function createDashboardRouter(store: MemoryStore): Router {
       }
       const filePath = path.join(MEMORIES_DIR, "daily", `${dateStr}.md`);
       const { content, exists } = readMemoryFile(filePath);
-      if (!exists) { res.json({ date: dateStr, content: "", exists: false }); return; }
+      if (!exists) {
+        res.json({ date: dateStr, content: "", exists: false });
+        return;
+      }
       const { metadata, body } = parseFrontmatter(content);
       res.json({ date: dateStr, content: body, metadata, exists: true });
     } catch (err: any) {
@@ -547,7 +561,10 @@ export function createDashboardRouter(store: MemoryStore): Router {
 // at their own repo or docs with MEMORIA_REPO_URL. Attribute-escaped because
 // it is interpolated into an href.
 const REPO_URL = (process.env.MEMORIA_REPO_URL || "https://github.com/Agripp87/memoria")
-  .replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  .replace(/&/g, "&amp;")
+  .replace(/"/g, "&quot;")
+  .replace(/</g, "&lt;")
+  .replace(/>/g, "&gt;");
 
 const DASHBOARD_HTML = `<!DOCTYPE html>
 <html lang="en">

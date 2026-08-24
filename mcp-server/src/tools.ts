@@ -87,7 +87,10 @@ export function resolveMemoryPath(file: string): string {
         if (fs.existsSync(ancestor)) {
           const ancestorReal = fs.realpathSync(ancestor);
           if (ancestorReal !== memoriesReal && !ancestorReal.startsWith(realPrefix)) {
-            throw new Error("Symlink traversal blocked: nearest existing ancestor escapes memories/");
+            // eslint-disable-next-line preserve-caught-error -- reports the symlink escape, not the ENOENT being handled; `cause` would mislead
+            throw new Error(
+              "Symlink traversal blocked: nearest existing ancestor escapes memories/",
+            );
           }
           break;
         }
@@ -200,7 +203,7 @@ export function setupWatcher(store: MemoryStore): void {
           // One bad file must not drop the batch or escape as an unhandled
           // promise rejection (mirrors the periodic sweep's error handling).
           process.stderr.write(
-            `Memoria: watcher reindex of ${file} failed: ${(err as Error).message}\n`
+            `Memoria: watcher reindex of ${file} failed: ${(err as Error).message}\n`,
           );
         }
       }
@@ -221,7 +224,7 @@ export function setupWatcher(store: MemoryStore): void {
  */
 export function setupPeriodicReindex(
   store: MemoryStore,
-  intervalMs = parseInt(process.env.MEMORIA_REINDEX_INTERVAL_MS || "300000", 10)
+  intervalMs = parseInt(process.env.MEMORIA_REINDEX_INTERVAL_MS || "300000", 10),
 ): NodeJS.Timeout {
   let running = false;
   const sweep = async () => {
@@ -240,9 +243,7 @@ export function setupPeriodicReindex(
       // (Karpathy rule VII). Idempotent — only writes when content changed.
       rebuildMarkdownIndex();
     } catch (err) {
-      process.stderr.write(
-        `Memoria: periodic reindex failed: ${(err as Error).message}\n`
-      );
+      process.stderr.write(`Memoria: periodic reindex failed: ${(err as Error).message}\n`);
     } finally {
       running = false;
     }
@@ -265,8 +266,8 @@ export function setupPeriodicOptimize(
   store: MemoryStore,
   intervalMs = parseInt(
     process.env.MEMORIA_OPTIMIZE_INTERVAL_MS || String(24 * 60 * 60 * 1000),
-    10
-  )
+    10,
+  ),
 ): NodeJS.Timeout | null {
   if (process.env.MEMORIA_AUTO_OPTIMIZE !== "true") return null;
 
@@ -278,15 +279,11 @@ export function setupPeriodicOptimize(
       for (const action of ["decay", "promote", "detect_stale"] as const) {
         const r = runOptimize(store, action);
         if (r.affected > 0) {
-          process.stderr.write(
-            `Memoria auto-optimize: ${action} affected ${r.affected}\n`
-          );
+          process.stderr.write(`Memoria auto-optimize: ${action} affected ${r.affected}\n`);
         }
       }
     } catch (err) {
-      process.stderr.write(
-        `Memoria auto-optimize failed: ${(err as Error).message}\n`
-      );
+      process.stderr.write(`Memoria auto-optimize failed: ${(err as Error).message}\n`);
     } finally {
       running = false;
     }
@@ -295,7 +292,7 @@ export function setupPeriodicOptimize(
   const timer = setInterval(run, intervalMs);
   timer.unref?.();
   process.stderr.write(
-    `Memoria: auto-optimize enabled (every ${Math.round(intervalMs / 3_600_000)}h).\n`
+    `Memoria: auto-optimize enabled (every ${Math.round(intervalMs / 3_600_000)}h).\n`,
   );
   return timer;
 }
@@ -312,10 +309,7 @@ export function setupPeriodicOptimize(
  */
 export function setupPeriodicCompile(
   store: MemoryStore,
-  intervalMs = parseInt(
-    process.env.MEMORIA_COMPILE_INTERVAL_MS || String(24 * 60 * 60 * 1000),
-    10
-  )
+  intervalMs = parseInt(process.env.MEMORIA_COMPILE_INTERVAL_MS || String(24 * 60 * 60 * 1000), 10),
 ): NodeJS.Timeout | null {
   if (process.env.MEMORIA_AUTO_COMPILE !== "true") return null;
 
@@ -327,17 +321,24 @@ export function setupPeriodicCompile(
       // Drain the ingest-driven queue (P2): if specific sources were touched
       // since the last run, rebuild just those; else do a full rollup.
       const touched = drainCompileQueue();
-      const res = buildEntityPages(MEMORIES_DIR, touched.length > 0 ? { onlySources: touched } : {});
+      const res = buildEntityPages(
+        MEMORIES_DIR,
+        touched.length > 0 ? { onlySources: touched } : {},
+      );
       for (const rel of res.written) {
         try {
           await reindexFile(store, resolveMemoryPath(rel));
         } catch (err) {
-          process.stderr.write(`Memoria auto-compile: reindex of ${rel} failed: ${(err as Error).message}\n`);
+          process.stderr.write(
+            `Memoria auto-compile: reindex of ${rel} failed: ${(err as Error).message}\n`,
+          );
         }
       }
       if (res.written.length > 0) {
         rebuildMarkdownIndex();
-        process.stderr.write(`Memoria auto-compile: updated ${res.written.length} entity page(s).\n`);
+        process.stderr.write(
+          `Memoria auto-compile: updated ${res.written.length} entity page(s).\n`,
+        );
       }
     } catch (err) {
       process.stderr.write(`Memoria auto-compile failed: ${(err as Error).message}\n`);
@@ -349,7 +350,7 @@ export function setupPeriodicCompile(
   const timer = setInterval(run, intervalMs);
   timer.unref?.();
   process.stderr.write(
-    `Memoria: auto-compile enabled (every ${Math.round(intervalMs / 3_600_000)}h).\n`
+    `Memoria: auto-compile enabled (every ${Math.round(intervalMs / 3_600_000)}h).\n`,
   );
   return timer;
 }
@@ -376,7 +377,9 @@ export function enqueueCompileSources(sources: string[]): void {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(compileQueuePath(), JSON.stringify([...merged]), "utf-8");
   } catch (err) {
-    process.stderr.write(`Memoria: compile-queue enqueue failed (non-fatal): ${(err as Error).message}\n`);
+    process.stderr.write(
+      `Memoria: compile-queue enqueue failed (non-fatal): ${(err as Error).message}\n`,
+    );
   }
 }
 
@@ -409,7 +412,14 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
     "Semantic + keyword hybrid search across all memories. Uses three-signal scoring: 0.2·recency + 0.3·importance + 0.5·relevance.",
     {
       query: z.string().describe("Search query"),
-      max_results: z.number().int().min(1).max(100).optional().default(10).describe("Maximum results to return (1-100)"),
+      max_results: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .default(10)
+        .describe("Maximum results to return (1-100)"),
     },
     async ({ query, max_results }) => {
       const results = await store.search(query, max_results);
@@ -427,7 +437,9 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       try {
         store.trackAccessBatch(distinctFiles);
       } catch (err) {
-        process.stderr.write(`Memoria: access tracking failed (non-fatal): ${(err as Error).message}\n`);
+        process.stderr.write(
+          `Memoria: access tracking failed (non-fatal): ${(err as Error).message}\n`,
+        );
       }
 
       let output = results
@@ -435,7 +447,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
           (r, i) =>
             `**${i + 1}. ${r.file}** (lines ${r.startLine}-${r.endLine})\n` +
             `   Score: ${r.score.toFixed(3)} (relevance: ${r.relevanceScore.toFixed(2)}, importance: ${r.importanceScore.toFixed(1)}, recency: ${r.recencyScore.toFixed(2)})\n` +
-            `   ${r.text.slice(0, 300)}${r.text.length > 300 ? "..." : ""}`
+            `   ${r.text.slice(0, 300)}${r.text.length > 300 ? "..." : ""}`,
         )
         .join("\n\n");
 
@@ -450,7 +462,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       }
 
       return { content: [{ type: "text" as const, text: output }] };
-    }
+    },
   );
 
   // Tool 2: memory_read
@@ -460,7 +472,13 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
     {
       file: z.string().describe("File path relative to memories/ directory"),
       start_line: z.number().int().min(1).optional().describe("Optional start line (1-based)"),
-      count: z.number().int().min(1).max(100000).optional().describe("Optional number of lines to read"),
+      count: z
+        .number()
+        .int()
+        .min(1)
+        .max(100000)
+        .optional()
+        .describe("Optional number of lines to read"),
     },
     async ({ file, start_line, count }) => {
       // Reject NUL bytes (would throw deep in fs); treat as "not found".
@@ -484,7 +502,9 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       try {
         store.trackAccess(getRelativePath(fullPath));
       } catch (err) {
-        process.stderr.write(`Memoria: access tracking failed (non-fatal): ${(err as Error).message}\n`);
+        process.stderr.write(
+          `Memoria: access tracking failed (non-fatal): ${(err as Error).message}\n`,
+        );
       }
 
       let output = content;
@@ -496,7 +516,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       }
 
       return { content: [{ type: "text" as const, text: output }] };
-    }
+    },
   );
 
   // Tool 3: memory_write
@@ -504,7 +524,9 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
     "memory_write",
     "Create or update a memory file. Checks for similar existing memories before writing (dedup). Returns similar memories if found so the agent can decide: ADD, UPDATE, or NOOP.",
     {
-      file: z.string().describe("File path relative to memories/ directory (e.g., 'project/new-feature.md')"),
+      file: z
+        .string()
+        .describe("File path relative to memories/ directory (e.g., 'project/new-feature.md')"),
       content: z.string().describe("Full file content including YAML frontmatter"),
       force: z.boolean().optional().default(false).describe("Skip dedup check and write directly"),
     },
@@ -513,7 +535,9 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       // traversal is enforced separately by resolveMemoryPath below.
       if (!isValidMemoryFilename(file)) {
         return {
-          content: [{ type: "text" as const, text: "Error: filename must match [a-zA-Z0-9_-/.]+.md" }],
+          content: [
+            { type: "text" as const, text: "Error: filename must match [a-zA-Z0-9_-/.]+.md" },
+          ],
         };
       }
 
@@ -542,7 +566,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
             const dupList = highSimilarity
               .map(
                 (s) =>
-                  `- **${s.file}** (similarity: ${(s.similarity * 100).toFixed(1)}%)\n  ${s.text.slice(0, 200)}...`
+                  `- **${s.file}** (similarity: ${(s.similarity * 100).toFixed(1)}%)\n  ${s.text.slice(0, 200)}...`,
               )
               .join("\n");
 
@@ -573,7 +597,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
           },
         ],
       };
-    }
+    },
   );
 
   // Tool 4: memory_list
@@ -615,7 +639,9 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       }
 
       if (entries.length === 0) {
-        return { content: [{ type: "text" as const, text: "No memories found matching filters." }] };
+        return {
+          content: [{ type: "text" as const, text: "No memories found matching filters." }],
+        };
       }
 
       entries.sort((a, b) => b.importance - a.importance);
@@ -623,16 +649,19 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       const output = entries
         .map(
           (e) =>
-            `- **${e.name}** (${e.type}, importance: ${e.importance})\n  ${e.file} — updated: ${e.updated}`
+            `- **${e.name}** (${e.type}, importance: ${e.importance})\n  ${e.file} — updated: ${e.updated}`,
         )
         .join("\n");
 
       return {
         content: [
-          { type: "text" as const, text: `${entries.length} memor${entries.length === 1 ? "y" : "ies"} found:\n\n${output}` },
+          {
+            type: "text" as const,
+            text: `${entries.length} memor${entries.length === 1 ? "y" : "ies"} found:\n\n${output}`,
+          },
         ],
       };
-    }
+    },
   );
 
   // Tool 5: memory_index
@@ -658,7 +687,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
           },
         ],
       };
-    }
+    },
   );
 
   // Tool 6: memory_daily
@@ -682,8 +711,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       if (fs.existsSync(dailyFile)) {
         fs.appendFileSync(dailyFile, `\n${entry}`, "utf-8");
       } else {
-        const header =
-          `---\nname: Daily log ${today}\ndescription: Session log for ${today}\ntype: session\nimportance: 3\ncreated: ${today}\nupdated: ${today}\ntags: [daily]\n---\n\n# Daily Log — ${today}\n\n${entry}`;
+        const header = `---\nname: Daily log ${today}\ndescription: Session log for ${today}\ntype: session\nimportance: 3\ncreated: ${today}\nupdated: ${today}\ntags: [daily]\n---\n\n# Daily Log — ${today}\n\n${entry}`;
         fs.writeFileSync(dailyFile, header, "utf-8");
       }
 
@@ -693,15 +721,15 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       try {
         rebuildMarkdownIndex();
       } catch (err) {
-        process.stderr.write(`Memoria: index refresh after daily write failed (non-fatal): ${(err as Error).message}\n`);
+        process.stderr.write(
+          `Memoria: index refresh after daily write failed (non-fatal): ${(err as Error).message}\n`,
+        );
       }
 
       return {
-        content: [
-          { type: "text" as const, text: `Appended to daily log: ${today}` },
-        ],
+        content: [{ type: "text" as const, text: `Appended to daily log: ${today}` }],
       };
-    }
+    },
   );
 
   // Tool 7: memory_optimize
@@ -723,7 +751,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
           },
         ],
       };
-    }
+    },
   );
 
   // Tool 8: memory_reflect
@@ -766,7 +794,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
           },
         ],
       };
-    }
+    },
   );
 
   // Tool 9: memory_stats
@@ -794,10 +822,14 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         warnings.push("- Score inflation: avg importance > 7 — consider recalibrating scores");
       }
       if (stats.staleCount > stats.totalFiles * 0.3) {
-        warnings.push(`- ${stats.staleCount} stale files (>30% of total) — run memory_optimize detect_stale`);
+        warnings.push(
+          `- ${stats.staleCount} stale files (>30% of total) — run memory_optimize detect_stale`,
+        );
       }
       if (fileCount > stats.totalFiles + 2) {
-        warnings.push(`- ${fileCount - stats.totalFiles} files on disk not indexed — run memory_index`);
+        warnings.push(
+          `- ${fileCount - stats.totalFiles} files on disk not indexed — run memory_index`,
+        );
       }
 
       // Source activity: scan last 7 daily logs to count events per source
@@ -831,7 +863,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       if (repetitiveSources.length > 0) {
         warnings.push(
           `- ${repetitiveSources.length} source(s) generating >50 events/week — consider rate-limiting or filtering: ` +
-            repetitiveSources.map(([s, n]) => `${s} (${n})`).join(", ")
+            repetitiveSources.map(([s, n]) => `${s} (${n})`).join(", "),
         );
       }
 
@@ -839,7 +871,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       if (stats.totalChunks > 100 && stats.medianImportance === stats.avgImportance) {
         warnings.push(
           `- Importance flatness: all ${stats.totalChunks} chunks have the same importance. ` +
-            `Per-event scoring is being lost. Check if daily-log frontmatter is bumping with events.`
+            `Per-event scoring is being lost. Check if daily-log frontmatter is bumping with events.`,
         );
       }
 
@@ -848,7 +880,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       if (stats.topAccessed.length > 0 && zeroAccessCount === stats.topAccessed.length) {
         warnings.push(
           `- All top files have 0 accesses — Memoria is being WRITTEN to but never QUERIED. ` +
-            `Memory only compounds when agents call memory_search before answering.`
+            `Memory only compounds when agents call memory_search before answering.`,
         );
       }
 
@@ -880,7 +912,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       ].join("\n");
 
       return { content: [{ type: "text" as const, text: output }] };
-    }
+    },
   );
 
   // Tool 10: memory_lint
@@ -892,7 +924,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       const result = await runLint(store, MEMORIES_DIR, getAllMemoryFiles, getRelativePath);
       const report = formatLintReport(result);
       return { content: [{ type: "text" as const, text: report }] };
-    }
+    },
   );
 
   // Tool 11: memory_compile
@@ -902,10 +934,14 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
     {
       content: z.string().describe("The analysis/answer text to compile into a memory"),
       name: z.string().describe("Short descriptive title"),
-      type: z.enum(["user", "project", "decision", "feedback", "reference", "reflection", "pattern"])
+      type: z
+        .enum(["user", "project", "decision", "feedback", "reference", "reflection", "pattern"])
         .describe("Memory type — determines subdirectory"),
       tags: z.array(z.string()).describe("Tags for categorization"),
-      related: z.array(z.string()).optional().describe("Related memory file paths (e.g., ['user/profile.md'])"),
+      related: z
+        .array(z.string())
+        .optional()
+        .describe("Related memory file paths (e.g., ['user/profile.md'])"),
     },
     async ({ content: bodyContent, name: memName, type: memType, tags, related }) => {
       // Size cap (matches memory_write)
@@ -917,30 +953,45 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
 
       // Compute importance based on type
       const TYPE_IMPORTANCE: Record<string, number> = {
-        user: 8, decision: 7, feedback: 7, pattern: 7,
-        project: 6, reference: 5, reflection: 6,
+        user: 8,
+        decision: 7,
+        feedback: 7,
+        pattern: 7,
+        project: 6,
+        reference: 5,
+        reflection: 6,
       };
       let importance = TYPE_IMPORTANCE[memType] || 5;
       if (bodyContent.length > 1000) importance = Math.min(10, importance + 1);
       if (bodyContent.length > 3000) importance = Math.min(10, importance + 1);
 
       // Generate filename slug
-      const baseSlug = memName
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "")
-        .slice(0, 60) || "memory";
+      const baseSlug =
+        memName
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 60) || "memory";
 
       const TYPE_DIR: Record<string, string> = {
-        user: "user", project: "project", decision: "decisions",
-        feedback: "feedback", reference: "references",
-        reflection: "sessions", pattern: "patterns",
+        user: "user",
+        project: "project",
+        decision: "decisions",
+        feedback: "feedback",
+        reference: "references",
+        reflection: "sessions",
+        pattern: "patterns",
       };
       const dir = TYPE_DIR[memType];
       if (!dir) {
         // Fail loudly instead of silently creating a non-standard directory.
         return {
-          content: [{ type: "text" as const, text: `Error: unmapped type "${memType}". Update TYPE_DIR in tools.ts.` }],
+          content: [
+            {
+              type: "text" as const,
+              text: `Error: unmapped type "${memType}". Update TYPE_DIR in tools.ts.`,
+            },
+          ],
         };
       }
 
@@ -951,7 +1002,9 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         await compileLocks.get(dirLockKey);
       }
       let releaseLock!: () => void;
-      const lockPromise = new Promise<void>((resolve) => { releaseLock = resolve; });
+      const lockPromise = new Promise<void>((resolve) => {
+        releaseLock = resolve;
+      });
       compileLocks.set(dirLockKey, lockPromise);
 
       // Collision detection: append -2, -3, etc. if filename exists.
@@ -966,7 +1019,12 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
           compileLocks.delete(dirLockKey);
           releaseLock();
           return {
-            content: [{ type: "text" as const, text: `Error: too many filename collisions for "${baseSlug}"` }],
+            content: [
+              {
+                type: "text" as const,
+                text: `Error: too many filename collisions for "${baseSlug}"`,
+              },
+            ],
           };
         }
       }
@@ -993,7 +1051,10 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       if (related && related.length > 0) {
         frontmatterObj.related = related;
       }
-      const frontmatterYaml = yaml.dump(frontmatterObj, { lineWidth: 200, schema: yaml.CORE_SCHEMA });
+      const frontmatterYaml = yaml.dump(frontmatterObj, {
+        lineWidth: 200,
+        schema: yaml.CORE_SCHEMA,
+      });
       const fileContent = `---\n${frontmatterYaml}---\n\n${bodyContent}`;
 
       try {
@@ -1005,7 +1066,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
           const dupList = highSimilarity
             .map(
               (s) =>
-                `- **${s.file}** (similarity: ${(s.similarity * 100).toFixed(1)}%)\n  ${s.text.slice(0, 200)}...`
+                `- **${s.file}** (similarity: ${(s.similarity * 100).toFixed(1)}%)\n  ${s.text.slice(0, 200)}...`,
             )
             .join("\n");
 
@@ -1041,7 +1102,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         compileLocks.delete(dirLockKey);
         releaseLock();
       }
-    }
+    },
   );
 
   // Tool 12: memory_compact
@@ -1082,7 +1143,12 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         lastSeen: string;
       }
       const sources = new Map<string, SourceStats>();
-      const allEntries: Array<{ time: string; source: string; content: string; importance: number }> = [];
+      const allEntries: Array<{
+        time: string;
+        source: string;
+        content: string;
+        importance: number;
+      }> = [];
 
       for (const file of files.reverse()) {
         const filePath = path.join(dailyDir, file);
@@ -1090,7 +1156,8 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         const date = path.basename(file, ".md");
 
         // Parse `## TIME — SOURCE\n\nCONTENT\n*importance: N*` blocks
-        const entryRegex = /## ([\d:APM ]+) — ([\w-]+)(?:\s*\*\([^)]+\)\*)?\s*\n([\s\S]*?)(?=\n## |$)/g;
+        const entryRegex =
+          /## ([\d:APM ]+) — ([\w-]+)(?:\s*\*\([^)]+\)\*)?\s*\n([\s\S]*?)(?=\n## |$)/g;
         let m: RegExpExecArray | null;
         while ((m = entryRegex.exec(content)) !== null) {
           const [, time, source, body] = m;
@@ -1103,7 +1170,13 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
 
           let stats = sources.get(source);
           if (!stats) {
-            stats = { source, totalEvents: 0, uniquePatterns: new Map(), firstSeen: date, lastSeen: date };
+            stats = {
+              source,
+              totalEvents: 0,
+              uniquePatterns: new Map(),
+              firstSeen: date,
+              lastSeen: date,
+            };
             sources.set(source, stats);
           }
           stats.totalEvents++;
@@ -1122,19 +1195,26 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       if (highImportance.length > 0) {
         lines.push(`## High-importance events (${highImportance.length})\n`);
         for (const e of highImportance.slice(0, 30)) {
-          lines.push(`- **${e.time}** [${e.source}] (importance ${e.importance}): ${e.content.slice(0, 200)}`);
+          lines.push(
+            `- **${e.time}** [${e.source}] (importance ${e.importance}): ${e.content.slice(0, 200)}`,
+          );
         }
         lines.push("");
       }
 
       // Per-source summary with deduped patterns
       lines.push(`## Source activity summary\n`);
-      const sortedSources = Array.from(sources.values()).sort((a, b) => b.totalEvents - a.totalEvents);
+      const sortedSources = Array.from(sources.values()).sort(
+        (a, b) => b.totalEvents - a.totalEvents,
+      );
       for (const s of sortedSources) {
         const distinctPatterns = s.uniquePatterns.size;
-        const dedupRatio = s.totalEvents > 0 ? ((1 - distinctPatterns / s.totalEvents) * 100).toFixed(0) : "0";
+        const dedupRatio =
+          s.totalEvents > 0 ? ((1 - distinctPatterns / s.totalEvents) * 100).toFixed(0) : "0";
         lines.push(`### ${s.source}`);
-        lines.push(`- ${s.totalEvents} events | ${distinctPatterns} distinct patterns | ${dedupRatio}% repetitive`);
+        lines.push(
+          `- ${s.totalEvents} events | ${distinctPatterns} distinct patterns | ${dedupRatio}% repetitive`,
+        );
         lines.push(`- Active ${s.firstSeen} → ${s.lastSeen}`);
 
         // Top 3 patterns by frequency
@@ -1151,7 +1231,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       lines.push(
         `**Next step**: synthesize this into a reflection memory using \`memory_compile\` with ` +
           `\`type: "reflection"\` and importance 6-8 based on what you find. ` +
-          `Focus on: recurring failure patterns, anomalies, decisions, things worth remembering.`
+          `Focus on: recurring failure patterns, anomalies, decisions, things worth remembering.`,
       );
 
       let output = lines.join("\n");
@@ -1160,7 +1240,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       }
 
       return { content: [{ type: "text" as const, text: output }] };
-    }
+    },
   );
 
   // Tool 13: memory_entities
@@ -1173,9 +1253,21 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       "(no LLM) — for semantic synthesis use memory_compact + memory_compile. " +
       "Idempotent; never overwrites a page a human has taken over.",
     {
-      days: z.number().int().min(1).max(365).optional().default(30)
+      days: z
+        .number()
+        .int()
+        .min(1)
+        .max(365)
+        .optional()
+        .default(30)
         .describe("How many recent daily logs to roll up"),
-      min_events: z.number().int().min(1).max(100).optional().default(3)
+      min_events: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .default(3)
         .describe("Minimum events from a source before it earns a page"),
     },
     async ({ days, min_events }) => {
@@ -1185,7 +1277,9 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         try {
           await reindexFile(store, resolveMemoryPath(rel));
         } catch (err) {
-          process.stderr.write(`Memoria: reindex of ${rel} failed (non-fatal): ${(err as Error).message}\n`);
+          process.stderr.write(
+            `Memoria: reindex of ${rel} failed (non-fatal): ${(err as Error).message}\n`,
+          );
         }
       }
       if (res.written.length > 0) rebuildMarkdownIndex();
@@ -1195,14 +1289,17 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         `- Pages written/updated: ${res.written.length}`,
         ...(res.written.length > 0 ? res.written.map((f) => `  - ${f}`) : []),
         ...(res.skipped.length > 0
-          ? [`- Skipped (human-owned): ${res.skipped.length}`, ...res.skipped.map((f) => `  - ${f}`)]
+          ? [
+              `- Skipped (human-owned): ${res.skipped.length}`,
+              ...res.skipped.map((f) => `  - ${f}`),
+            ]
           : []),
       ];
       if (res.written.length === 0 && res.skipped.length === 0) {
         lines.push(`- No source met the ${min_events}-event threshold in the last ${days} days.`);
       }
       return { content: [{ type: "text" as const, text: lines.join("\n") }] };
-    }
+    },
   );
 }
 
@@ -1243,7 +1340,8 @@ function escapeTableCell(s: string): string {
  * Everything from this line to EOF is preserved verbatim across auto-rebuilds,
  * so curated cross-store pointers / sync notes survive the generator.
  */
-const INDEX_MANUAL_SENTINEL = "<!-- MEMORIA:MANUAL — content below is preserved across auto-rebuilds -->";
+const INDEX_MANUAL_SENTINEL =
+  "<!-- MEMORIA:MANUAL — content below is preserved across auto-rebuilds -->";
 
 /**
  * Rebuild MEMORY_INDEX.md as a navigable catalog grouped by type.
@@ -1302,7 +1400,17 @@ export function rebuildMarkdownIndex(): string {
   }
 
   // Group by type
-  const typeOrder = ["user", "project", "decision", "feedback", "reference", "reflection", "pattern", "source-rollup", "session"];
+  const typeOrder = [
+    "user",
+    "project",
+    "decision",
+    "feedback",
+    "reference",
+    "reflection",
+    "pattern",
+    "source-rollup",
+    "session",
+  ];
   const groups = new Map<string, IndexEntry[]>();
 
   for (const entry of entries) {
@@ -1351,7 +1459,7 @@ export function rebuildMarkdownIndex(): string {
       const url = escapeMarkdownUrl(entry.relPath);
       const desc = entry.description ? ` — ${escapeTableCell(entry.description.slice(0, 80))}` : "";
       lines.push(
-        `| [${name}](${url})${desc} | ${entry.importance} | ${escapeTableCell(entry.updated)} | ${entry.linkCount} |`
+        `| [${name}](${url})${desc} | ${entry.importance} | ${escapeTableCell(entry.updated)} | ${entry.linkCount} |`,
       );
     }
     lines.push("");
@@ -1408,7 +1516,7 @@ export function rebuildMarkdownIndex(): string {
   // Idempotent: skip the write (and the watcher/git churn it causes) when the
   // generated content is byte-identical to what's already on disk. This is what
   // makes it safe to call on every reindex sweep.
-  let changed = true;
+  let changed: boolean;
   try {
     changed = fs.readFileSync(indexPath, "utf-8") !== body;
   } catch {
@@ -1464,15 +1572,13 @@ async function doInitCollector(store: MemoryStore): Promise<void> {
 
   // Wire ingestion: when daemon has events, run through pipeline + fusion
   daemon.onIngestion(async (events) => {
-    let result: Awaited<ReturnType<IngestionPipeline["ingest"]>> | null = null;
+    let result: Awaited<ReturnType<IngestionPipeline["ingest"]>>;
 
     // Run ingestion pipeline — wrap so failures are visible, not silent
     try {
       result = await ingestion!.ingest(events);
     } catch (err) {
-      process.stderr.write(
-        `Memoria: ingestion pipeline failed: ${(err as Error).message}\n`
-      );
+      process.stderr.write(`Memoria: ingestion pipeline failed: ${(err as Error).message}\n`);
       throw err; // re-throw so the daemon doesn't mark events synced
     }
 
@@ -1499,14 +1605,14 @@ async function doInitCollector(store: MemoryStore): Promise<void> {
         }
       } catch (err) {
         process.stderr.write(
-          `Memoria: fusion write failed (non-fatal): ${(err as Error).message}\n`
+          `Memoria: fusion write failed (non-fatal): ${(err as Error).message}\n`,
         );
       }
     }
 
     if (result && result.written > 0) {
       process.stderr.write(
-        `Memoria: ingested ${result.written} events (${result.deduplicated} deduped, ${result.rateLimited} rate-limited)\n`
+        `Memoria: ingested ${result.written} events (${result.deduplicated} deduped, ${result.rateLimited} rate-limited)\n`,
       );
     }
 
@@ -1527,34 +1633,39 @@ export function registerCollectorTools(server: McpServer, store: MemoryStore): v
     "memory_sources",
     "Manage data sources for the sub-memory collector. List available sources, enable/disable them, add custom sources, or record user agreement.",
     {
-      action: z.enum([
-        "list",
-        "enable",
-        "disable",
-        "agree",
-        "add_custom",
-        "remove_custom",
-        "configure",
-      ]).describe("Action to perform"),
-      source: z.string().optional().describe("Source ID (required for enable/disable/agree/remove/configure)"),
-      config: z.record(z.string(), z.unknown()).optional().describe("Configuration overrides (for enable/configure)"),
-      custom_definition: z.object({
-        id: z.string(),
-        name: z.string(),
-        description: z.string(),
-        mode: z.enum(["file_watcher", "shell_command", "webhook"]),
-        watchPath: z.string().optional(),
-        fileFormat: z.enum(["json", "csv", "lines"]).optional(),
-        command: z.string().optional(),
-        webhookPath: z.string().optional(),
-        jsonPath: z.string().optional(),
-        fieldMap: z.object({
-          content: z.string().optional(),
-          timestamp: z.string().optional(),
-          id: z.string().optional(),
-          meta: z.array(z.string()).optional(),
-        }).optional(),
-      }).optional().describe("Custom source definition (for add_custom)"),
+      action: z
+        .enum(["list", "enable", "disable", "agree", "add_custom", "remove_custom", "configure"])
+        .describe("Action to perform"),
+      source: z
+        .string()
+        .optional()
+        .describe("Source ID (required for enable/disable/agree/remove/configure)"),
+      config: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe("Configuration overrides (for enable/configure)"),
+      custom_definition: z
+        .object({
+          id: z.string(),
+          name: z.string(),
+          description: z.string(),
+          mode: z.enum(["file_watcher", "shell_command", "webhook"]),
+          watchPath: z.string().optional(),
+          fileFormat: z.enum(["json", "csv", "lines"]).optional(),
+          command: z.string().optional(),
+          webhookPath: z.string().optional(),
+          jsonPath: z.string().optional(),
+          fieldMap: z
+            .object({
+              content: z.string().optional(),
+              timestamp: z.string().optional(),
+              id: z.string().optional(),
+              meta: z.array(z.string()).optional(),
+            })
+            .optional(),
+        })
+        .optional()
+        .describe("Custom source definition (for add_custom)"),
     },
     async ({ action, source, config, custom_definition }) => {
       await ensureCollector(store);
@@ -1583,48 +1694,58 @@ export function registerCollectorTools(server: McpServer, store: MemoryStore): v
         }
 
         case "enable": {
-          if (!source) return { content: [{ type: "text" as const, text: "Error: source ID required" }] };
+          if (!source)
+            return { content: [{ type: "text" as const, text: "Error: source ID required" }] };
           const result = await registry!.enableSource(source, config as any);
           if (result.success) daemon!.syncPollTimers();
           return { content: [{ type: "text" as const, text: result.message }] };
         }
 
         case "disable": {
-          if (!source) return { content: [{ type: "text" as const, text: "Error: source ID required" }] };
+          if (!source)
+            return { content: [{ type: "text" as const, text: "Error: source ID required" }] };
           const result = await registry!.disableSource(source);
           if (result.success) daemon!.syncPollTimers();
           return { content: [{ type: "text" as const, text: result.message }] };
         }
 
         case "agree": {
-          if (!source) return { content: [{ type: "text" as const, text: "Error: source ID required" }] };
+          if (!source)
+            return { content: [{ type: "text" as const, text: "Error: source ID required" }] };
           registry!.recordAgreement(source);
           return {
-            content: [{
-              type: "text" as const,
-              text: `User agreement recorded for "${source}". You can now enable it with action "enable".`,
-            }],
+            content: [
+              {
+                type: "text" as const,
+                text: `User agreement recorded for "${source}". You can now enable it with action "enable".`,
+              },
+            ],
           };
         }
 
         case "add_custom": {
           if (!custom_definition) {
-            return { content: [{ type: "text" as const, text: "Error: custom_definition required" }] };
+            return {
+              content: [{ type: "text" as const, text: "Error: custom_definition required" }],
+            };
           }
           const result = registry!.addCustomSource(custom_definition as CustomSourceDefinition);
           return { content: [{ type: "text" as const, text: result.message }] };
         }
 
         case "remove_custom": {
-          if (!source) return { content: [{ type: "text" as const, text: "Error: source ID required" }] };
+          if (!source)
+            return { content: [{ type: "text" as const, text: "Error: source ID required" }] };
           const result = await registry!.removeCustomSource(source);
           if (result.success) daemon!.syncPollTimers();
           return { content: [{ type: "text" as const, text: result.message }] };
         }
 
         case "configure": {
-          if (!source) return { content: [{ type: "text" as const, text: "Error: source ID required" }] };
-          if (!config) return { content: [{ type: "text" as const, text: "Error: config required" }] };
+          if (!source)
+            return { content: [{ type: "text" as const, text: "Error: source ID required" }] };
+          if (!config)
+            return { content: [{ type: "text" as const, text: "Error: config required" }] };
           const result = registry!.updateSourceConfig(source, config);
           return { content: [{ type: "text" as const, text: result.message }] };
         }
@@ -1632,7 +1753,7 @@ export function registerCollectorTools(server: McpServer, store: MemoryStore): v
         default:
           return { content: [{ type: "text" as const, text: `Unknown action: ${action}` }] };
       }
-    }
+    },
   );
 
   // Tool 11: memory_ingest — manually trigger ingestion from buffer to core
@@ -1673,7 +1794,10 @@ export function registerCollectorTools(server: McpServer, store: MemoryStore): v
         else handled.push(rowid);
       }
       buffer!.markSynced(handled);
-      const dl = errored.length > 0 ? buffer!.recordFailedAttempts(errored) : { retried: 0, deadLettered: 0 };
+      const dl =
+        errored.length > 0
+          ? buffer!.recordFailedAttempts(errored)
+          : { retried: 0, deadLettered: 0 };
 
       // Queue touched sources so the next compile pass refreshes their pages.
       if (result.writtenSources.length > 0) enqueueCompileSources(result.writtenSources);
@@ -1685,15 +1809,15 @@ export function registerCollectorTools(server: McpServer, store: MemoryStore): v
         `- Deduplicated: ${result.deduplicated}`,
         `- Rate-limited (deferred, will retry): ${result.rateLimited}`,
         ...(deferred + errored.length > 0
-          ? [`- Left unsynced for retry: ${deferred + dl.retried}${dl.deadLettered > 0 ? ` | dead-lettered: ${dl.deadLettered}` : ""}`]
+          ? [
+              `- Left unsynced for retry: ${deferred + dl.retried}${dl.deadLettered > 0 ? ` | dead-lettered: ${dl.deadLettered}` : ""}`,
+            ]
           : []),
-        ...(result.errors.length > 0
-          ? [`- Errors: ${result.errors.join("; ")}`]
-          : []),
+        ...(result.errors.length > 0 ? [`- Errors: ${result.errors.join("; ")}`] : []),
       ].join("\n");
 
       return { content: [{ type: "text" as const, text: output }] };
-    }
+    },
   );
 
   // Tool 12: memory_fuse — run cross-source temporal fusion
@@ -1710,7 +1834,11 @@ export function registerCollectorTools(server: McpServer, store: MemoryStore): v
       // Fetch recent unsynced events from buffer
       const allEvents = buffer!.fetchUnsynced(500);
       if (allEvents.length < 2) {
-        return { content: [{ type: "text" as const, text: "Not enough events for fusion (need at least 2)." }] };
+        return {
+          content: [
+            { type: "text" as const, text: "Not enough events for fusion (need at least 2)." },
+          ],
+        };
       }
 
       const cutoff = Date.now() - hours * 3600_000;
@@ -1726,10 +1854,12 @@ export function registerCollectorTools(server: McpServer, store: MemoryStore): v
 
       if (activities.length === 0) {
         return {
-          content: [{
-            type: "text" as const,
-            text: `No cross-source patterns found in ${recentEvents.length} events (${hours}h window, ${window_minutes}min fusion).`,
-          }],
+          content: [
+            {
+              type: "text" as const,
+              text: `No cross-source patterns found in ${recentEvents.length} events (${hours}h window, ${window_minutes}min fusion).`,
+            },
+          ],
         };
       }
 
@@ -1748,17 +1878,19 @@ export function registerCollectorTools(server: McpServer, store: MemoryStore): v
         .map(
           (a) =>
             `- **${a.label}** (${a.sourceCount} sources, importance: ${a.importance})\n` +
-            `  ${a.startTime.slice(11, 16)} – ${a.endTime.slice(11, 16)} | Tags: ${a.tags.join(", ")}`
+            `  ${a.startTime.slice(11, 16)} – ${a.endTime.slice(11, 16)} | Tags: ${a.tags.join(", ")}`,
         )
         .join("\n");
 
       return {
-        content: [{
-          type: "text" as const,
-          text: `**Fused ${activities.length} activit${activities.length === 1 ? "y" : "ies"}**\n\n${summary}`,
-        }],
+        content: [
+          {
+            type: "text" as const,
+            text: `**Fused ${activities.length} activit${activities.length === 1 ? "y" : "ies"}**\n\n${summary}`,
+          },
+        ],
       };
-    }
+    },
   );
 
   // Tool 13: memory_priority — view/adjust collector priority settings
@@ -1768,7 +1900,10 @@ export function registerCollectorTools(server: McpServer, store: MemoryStore): v
     {
       action: z.enum(["status", "set_threshold", "flush_buffer"]).describe("Action to perform"),
       source: z.string().optional().describe("Source ID (for set_threshold)"),
-      threshold: z.number().optional().describe("New importance threshold 1-10 (for set_threshold)"),
+      threshold: z
+        .number()
+        .optional()
+        .describe("New importance threshold 1-10 (for set_threshold)"),
     },
     async ({ action, source, threshold }) => {
       await ensureCollector(store);
@@ -1790,29 +1925,30 @@ export function registerCollectorTools(server: McpServer, store: MemoryStore): v
             `- Size: ${(bufferStats.bufferSizeBytes / 1024).toFixed(1)} KB`,
             `- Oldest unsynced: ${bufferStats.oldestUnsynced ?? "none"}`,
             ...(bufferStats.droppedUnsynced > 0
-              ? [`- ⚠ Unsynced events DROPPED at capacity (data loss): ${bufferStats.droppedUnsynced}`]
+              ? [
+                  `- ⚠ Unsynced events DROPPED at capacity (data loss): ${bufferStats.droppedUnsynced}`,
+                ]
               : []),
             ...(bufferStats.deadLettered > 0
-              ? [`- ⚠ Dead-lettered after retry cap (see data/.dead-letter.jsonl): ${bufferStats.deadLettered}`]
+              ? [
+                  `- ⚠ Dead-lettered after retry cap (see data/.dead-letter.jsonl): ${bufferStats.deadLettered}`,
+                ]
               : []),
             ``,
             `**Poll Timers**`,
           ];
 
           for (const pt of daemonStatus.pollTimers) {
-            const status = pt.inBackoff
-              ? `in backoff (${pt.errors} errors)`
-              : "active";
-            lines.push(
-              `- ${pt.sourceId}: every ${pt.intervalMs / 1000}s — ${status}`
-            );
+            const status = pt.inBackoff ? `in backoff (${pt.errors} errors)` : "active";
+            lines.push(`- ${pt.sourceId}: every ${pt.intervalMs / 1000}s — ${status}`);
           }
 
           return { content: [{ type: "text" as const, text: lines.join("\n") }] };
         }
 
         case "set_threshold": {
-          if (!source) return { content: [{ type: "text" as const, text: "Error: source ID required" }] };
+          if (!source)
+            return { content: [{ type: "text" as const, text: "Error: source ID required" }] };
           if (threshold === undefined || threshold < 1 || threshold > 10) {
             return { content: [{ type: "text" as const, text: "Error: threshold must be 1-10" }] };
           }
@@ -1825,17 +1961,19 @@ export function registerCollectorTools(server: McpServer, store: MemoryStore): v
         case "flush_buffer": {
           const cleaned = buffer!.cleanup();
           return {
-            content: [{
-              type: "text" as const,
-              text: `Flushed ${cleaned} synced events from buffer.`,
-            }],
+            content: [
+              {
+                type: "text" as const,
+                text: `Flushed ${cleaned} synced events from buffer.`,
+              },
+            ],
           };
         }
 
         default:
           return { content: [{ type: "text" as const, text: `Unknown action: ${action}` }] };
       }
-    }
+    },
   );
 }
 

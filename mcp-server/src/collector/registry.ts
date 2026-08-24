@@ -12,7 +12,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
-import type { SourceAdapter, AdapterInfo, AdapterConfig } from "./adapters/base.js";
+import type { SourceAdapter, AdapterConfig } from "./adapters/base.js";
 import { IMessageAdapter } from "./adapters/imessage.js";
 import { CalendarAdapter } from "./adapters/calendar.js";
 import { EmailAdapter } from "./adapters/email.js";
@@ -135,7 +135,7 @@ export class SourceRegistry {
    */
   async enableSource(
     sourceId: string,
-    configOverrides?: Partial<AdapterConfig>
+    configOverrides?: Partial<AdapterConfig>,
   ): Promise<{ success: boolean; message: string }> {
     const adapter = this.adapters.get(sourceId);
     if (!adapter) {
@@ -151,7 +151,7 @@ export class SourceRegistry {
     const currentPlatform = platformMap[process.platform] || process.platform;
     if (
       adapter.info.platforms.length > 0 &&
-      !adapter.info.platforms.includes(currentPlatform as typeof adapter.info.platforms[number])
+      !adapter.info.platforms.includes(currentPlatform as (typeof adapter.info.platforms)[number])
     ) {
       return {
         success: false,
@@ -177,9 +177,7 @@ export class SourceRegistry {
     // Re-validate file_watcher containment at enable time (a definition may
     // have been persisted before the guard existed, or the allowlist may have
     // tightened since it was added).
-    const customDef = this.state.customSources.find(
-      (d) => `custom-${d.id}` === sourceId
-    );
+    const customDef = this.state.customSources.find((d) => `custom-${d.id}` === sourceId);
     if (customDef?.mode === "file_watcher") {
       try {
         assertWatchPathAllowed(customDef.watchPath ?? "", { dataDir: this.dataDir });
@@ -190,9 +188,7 @@ export class SourceRegistry {
 
     // Auto-install dependencies
     if (adapter.info.dependencies.length > 0) {
-      const installResult = await this.installDependencies(
-        adapter.info.dependencies
-      );
+      const installResult = await this.installDependencies(adapter.info.dependencies);
       if (!installResult.success) {
         return {
           success: false,
@@ -239,9 +235,7 @@ export class SourceRegistry {
   /**
    * Disable a data source.
    */
-  async disableSource(
-    sourceId: string
-  ): Promise<{ success: boolean; message: string }> {
+  async disableSource(sourceId: string): Promise<{ success: boolean; message: string }> {
     const adapter = this.activeAdapters.get(sourceId);
     if (adapter) {
       // Save checkpoint before stopping
@@ -266,7 +260,7 @@ export class SourceRegistry {
    */
   updateSourceConfig(
     sourceId: string,
-    settings: Record<string, unknown>
+    settings: Record<string, unknown>,
   ): { success: boolean; message: string } {
     const adapter = this.adapters.get(sourceId);
     if (!adapter) {
@@ -291,9 +285,7 @@ export class SourceRegistry {
   /**
    * Add a user-defined custom data source.
    */
-  addCustomSource(
-    definition: CustomSourceDefinition
-  ): { success: boolean; message: string } {
+  addCustomSource(definition: CustomSourceDefinition): { success: boolean; message: string } {
     // Validate
     if (!definition.id || !/^[a-z0-9_-]+$/.test(definition.id)) {
       return {
@@ -319,10 +311,7 @@ export class SourceRegistry {
     // shell_command sources run arbitrary executables on the host. On a
     // networked deployment that is remote code execution, so it is disabled
     // unless explicitly opted in on a trusted local instance.
-    if (
-      definition.mode === "shell_command" &&
-      process.env.MEMORIA_ALLOW_SHELL_SOURCES !== "true"
-    ) {
+    if (definition.mode === "shell_command" && process.env.MEMORIA_ALLOW_SHELL_SOURCES !== "true") {
       return {
         success: false,
         message:
@@ -375,9 +364,7 @@ export class SourceRegistry {
   /**
    * Remove a custom data source.
    */
-  async removeCustomSource(
-    sourceId: string
-  ): Promise<{ success: boolean; message: string }> {
+  async removeCustomSource(sourceId: string): Promise<{ success: boolean; message: string }> {
     const fullId = sourceId.startsWith("custom-") ? sourceId : `custom-${sourceId}`;
 
     if (!this.adapters.has(fullId)) {
@@ -389,9 +376,7 @@ export class SourceRegistry {
 
     // Remove from registry
     this.adapters.delete(fullId);
-    this.state.customSources = this.state.customSources.filter(
-      (d) => `custom-${d.id}` !== fullId
-    );
+    this.state.customSources = this.state.customSources.filter((d) => `custom-${d.id}` !== fullId);
     delete this.state.configs[fullId];
     delete this.state.checkpoints[fullId];
     delete this.state.eventCounts[fullId];
@@ -450,8 +435,7 @@ export class SourceRegistry {
    * Record that events were collected.
    */
   recordEvents(sourceId: string, count: number): void {
-    this.state.eventCounts[sourceId] =
-      (this.state.eventCounts[sourceId] ?? 0) + count;
+    this.state.eventCounts[sourceId] = (this.state.eventCounts[sourceId] ?? 0) + count;
     this.lastPolled.set(sourceId, new Date().toISOString());
   }
 
@@ -483,7 +467,7 @@ export class SourceRegistry {
   }
 
   private async installDependencies(
-    deps: string[]
+    deps: string[],
   ): Promise<{ success: boolean; message: string }> {
     const missing = deps.filter((d) => {
       try {
@@ -504,7 +488,8 @@ export class SourceRegistry {
     // but this prevents a future/custom source from injecting an npm flag (e.g.
     // a leading "-") or junk via a crafted name. execFileSync (no shell) also
     // removes the metacharacter-injection risk of the old execSync string.
-    const NPM_DEP = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*(@[a-zA-Z0-9-._^~><=. |*x]+)?$/;
+    const NPM_DEP =
+      /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*(@[a-zA-Z0-9-._^~><=. |*x]+)?$/;
     const invalid = missing.filter((d) => !NPM_DEP.test(d));
     if (invalid.length > 0) {
       return {
@@ -513,9 +498,7 @@ export class SourceRegistry {
       };
     }
 
-    process.stderr.write(
-      `Memoria: auto-installing dependencies: ${missing.join(", ")}\n`
-    );
+    process.stderr.write(`Memoria: auto-installing dependencies: ${missing.join(", ")}\n`);
 
     try {
       execFileSync("npm", ["install", "--save", ...missing], {
@@ -564,13 +547,13 @@ export class SourceRegistry {
         process.stderr.write(
           `Memoria: SECURITY/DATA — collector config failed to decrypt (${(err as Error).message}). ` +
             `Preserved the original at ${backup}; starting with empty state. ` +
-            `If MEMORIA_ENCRYPTION_KEY changed, restore the matching key to recover stored credentials.\n`
+            `If MEMORIA_ENCRYPTION_KEY changed, restore the matching key to recover stored credentials.\n`,
         );
       } catch (backupErr) {
         process.stderr.write(
           `Memoria: collector config failed to decrypt and the backup also failed ` +
             `(${(backupErr as Error).message}); leaving the original in place. ` +
-            `Operator action required before re-enabling sources.\n`
+            `Operator action required before re-enabling sources.\n`,
         );
       }
       return defaultState;

@@ -23,11 +23,18 @@ const KEY = process.env.MEMORIA_API_KEY || "demo-key-123";
 if (!fs.existsSync(path.join(mcpDir, "dist", "http.js"))) {
   console.log("Building mcp-server (dist/http.js missing)…");
   const b = spawnSync("npm", ["run", "build"], { cwd: mcpDir, stdio: "inherit", shell: true });
-  if (b.status !== 0) { console.error("Build failed."); process.exit(1); }
+  if (b.status !== 0) {
+    console.error("Build failed.");
+    process.exit(1);
+  }
 }
 
 // 2. Generate the demo data.
-const g = spawnSync(process.execPath, [path.join(__dirname, "generate-demo-data.mjs"), "--out", OUT], { stdio: "inherit" });
+const g = spawnSync(
+  process.execPath,
+  [path.join(__dirname, "generate-demo-data.mjs"), "--out", OUT],
+  { stdio: "inherit" },
+);
 if (g.status !== 0) process.exit(g.status ?? 1);
 
 // 3. Launch the dashboard against the demo store.

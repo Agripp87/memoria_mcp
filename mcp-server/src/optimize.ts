@@ -15,9 +15,7 @@ export function runDecay(store: MemoryStore): OptimizeResult {
   return {
     action: "decay",
     affected,
-    details: [
-      `Reduced importance by 1 for ${affected} chunk(s) not accessed in 60+ days`,
-    ],
+    details: [`Reduced importance by 1 for ${affected} chunk(s) not accessed in 60+ days`],
   };
 }
 
@@ -26,9 +24,7 @@ export function runPromote(store: MemoryStore): OptimizeResult {
   return {
     action: "promote",
     affected,
-    details: [
-      `Increased importance by 1 for ${affected} chunk(s) with 10+ accesses`,
-    ],
+    details: [`Increased importance by 1 for ${affected} chunk(s) with 10+ accesses`],
   };
 }
 
@@ -36,7 +32,7 @@ export function detectStale(store: MemoryStore): OptimizeResult {
   const stale = store.findStale(90, 5);
   const details = stale.map(
     (s) =>
-      `${s.file} — importance: ${s.importance}, last accessed: ${s.lastAccessed}, accesses: ${s.accessCount}`
+      `${s.file} — importance: ${s.importance}, last accessed: ${s.lastAccessed}, accesses: ${s.accessCount}`,
   );
 
   return {
@@ -74,10 +70,7 @@ export function findDuplicates(store: MemoryStore): OptimizeResult {
   };
 }
 
-export function runOptimize(
-  store: MemoryStore,
-  action: string
-): OptimizeResult {
+export function runOptimize(store: MemoryStore, action: string): OptimizeResult {
   switch (action) {
     case "decay":
       return runDecay(store);

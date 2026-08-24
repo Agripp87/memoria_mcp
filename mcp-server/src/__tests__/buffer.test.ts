@@ -30,7 +30,9 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("EventBuffer capacity / unsynced-loss accounting", () => {

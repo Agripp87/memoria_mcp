@@ -17,6 +17,6 @@ try {
   process.stderr.write(`prefetch: cached ${MODEL} to ${env.cacheDir}\n`);
 } catch (err) {
   process.stderr.write(
-    `prefetch: skipped (${err?.message ?? err}); runtime will download ${MODEL} on first use\n`
+    `prefetch: skipped (${err?.message ?? err}); runtime will download ${MODEL} on first use\n`,
   );
 }

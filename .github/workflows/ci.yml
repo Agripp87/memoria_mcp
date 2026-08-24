@@ -37,6 +37,25 @@ jobs:
       - if: matrix.os != 'ubuntu-latest'
         run: npm test
 
+  lint:
+    name: Lint + format (mcp-server)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp-server
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+      - run: npm ci
+      # ESLint fails on errors only; `no-explicit-any` is a warning by design
+      # (see eslint.config.js) so it does not block a merge.
+      - run: npm run lint
+      - run: npm run format:check
+
   python:
     name: Python syntax (integrations)
     runs-on: ubuntu-latest

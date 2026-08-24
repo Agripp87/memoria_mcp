@@ -22,7 +22,9 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(ROOT, { recursive: true, force: true });
+  } catch {}
 });
 
 /** Try to create a symlink; return false if the platform forbids it (e.g.
@@ -67,7 +69,9 @@ describe("resolveMemoryPath (real validator)", () => {
     try {
       expect(() => resolveMemoryPath("leak.md")).toThrow(/symlink/i);
     } finally {
-      try { fs.unlinkSync(link); } catch {}
+      try {
+        fs.unlinkSync(link);
+      } catch {}
     }
   });
 
@@ -78,7 +82,9 @@ describe("resolveMemoryPath (real validator)", () => {
     try {
       expect(() => resolveMemoryPath("dangling.md")).toThrow(/symlink/i);
     } finally {
-      try { fs.unlinkSync(link); } catch {}
+      try {
+        fs.unlinkSync(link);
+      } catch {}
     }
   });
 });

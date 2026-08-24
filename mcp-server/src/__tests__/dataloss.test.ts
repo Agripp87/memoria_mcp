@@ -48,7 +48,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
-  try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(root, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("A2: rate-limited events are deferred, not dropped", () => {
@@ -81,7 +83,10 @@ describe("A5: dedup/rate state only mutates after a successful write", () => {
     fs.writeFileSync(path.join(memoriesDir, "daily"), "not a dir", "utf-8");
 
     const pipeline = new IngestionPipeline({ memoriesDir });
-    const event = ev({ id: "retry-me", content: "a body that will fail to persist on the first try" });
+    const event = ev({
+      id: "retry-me",
+      content: "a body that will fail to persist on the first try",
+    });
 
     const r1 = await pipeline.ingest([event]);
     expect(r1.written).toBe(0);
@@ -117,7 +122,11 @@ describe("A1: only durably-handled events are marked synced (daemon path)", () =
 
     const outcomesFor = (events: RawEvent[]) => ({
       processed: events.length,
-      written: 0, deduplicated: 0, rateLimited: 0, errors: [], writtenSources: [],
+      written: 0,
+      deduplicated: 0,
+      rateLimited: 0,
+      errors: [],
+      writtenSources: [],
       outcomes: events.map((e) => ({
         id: e.id,
         source: e.source,
@@ -170,8 +179,8 @@ describe("A4: fairness and backpressure", () => {
     // Source A floods 40 high-importance events; source B has 3 low ones.
     buffer.pushBatch(
       Array.from({ length: 40 }, (_, i) =>
-        ev({ id: `a${i}`, source: "flood", importanceEstimate: 9, content: `flood ${i}` })
-      )
+        ev({ id: `a${i}`, source: "flood", importanceEstimate: 9, content: `flood ${i}` }),
+      ),
     );
     buffer.pushBatch([
       ev({ id: "b1", source: "quiet", importanceEstimate: 2, content: "quiet 1" }),
@@ -195,10 +204,15 @@ describe("A4: fairness and backpressure", () => {
     const registry = { getActiveAdapters: () => new Map(), saveCheckpoints: () => {} } as any;
     const daemon = new CollectorDaemon(registry, buffer, { backpressureThreshold: 0.8 });
 
-    buffer.pushBatch(Array.from({ length: 79 }, (_, i) => ev({ id: `e${i}`, content: `body ${i}` })));
+    buffer.pushBatch(
+      Array.from({ length: 79 }, (_, i) => ev({ id: `e${i}`, content: `body ${i}` })),
+    );
     expect(daemon.backpressured()).toBe(false);
 
-    buffer.pushBatch([ev({ id: "e79", content: "body 79" }), ev({ id: "e80", content: "body 80" })]);
+    buffer.pushBatch([
+      ev({ id: "e79", content: "body 79" }),
+      ev({ id: "e80", content: "body 80" }),
+    ]);
     expect(daemon.backpressured()).toBe(true);
 
     await buffer.destroy();

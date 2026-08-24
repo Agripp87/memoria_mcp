@@ -10,18 +10,9 @@
  * Requires: googleapis npm package (auto-installed)
  */
 
-import type {
-  SourceAdapter,
-  AdapterInfo,
-  AdapterConfig,
-  RawEvent,
-} from "./base.js";
+import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
 import { estimateImportance, classifyPrivacy } from "./base.js";
-import {
-  getGoogleAuth,
-  extractGoogleAuthConfig,
-  clearGoogleAuth,
-} from "./google-auth.js";
+import { getGoogleAuth, extractGoogleAuthConfig } from "./google-auth.js";
 
 export class GoogleGmailAdapter implements SourceAdapter {
   readonly info: AdapterInfo = {
@@ -58,9 +49,7 @@ export class GoogleGmailAdapter implements SourceAdapter {
 
   async init(config: AdapterConfig): Promise<void> {
     this.config = config;
-    const authConfig = extractGoogleAuthConfig(
-      config.settings as Record<string, any>
-    );
+    const authConfig = extractGoogleAuthConfig(config.settings as Record<string, any>);
     const auth = await getGoogleAuth(authConfig);
 
     const { google } = await import("googleapis");
@@ -74,7 +63,8 @@ export class GoogleGmailAdapter implements SourceAdapter {
       } catch (err: any) {
         throw new Error(
           `Gmail API connection failed: ${err.message}. ` +
-            "Ensure the Gmail API is enabled in your Google Cloud Console."
+            "Ensure the Gmail API is enabled in your Google Cloud Console.",
+          { cause: err },
         );
       }
     }
@@ -99,29 +89,19 @@ export class GoogleGmailAdapter implements SourceAdapter {
           this.checkpoint,
           labels,
           excludeLabels,
-          maxResults
+          maxResults,
         );
         events.push(...historyEvents);
       } else {
         // Fallback: list recent messages
-        const listEvents = await this.pollList(
-          labels,
-          excludeLabels,
-          maxResults
-        );
+        const listEvents = await this.pollList(labels, excludeLabels, maxResults);
         events.push(...listEvents);
       }
     } catch (err: any) {
       // historyId expired — fall back to list
       if (err.code === 404 || err.message?.includes("historyId")) {
-        process.stderr.write(
-          "Memoria: Gmail historyId expired, falling back to list\n"
-        );
-        const listEvents = await this.pollList(
-          labels,
-          excludeLabels,
-          maxResults
-        );
+        process.stderr.write("Memoria: Gmail historyId expired, falling back to list\n");
+        const listEvents = await this.pollList(labels, excludeLabels, maxResults);
         events.push(...listEvents);
       } else {
         process.stderr.write(`Memoria: Gmail poll error: ${err.message}\n`);
@@ -137,7 +117,7 @@ export class GoogleGmailAdapter implements SourceAdapter {
     startHistoryId: string,
     labels: string[],
     excludeLabels: string[],
-    maxResults: number
+    maxResults: number,
   ): Promise<RawEvent[]> {
     const events: RawEvent[] = [];
     const messageIds: string[] = [];
@@ -159,9 +139,7 @@ export class GoogleGmailAdapter implements SourceAdapter {
           if (msg.message?.id) {
             // Skip excluded labels
             const msgLabels = msg.message.labelIds || [];
-            const hasExcluded = msgLabels.some((l: string) =>
-              excludeLabels.includes(l)
-            );
+            const hasExcluded = msgLabels.some((l: string) => excludeLabels.includes(l));
             if (!hasExcluded) {
               messageIds.push(msg.message.id);
             }
@@ -191,14 +169,12 @@ export class GoogleGmailAdapter implements SourceAdapter {
   private async pollList(
     labels: string[],
     excludeLabels: string[],
-    maxResults: number
+    maxResults: number,
   ): Promise<RawEvent[]> {
     const events: RawEvent[] = [];
 
     // Build query to exclude unwanted labels
-    const excludeQuery = excludeLabels
-      .map((l) => `-label:${l.toLowerCase()}`)
-      .join(" ");
+    const excludeQuery = excludeLabels.map((l) => `-label:${l.toLowerCase()}`).join(" ");
     const labelQuery = labels.map((l) => `label:${l.toLowerCase()}`).join(" OR ");
     const query = `(${labelQuery}) ${excludeQuery} newer_than:1d`;
 
@@ -222,7 +198,9 @@ export class GoogleGmailAdapter implements SourceAdapter {
         this.checkpoint = String(profile.data.historyId);
       }
     } catch (err) {
-      process.stderr.write(`Memoria gmail: failed to update historyId: ${(err as Error).message}\n`);
+      process.stderr.write(
+        `Memoria gmail: failed to update historyId: ${(err as Error).message}\n`,
+      );
     }
 
     return events;
@@ -241,9 +219,7 @@ export class GoogleGmailAdapter implements SourceAdapter {
 
       const headers = msg.data.payload?.headers || [];
       const getHeader = (name: string): string =>
-        headers.find(
-          (h: any) => h.name.toLowerCase() === name.toLowerCase()
-        )?.value || "";
+        headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
 
       const from = getHeader("From");
       const to = getHeader("To");
@@ -261,9 +237,7 @@ export class GoogleGmailAdapter implements SourceAdapter {
       const fromName = fromMatch?.[1] || fromMatch?.[2] || from;
       const fromAddress = fromMatch?.[2] || from;
 
-      const content = snippet
-        ? `${subject} — ${snippet.slice(0, 300)}`
-        : subject;
+      const content = snippet ? `${subject} — ${snippet.slice(0, 300)}` : subject;
 
       const meta: Record<string, unknown> = {
         from: fromName,
@@ -271,13 +245,10 @@ export class GoogleGmailAdapter implements SourceAdapter {
         to,
         subject,
         labels: labelIds,
-        isAutomated:
-          /no-?reply|automated|noreply|mailer-daemon/i.test(fromAddress),
+        isAutomated: /no-?reply|automated|noreply|mailer-daemon/i.test(fromAddress),
         isImportant: labelIds.includes("IMPORTANT"),
         isStarred: labelIds.includes("STARRED"),
-        category: labelIds.find((l: string) =>
-          l.startsWith("CATEGORY_")
-        ) ?? null,
+        category: labelIds.find((l: string) => l.startsWith("CATEGORY_")) ?? null,
       };
 
       const importance = estimateImportance(content, meta);
@@ -295,19 +266,14 @@ export class GoogleGmailAdapter implements SourceAdapter {
         id: `gmail-${messageId}`,
         source: "google-gmail",
         eventType: "email_received",
-        content:
-          privacy === "summarize"
-            ? `${subject} (from ${fromName})`
-            : content,
+        content: privacy === "summarize" ? `${subject} (from ${fromName})` : content,
         timestamp,
         meta,
         importanceEstimate: adjustedImportance,
         privacyTier: privacy,
       };
     } catch (err: any) {
-      process.stderr.write(
-        `Memoria: Gmail fetch error for ${messageId}: ${err.message}\n`
-      );
+      process.stderr.write(`Memoria: Gmail fetch error for ${messageId}: ${err.message}\n`);
       return null;
     }
   }

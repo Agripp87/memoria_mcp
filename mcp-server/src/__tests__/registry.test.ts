@@ -30,7 +30,9 @@ beforeEach(() => {
 afterEach(() => {
   delete process.env.MEMORIA_ALLOW_SHELL_SOURCES;
   delete process.env.MEMORIA_FILE_WATCHER_ROOTS;
-  try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(root, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("SourceRegistry.addCustomSource gating", () => {
@@ -54,7 +56,7 @@ describe("SourceRegistry.addCustomSource gating", () => {
 
   it("refuses a file_watcher pointed at the collector key/credential dir", () => {
     const r = reg.addCustomSource(
-      def({ id: "leak", mode: "file_watcher", watchPath: path.join(dataDir, "collector.key") })
+      def({ id: "leak", mode: "file_watcher", watchPath: path.join(dataDir, "collector.key") }),
     );
     expect(r.success).toBe(false);
     expect(r.message).toMatch(/collector data directory/i);

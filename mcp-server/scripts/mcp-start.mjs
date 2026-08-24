@@ -41,7 +41,9 @@ try {
   const age = Date.now() - statSync(lock).mtimeMs;
   if (age < 60_000) {
     buildAllowed = false;
-    warn(`another launcher holds the build lock (${Math.round(age / 1000)}s old) — skipping build, serving existing dist/`);
+    warn(
+      `another launcher holds the build lock (${Math.round(age / 1000)}s old) — skipping build, serving existing dist/`,
+    );
   } else {
     rmSync(lock, { force: true }); // stale lock from a killed launcher
   }
@@ -50,7 +52,10 @@ try {
 }
 
 if (existsSync(tsc) && buildAllowed) {
-  try { mkdirSync(root, { recursive: true }); writeFileSync(lock, String(process.pid)); } catch {}
+  try {
+    mkdirSync(root, { recursive: true });
+    writeFileSync(lock, String(process.pid));
+  } catch {}
   const started = Date.now();
   // stdio: pipe everything — nothing from the compiler may reach stdout.
   const build = spawnSync(process.execPath, [tsc], {
@@ -62,14 +67,16 @@ if (existsSync(tsc) && buildAllowed) {
   const output = `${build.stdout || ""}${build.stderr || ""}`.trim();
   if (output) process.stderr.write(output + "\n");
 
-  try { rmSync(lock, { force: true }); } catch {}
+  try {
+    rmSync(lock, { force: true });
+  } catch {}
 
   if (build.status === 0) {
     warn(`build OK (${Date.now() - started}ms)`);
   } else if (existsSync(entry)) {
     warn(
       `BUILD FAILED (exit ${build.status}) — serving the previous dist/ build, ` +
-        `which may be stale. Fix the errors above and restart.`
+        `which may be stale. Fix the errors above and restart.`,
     );
   } else {
     warn(`BUILD FAILED (exit ${build.status}) and no previous dist/ to fall back on.`);
@@ -79,7 +86,7 @@ if (existsSync(tsc) && buildAllowed) {
   warn(
     buildAllowed
       ? `typescript is not installed and dist/ is missing — run 'npm ci' in ${root}.`
-      : "build lock held by another launcher and no dist/ exists yet — retry shortly."
+      : "build lock held by another launcher and no dist/ exists yet — retry shortly.",
   );
   process.exit(1);
 } else if (buildAllowed) {

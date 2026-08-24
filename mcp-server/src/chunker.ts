@@ -48,7 +48,7 @@ export function parseFrontmatter(content: string): {
         } else if (Array.isArray(v)) {
           // Stringify Date entries inside arrays too
           metadata[k] = v.map((item) =>
-            item instanceof Date ? item.toISOString().split("T")[0] : item
+            item instanceof Date ? item.toISOString().split("T")[0] : item,
           );
         }
       }
@@ -78,9 +78,7 @@ export function chunkMarkdown(content: string, filePath: string): Chunk[] {
   // the last newline, which made search results report off-by-one line
   // numbers in indexes.
   const frontmatterMatch = content.match(/^---\n[\s\S]*?\n---\n?/);
-  const frontmatterLines = frontmatterMatch
-    ? (frontmatterMatch[0].match(/\n/g) || []).length
-    : 0;
+  const frontmatterLines = frontmatterMatch ? (frontmatterMatch[0].match(/\n/g) || []).length : 0;
 
   for (const line of lines) {
     lineNum++;

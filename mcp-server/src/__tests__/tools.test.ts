@@ -19,7 +19,9 @@ const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "memoria-tools-"));
 process.env.MEMORIA_DIR = ROOT;
 const MEM = path.join(ROOT, "memories");
 
-type Handler = (args: Record<string, unknown>) => Promise<{ content: Array<{ type: string; text: string }> }>;
+type Handler = (
+  args: Record<string, unknown>,
+) => Promise<{ content: Array<{ type: string; text: string }> }>;
 const handlers = new Map<string, Handler>();
 
 let store: any;
@@ -44,16 +46,29 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  try { store?.close(); } catch {}
-  try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {}
+  try {
+    store?.close();
+  } catch {}
+  try {
+    fs.rmSync(ROOT, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("registration", () => {
   it("registers the 13 core tools", () => {
     for (const name of [
-      "memory_search", "memory_read", "memory_write", "memory_list",
-      "memory_index", "memory_daily", "memory_optimize", "memory_reflect",
-      "memory_stats", "memory_lint", "memory_compile", "memory_compact",
+      "memory_search",
+      "memory_read",
+      "memory_write",
+      "memory_list",
+      "memory_index",
+      "memory_daily",
+      "memory_optimize",
+      "memory_reflect",
+      "memory_stats",
+      "memory_lint",
+      "memory_compile",
+      "memory_compact",
       "memory_entities",
     ]) {
       expect(handlers.has(name), name).toBe(true);
@@ -63,8 +78,13 @@ describe("registration", () => {
 
 describe("memory_write / memory_read round trip", () => {
   it("writes a valid memory and reads it back", async () => {
-    const content = "---\nname: Widget\ndescription: a widget\ntype: project\nimportance: 6\n---\n\nWidget details body.";
-    const w = await handlers.get("memory_write")!({ file: "project/widget.md", content, force: false });
+    const content =
+      "---\nname: Widget\ndescription: a widget\ntype: project\nimportance: 6\n---\n\nWidget details body.";
+    const w = await handlers.get("memory_write")!({
+      file: "project/widget.md",
+      content,
+      force: false,
+    });
     expect(text(w)).toContain("Written: project/widget.md");
 
     const r = await handlers.get("memory_read")!({ file: "project/widget.md" });
@@ -72,7 +92,11 @@ describe("memory_write / memory_read round trip", () => {
   });
 
   it("rejects an invalid filename", async () => {
-    const w = await handlers.get("memory_write")!({ file: "bad name!.md", content: "x", force: false });
+    const w = await handlers.get("memory_write")!({
+      file: "bad name!.md",
+      content: "x",
+      force: false,
+    });
     expect(text(w)).toContain("Error: filename must match");
   });
 
@@ -93,11 +117,17 @@ describe("memory_write / memory_read round trip", () => {
   });
 
   it("flags near-duplicate content instead of writing (dedup gate)", async () => {
-    const original = "---\nname: Dup A\ntype: reference\nimportance: 5\n---\n\nA very distinctive sentence about purple gorillas dancing at midnight in the observatory.";
-    await handlers.get("memory_write")!({ file: "references/dup-a.md", content: original, force: false });
+    const original =
+      "---\nname: Dup A\ntype: reference\nimportance: 5\n---\n\nA very distinctive sentence about purple gorillas dancing at midnight in the observatory.";
+    await handlers.get("memory_write")!({
+      file: "references/dup-a.md",
+      content: original,
+      force: false,
+    });
     const dup = await handlers.get("memory_write")!({
       file: "references/dup-b.md",
-      content: "---\nname: Dup B\ntype: reference\nimportance: 5\n---\n\nA very distinctive sentence about purple gorillas dancing at midnight in the observatory.",
+      content:
+        "---\nname: Dup B\ntype: reference\nimportance: 5\n---\n\nA very distinctive sentence about purple gorillas dancing at midnight in the observatory.",
       force: false,
     });
     expect(text(dup)).toContain("Potential duplicates found");
@@ -114,7 +144,10 @@ describe("memory_search", () => {
   });
 
   it("returns a friendly message when nothing matches", async () => {
-    const r = await handlers.get("memory_search")!({ query: "zzz-nonexistent-term-qqq", max_results: 3 });
+    const r = await handlers.get("memory_search")!({
+      query: "zzz-nonexistent-term-qqq",
+      max_results: 3,
+    });
     // Either no matches or low-score results — must not throw. (Hash provider
     // can surface weak lexical matches.)
     expect(text(r).length).toBeGreaterThan(0);
@@ -179,21 +212,26 @@ describe("memory_optimize / memory_reflect / memory_compact / memory_lint", () =
 describe("memory_compile", () => {
   it("compiles content into a typed core memory with frontmatter + index update", async () => {
     const r = await handlers.get("memory_compile")!({
-      content: "A compiled insight about the quarterly llama migration patterns across the Andes, long enough to be its own memory.",
+      content:
+        "A compiled insight about the quarterly llama migration patterns across the Andes, long enough to be its own memory.",
       name: "Llama migration insight",
       type: "reference",
       tags: ["llamas", "insight"],
     });
     const out = text(r);
     expect(out).toContain("Compiled: references/llama-migration-insight.md");
-    const file = fs.readFileSync(path.join(MEM, "references", "llama-migration-insight.md"), "utf-8");
+    const file = fs.readFileSync(
+      path.join(MEM, "references", "llama-migration-insight.md"),
+      "utf-8",
+    );
     expect(file).toContain("origin: compiled");
   });
 
   it("rejects an unmapped write path via type enum shape (error text on bad slug collision cap is separate)", async () => {
     // Slug collision: compiling the same name again appends -2 (no overwrite).
     const r = await handlers.get("memory_compile")!({
-      content: "A different body so the dedup gate does not fire: alpacas, not llamas, and entirely other words about highland grazing.",
+      content:
+        "A different body so the dedup gate does not fire: alpacas, not llamas, and entirely other words about highland grazing.",
       name: "Llama migration insight",
       type: "reference",
       tags: ["alpacas"],
@@ -210,7 +248,7 @@ describe("memory_entities", () => {
       daily,
       `\n## 10:00 AM — tools-src\n\nfirst event body\n\n*importance: 5 | privacy: send*\n` +
         `\n## 10:01 AM — tools-src\n\nsecond event body\n\n*importance: 5 | privacy: send*\n` +
-        `\n## 10:02 AM — tools-src\n\nthird event body\n\n*importance: 8 | privacy: send*\n`
+        `\n## 10:02 AM — tools-src\n\nthird event body\n\n*importance: 8 | privacy: send*\n`,
     );
     const r = await handlers.get("memory_entities")!({ days: 30, min_events: 3 });
     expect(text(r)).toContain("entities/tools-src.md");

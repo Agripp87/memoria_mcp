@@ -4,12 +4,7 @@
  * Auto-installed when the user enables this source.
  */
 
-import type {
-  SourceAdapter,
-  AdapterInfo,
-  AdapterConfig,
-  RawEvent,
-} from "./base.js";
+import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
 import { estimateImportance, classifyPrivacy } from "./base.js";
 
 export class EmailAdapter implements SourceAdapter {
@@ -45,15 +40,10 @@ export class EmailAdapter implements SourceAdapter {
   async init(config: AdapterConfig): Promise<void> {
     this.config = config;
 
-    const { host, port, secure, user, password } = config.settings as Record<
-      string,
-      any
-    >;
+    const { host, port, secure, user, password } = config.settings as Record<string, any>;
 
     if (!host || !user || !password) {
-      throw new Error(
-        "Email adapter requires host, user, and password in settings."
-      );
+      throw new Error("Email adapter requires host, user, and password in settings.");
     }
 
     try {
@@ -70,7 +60,8 @@ export class EmailAdapter implements SourceAdapter {
     } catch (err: any) {
       throw new Error(
         `Email connection failed: ${err.message}. ` +
-          "Check your IMAP credentials and ensure app-specific passwords are used for Gmail/iCloud."
+          "Check your IMAP credentials and ensure app-specific passwords are used for Gmail/iCloud.",
+        { cause: err },
       );
     }
   }
@@ -102,16 +93,11 @@ export class EmailAdapter implements SourceAdapter {
           const env = message.envelope;
           if (!env) continue;
 
-          const from =
-            env.from?.[0]?.name ?? env.from?.[0]?.address ?? "unknown";
-          const to = (env.to ?? [])
-            .map((t: any) => t.name ?? t.address)
-            .join(", ");
+          const from = env.from?.[0]?.name ?? env.from?.[0]?.address ?? "unknown";
+          const to = (env.to ?? []).map((t: any) => t.name ?? t.address).join(", ");
 
           const subject = env.subject ?? "(no subject)";
-          const date = env.date
-            ? new Date(env.date).toISOString()
-            : new Date().toISOString();
+          const date = env.date ? new Date(env.date).toISOString() : new Date().toISOString();
 
           // Extract preview text from source (first 500 chars)
           let preview = "";
@@ -128,16 +114,13 @@ export class EmailAdapter implements SourceAdapter {
             }
           }
 
-          const content = preview
-            ? `${subject} — ${preview.slice(0, 200)}`
-            : subject;
+          const content = preview ? `${subject} — ${preview.slice(0, 200)}` : subject;
 
           const meta: Record<string, unknown> = {
             from,
             to,
             subject,
-            isAutomated:
-              /no-?reply|automated|noreply|mailer-daemon/i.test(from),
+            isAutomated: /no-?reply|automated|noreply|mailer-daemon/i.test(from),
           };
 
           const importance = estimateImportance(content, meta);
@@ -150,8 +133,7 @@ export class EmailAdapter implements SourceAdapter {
             id: `email-${message.uid}`,
             source: "email",
             eventType: "email_received",
-            content:
-              privacy === "summarize" ? `${subject} (from ${from})` : content,
+            content: privacy === "summarize" ? `${subject} (from ${from})` : content,
             timestamp: date,
             meta,
             importanceEstimate: importance,

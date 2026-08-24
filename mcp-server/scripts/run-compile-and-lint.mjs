@@ -29,7 +29,12 @@ for (const rel of res.written) {
 if (res.written.length > 0) console.log("  " + tools.rebuildMarkdownIndex());
 
 // ── 2. Lint ────────────────────────────────────────────────
-const lint = await runLint(store, tools.MEMORIES_DIR, tools.getAllMemoryFiles, tools.getRelativePath);
+const lint = await runLint(
+  store,
+  tools.MEMORIES_DIR,
+  tools.getAllMemoryFiles,
+  tools.getRelativePath,
+);
 console.log("\n" + formatLintReport(lint));
 
 store.close();

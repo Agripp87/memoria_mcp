@@ -761,7 +761,7 @@ Near-term, roughly in order:
 - [ ] Claude Code plugin (MCP server + generic SessionStart/Stop sync hooks, one-command install)
 - [ ] Remote-agnostic sync hook pair (git remote required, object storage optional) built on `lib-union-merge.sh`
 - [ ] `server.json` + listing in the official MCP Registry; Docker MCP Catalog
-- [ ] ESLint + Prettier in CI; raise tool-handler and dashboard-JS coverage
+- [ ] Raise tool-handler and dashboard-JS coverage
 - [ ] Per-client API keys / scoped tokens (replace the single-key perimeter)
 - [ ] Move the derived index off FUSE so hosted instances can scale past one writer
 

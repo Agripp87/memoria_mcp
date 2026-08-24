@@ -5,7 +5,7 @@ import fs from "fs";
 import { IngestionPipeline } from "../collector/ingestion.js";
 import type { RawEvent } from "../collector/adapters/base.js";
 
-let root: string;       // temp Memoria root
+let root: string; // temp Memoria root
 let memoriesDir: string;
 
 function ev(over: Partial<RawEvent> = {}): RawEvent {
@@ -38,7 +38,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
-  try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(root, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("IngestionPipeline — H1: never writes into core memories", () => {
@@ -59,7 +61,9 @@ describe("IngestionPipeline — H1: never writes into core memories", () => {
       ],
     });
 
-    const result = await pipeline.ingest([ev({ content: "Some automated collector event body that is long enough." })]);
+    const result = await pipeline.ingest([
+      ev({ content: "Some automated collector event body that is long enough." }),
+    ]);
 
     // The event is written (to the daily log), and the core file is untouched.
     expect(result.written).toBe(1);
@@ -71,7 +75,10 @@ describe("IngestionPipeline — H1: never writes into core memories", () => {
     const pipeline = new IngestionPipeline({ memoriesDir });
     const result = await pipeline.ingest([
       ev({ source: "agent-alpha", content: "First detailed event body, well over twenty chars." }),
-      ev({ source: "agent-alpha", content: "Second detailed event body, distinct from the first." }),
+      ev({
+        source: "agent-alpha",
+        content: "Second detailed event body, distinct from the first.",
+      }),
       ev({ source: "agent-beta", content: "A beta event body that is also nice and long here." }),
     ]);
     expect(result.written).toBe(3);
@@ -81,9 +88,7 @@ describe("IngestionPipeline — H1: never writes into core memories", () => {
   it("skips an event that is near-identical to an existing memory", async () => {
     const pipeline = new IngestionPipeline({
       memoriesDir,
-      searchMemories: async () => [
-        { file: "daily/2026-01-01.md", content: "dup", score: 0.95 },
-      ],
+      searchMemories: async () => [{ file: "daily/2026-01-01.md", content: "dup", score: 0.95 }],
     });
     const result = await pipeline.ingest([ev()]);
     expect(result.written).toBe(0);
@@ -118,7 +123,13 @@ describe("IngestionPipeline — M3: daily-log importance only bumps for high-sig
     expect(fm).toMatch(/^importance: 5$/m);
 
     // High-signal event (>=7) bumps the file.
-    await pipeline.ingest([ev({ id: "h1", importanceEstimate: 9, content: "Critical: production outage decision recorded here." })]);
+    await pipeline.ingest([
+      ev({
+        id: "h1",
+        importanceEstimate: 9,
+        content: "Critical: production outage decision recorded here.",
+      }),
+    ]);
     fm = fs.readFileSync(todayDailyPath(), "utf-8");
     expect(fm).toMatch(/^importance: 9$/m);
   });
