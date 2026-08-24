@@ -9,7 +9,8 @@
     "memoria-mcp-http": "dist/http.js"
   },
   "files": [
-    "dist/",
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
     "scripts/",
     "README.md",
     "LICENSE"
