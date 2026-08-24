@@ -1,0 +1,11 @@
+# Daily logs are append-only: when two devices both add entries to the same
+# day, the correct merge is to keep both sides' lines. That is precisely what
+# git's built-in `union` low-level merge driver does, so same-day edits from
+# two machines merge silently instead of producing conflict markers.
+#
+# This is the single most important line in a synced Memoria store.
+memories/daily/*.md merge=union
+
+# Everything else takes the normal three-way merge: core memories are edited,
+# not appended, so a genuine conflict there deserves a human.
+*.md text eol=lf

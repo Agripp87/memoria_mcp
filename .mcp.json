@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "memoria": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/scripts/plugin-start.mjs"],
+      "env": {
+        "MEMORIA_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"
+      }
+    }
+  }
+}

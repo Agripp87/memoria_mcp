@@ -1,0 +1,10 @@
+# Derived and runtime state. The Markdown under memories/ is the source of
+# truth; everything below is rebuildable or device-local, and some of it is
+# secret. None of it belongs in the repo.
+data/
+.sync.log
+.last-sync
+
+# The object-storage mirror hook, if you use one: it tends to hold bucket
+# names and account details specific to one person.
+.memoria-mirror.sh

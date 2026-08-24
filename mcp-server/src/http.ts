@@ -265,7 +265,7 @@ const store = new MemoryStore(DB_PATH);
 function createServer(): McpServer {
   const server = new McpServer({
     name: "memoria",
-    version: "1.0.0",
+    version: "0.1.0",
     description:
       "Persistent, plain-text memory for Claude. MANDATORY: Every session MUST produce at least one daily log entry via memory_daily. At session start, read today's daily log. Before session ends, write a session summary. A session without a daily log entry is a failed session.",
   });

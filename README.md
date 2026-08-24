@@ -82,7 +82,24 @@ Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Co
 - npm
 - (Optional) an OpenAI API key for the highest-quality embeddings. Without one, a local `all-MiniLM-L6-v2` model provides semantic embeddings fully offline (one-time ~23 MB download).
 
-### 1. Build from source
+### Option A: install the Claude Code plugin (fastest)
+
+In Claude Code:
+
+```
+/plugin marketplace add Agripp87/memoria
+/plugin install memoria@memoria
+```
+
+That registers the MCP server and — if your store is a git repo — wires up the
+SessionStart/Stop sync hooks. The first launch installs dependencies and builds
+from source, which takes a minute; after that it starts immediately.
+
+Nothing else is required: the store defaults to `~/.memoria` and is created on
+the first write. Skip to [Tell Claude how to use it](#tell-claude-how-to-use-it) — or read on for
+a manual install.
+
+### Option B: build from source
 
 ```bash
 git clone https://github.com/Agripp87/memoria.git
@@ -91,9 +108,9 @@ npm install
 npm run build
 ```
 
-> An npm package (`@memoria/mcp`, `npx`-runnable) and a Claude Code plugin are on the [roadmap](#roadmap); until then, build from source.
+> An npm package (`@memoria/mcp`, `npx`-runnable) is on the [roadmap](#roadmap); until then the plugin or a source build are the two install paths.
 
-### 2. Try it on fake data (30 seconds)
+### Try it on fake data (30 seconds)
 
 ```bash
 npm run demo
@@ -101,7 +118,7 @@ npm run demo
 # → open http://127.0.0.1:3110/dashboard   (key: demo-key-123)
 ```
 
-### 3. Register with Claude Code
+### Register with Claude Code (manual install)
 
 ```bash
 claude mcp add memoria -s user -- node /absolute/path/to/memoria/mcp-server/scripts/mcp-start.mjs
@@ -129,9 +146,11 @@ The store defaults to `~/.memoria` (`MEMORIA_DIR` overrides it). The first `memo
 > checked-out source. If the build fails, it falls back to the previous
 > `dist/` with a loud stderr warning rather than starting nothing.
 
-Then tell Claude how to use it. Memoria works best with a short standing instruction in your `CLAUDE.md` — e.g. *"At session start, `memory_search` for context relevant to the task. Record decisions, solved bugs and preferences with `memory_daily` during the session, `memory_write` for durable facts. Do not capture transactional work."* The server's own MCP instructions already ask for at least one daily-log entry per session.
+### Tell Claude how to use it
 
-### 4. Remote access (claude.ai, other devices) with Docker
+Memoria works best with a short standing instruction in your `CLAUDE.md` — e.g. *"At session start, `memory_search` for context relevant to the task. Record decisions, solved bugs and preferences with `memory_daily` during the session, `memory_write` for durable facts. Do not capture transactional work."* The server's own MCP instructions already ask for at least one daily-log entry per session.
+
+### Remote access (claude.ai, other devices) with Docker
 
 ```bash
 cp .env.example .env
@@ -617,13 +636,28 @@ Results are position-optimized: high-importance memories placed at the start and
 
 ## Multi-device sync
 
-Memoria deliberately has **no sync service**. The store is a directory of Markdown files, so the simplest robust setup is:
+Memoria deliberately has **no sync service**. The store is a directory of Markdown files, so git already solves this — [`scripts/sync/`](scripts/sync/README.md) just makes the setup correct rather than merely possible.
 
-1. Make `MEMORIA_DIR` a **private git repo** (`git init` in `~/.memoria`, add a private remote). Commit `memories/`; git-ignore `data/` (see the store layout above).
-2. On each machine, pull before a session and commit + push after it. With Claude Code this is two hooks — `SessionStart` → `git pull`, `Stop` → `git add memories && git commit && git push` — both failing soft so a network blip never blocks a session.
-3. Optionally mirror to object storage (S3/GCS/R2) for a hosted instance: the maintainer runs Cloud Run on a GCS FUSE mount and syncs the laptop clone with `gsutil rsync`.
+```bash
+cd ~/.memoria                                   # your MEMORIA_DIR
+git init -b main
+cp /path/to/memoria/store-template/.gitattributes .   # <- the important bit
+cp /path/to/memoria/store-template/.gitignore .
+git add -A && git commit -m "Initial memory store"
+gh repo create my-memoria-store --private --source=. --push
+```
 
-**Conflicts.** Core memories change rarely and conflict rarely. The one file two machines routinely both append to is *today's daily log* — and for an append-only log the correct merge is mechanical: keep both sides' entries. [`scripts/lib-union-merge.sh`](scripts/lib-union-merge.sh) implements exactly that three-way append-union (base = last synced state, ours = local, theirs = remote) and returns non-zero for anything it cannot merge mechanically, so callers can fall back to a loud conflict marker instead of silently dropping entries. Source it from your hooks. Generalizing the maintainer's hook scripts into a drop-in, remote-agnostic pair is on the roadmap.
+Then wire [`memoria-sync-pull.sh`](scripts/sync/memoria-sync-pull.sh) into a Claude Code `SessionStart` hook and [`memoria-sync-push.sh`](scripts/sync/memoria-sync-push.sh) into `Stop` — the plugin does this for you. Both fail soft: offline, no remote, or no git repo at all, they log a line and let the session proceed. The push is rate-limited (default 15 min) so the Stop hook does not hit the network on every turn; local commits are never rate-limited.
+
+**Same-day conflicts solve themselves.** Two machines appending to the same daily log is the normal case, and for an append-only file the resolution is mechanical — keep both sides' lines. That is exactly git's built-in `union` merge driver, enabled by one line in the store template's `.gitattributes`:
+
+```gitattributes
+memories/daily/*.md merge=union
+```
+
+With that in place, same-day entries from two devices merge silently and none are lost. Core memories (`user/`, `project/`, `decisions/`, …) deliberately keep the normal three-way merge: those files are edited rather than appended, so a both-sides change is a real disagreement that deserves a human. (Union merge keeps every entry but does not reorder them chronologically — see the [sync guide](scripts/sync/README.md#why-daily-logs-never-conflict).)
+
+**Object storage is optional.** If you also run a hosted instance backed by a bucket, drop an executable at `$MEMORIA_DIR/.memoria-mirror.sh` and both scripts will call it with `pull` / `push` around the git sync. [`scripts/lib-union-merge.sh`](scripts/lib-union-merge.sh) implements the same append-union merge by hand for setups where git is not the transport and there is no merge base to work from.
 
 **From Claude Code's built-in memory.** [`scripts/sync-from-claude-memory.sh`](scripts/sync-from-claude-memory.sh) one-way-pulls `~/.claude/projects/*/memory/*.md` into the store so existing auto-memory is not lost.
 
@@ -758,8 +792,6 @@ The last critical re-review confirmed the fixes above are live and left a set of
 Near-term, roughly in order:
 
 - [ ] Publish `@memoria/mcp` to npm (`npx @memoria/mcp`) and `memoria-mcp` on PyPI (name reserved)
-- [ ] Claude Code plugin (MCP server + generic SessionStart/Stop sync hooks, one-command install)
-- [ ] Remote-agnostic sync hook pair (git remote required, object storage optional) built on `lib-union-merge.sh`
 - [ ] `server.json` + listing in the official MCP Registry; Docker MCP Catalog
 - [ ] Raise tool-handler and dashboard-JS coverage
 - [ ] Per-client API keys / scoped tokens (replace the single-key perimeter)
