@@ -54,7 +54,7 @@ Useful commands, all from `mcp-server/`:
 
 | Command | What it does |
 |---------|--------------|
-| `npm test` | Full Vitest suite (~250 tests, no network or API keys needed) |
+| `npm test` | Full Vitest suite (248 tests, no network or API keys needed) |
 | `npm run test:watch` | Watch mode |
 | `npm run test:coverage` | Suite + the coverage floors CI enforces |
 | `npm run lint` | ESLint |

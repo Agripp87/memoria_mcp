@@ -53,7 +53,7 @@ so the public history starts here.
   under `deploy/gcp/` with CI/CD and auto-rollback.
 - **Python `/ingest` client** (`integrations/orchestrator_hook.py`) for pushing
   events from external agent systems.
-- ~250 tests with per-file coverage floors, running on Ubuntu and Windows;
+- 248 tests with per-file coverage floors, running on Ubuntu and Windows;
   ESLint, Prettier, shellcheck and a full-history gitleaks scan in CI.
 
 ### Security

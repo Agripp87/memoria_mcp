@@ -4,7 +4,7 @@
 
 Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Code, claude.ai (Chat / CoWork) and any other MCP client a shared long-term memory. Memories are Markdown files with YAML frontmatter in a directory you control; a derived SQLite + FTS5 index provides hybrid semantic + keyword search; a set of agentic tools (reflect, lint, compact, compile) keeps the store healthy; and an optional collector daemon feeds in events from your own tools. It runs as a stdio server for Claude Code and as an OAuth 2.1 HTTP server for remote clients.
 
-> **Status: early public release.** The server has run as the maintainer's daily driver since spring 2026 (hosted on Cloud Run, ~240 tests, two adversarial security reviews). The packaging, plugin and npm publish are in progress — see [Roadmap](#roadmap). The sub-memory **collector** (iMessage / IMAP / Google ingestion) ships but should be treated as **experimental**; read [SECURITY.md](SECURITY.md) before enabling sources.
+> **Status: early public release.** The server has run as the maintainer's daily driver since spring 2026 (hosted on Cloud Run, 248 tests, two adversarial security reviews). It installs as a Claude Code plugin today; the npm and PyPI packages are still to come — see [Roadmap](#roadmap). The sub-memory **collector** (iMessage / IMAP / Google ingestion) ships but should be treated as **experimental**; read [SECURITY.md](SECURITY.md) before enabling sources.
 
 **Why Memoria instead of another memory layer?**
 
@@ -23,7 +23,7 @@ Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Co
  Direct file           MCP Server          MCP Server
  read/write           (HTTP/OAuth)        (HTTP/OAuth)
       |                    |                    |
-      +------------ $MEMORIA_DIR/memories/ ---------+
+      +-------- $MEMORIA_DIR/memories/ ---------+
                    (canonical store)
                          |
               +----------+----------+
@@ -71,7 +71,7 @@ Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Co
 - **Spec-compliant YAML parser**: Uses `js-yaml` for frontmatter (handles quoted colons, multi-line strings, special chars in tags) — gracefully degrades on malformed YAML
 - **Bounded lint operations**: Contradiction scan capped at top 30 memories by importance, batched 5-in-parallel to control embedding API cost
 - **Buffer capacity reporting**: `/ingest` returns `bufferDropped` count and `bufferUsage` so callers know when events are dropped at capacity
-- **Test suite**: 231 tests covering chunker, embeddings, store, optimizer, ingestion, path resolution (incl. symlink-leaf containment), file_watcher allowlisting, privacy-tier classification + sink-side redaction, AES-256-GCM crypto (round-trip/tamper/strict-key), YAML edge cases, access tracking, plus an **HTTP integration suite** (supertest over the real Express app: the `/dashboard/api` Bearer auth-gate, the full OAuth `authorization_code`+PKCE flow end-to-end, client-credential + API-key-decoupling checks, redirect allowlisting) and **wiki rendering** (code-safe `[[wikilink]]` resolution, stored-XSS escaping, link-label safety). CI fails on coverage regression via per-file floors.
+- **Test suite**: 248 tests covering chunker, embeddings, store, optimizer, ingestion, path resolution (incl. symlink-leaf containment), file_watcher allowlisting, privacy-tier classification + sink-side redaction, AES-256-GCM crypto (round-trip/tamper/strict-key), YAML edge cases, access tracking, plus an **HTTP integration suite** (supertest over the real Express app: the `/dashboard/api` Bearer auth-gate, the full OAuth `authorization_code`+PKCE flow end-to-end, client-credential + API-key-decoupling checks, redirect allowlisting) and **wiki rendering** (code-safe `[[wikilink]]` resolution, stored-XSS escaping, link-label safety). CI fails on coverage regression via per-file floors.
 - **File watcher**: Auto-reindex on change with 1.5s debounce, plus a periodic reindex sweep (default 5 min) as a fallback for mounts where `fs.watch` is inert (e.g. GCS FUSE on Cloud Run)
 
 ## Quick Start
@@ -551,7 +551,7 @@ memoria/
         ├── optimize.ts        # Decay, promotion, staleness, dedup
         ├── entities.ts        # Entity-page compilation (compile-don't-retrieve loop)
         ├── lint.ts            # Contradictions, orphans, gaps, stale refs, index drift, alias/low-confidence
-        ├── __tests__/         # Vitest test suite (~240 tests, incl. HTTP integration)
+        ├── __tests__/         # Vitest test suite (248 tests, incl. HTTP integration)
         └── collector/
             ├── crypto.ts      # AES-256-GCM encryption + master key
             ├── provenance.ts  # Durable append-only raw/provenance archive (data/raw/)
@@ -708,7 +708,7 @@ See [SECURITY.md](SECURITY.md) for the trust model (single-tenant, one static ke
 
 ```bash
 cd mcp-server
-npm test            # Run all 240 tests (CI runs them on ubuntu AND windows)
+npm test            # Run all 248 tests (CI runs them on ubuntu AND windows)
 npm run test:coverage  # Run with coverage (CI gate; per-file floors fail on regression)
 npm run test:watch  # Watch mode for development
 ```
