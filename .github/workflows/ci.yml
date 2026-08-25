@@ -80,8 +80,30 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      # The public repo must never contain a credential or a memory file. This
-      # scans the full history on every push/PR and fails the build on a hit.
-      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+      # The public repo must never contain a credential or a memory file.
+      #
+      # This runs the gitleaks binary directly rather than gitleaks-action.
+      # The action derives a commit range from the push event, and when that
+      # range does not resolve — as happened on the merge that seeded this
+      # repository from an unrelated history — it scans zero bytes and reports
+      # "no leaks found in partial scan". That is a scanner that can pass
+      # without having looked at anything, which is worse than no scanner. A
+      # pinned binary over the full history is deterministic and matches what
+      # runs locally.
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          curl -sSfL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks version
+      # Two passes: every commit that has ever existed, then the working tree
+      # (which also covers files that are only ever untracked in a PR).
+      - name: Scan full git history
+        run: ./gitleaks git . --no-banner --redact --config .gitleaks.toml
+      - name: Scan working tree
+        run: ./gitleaks dir . --no-banner --redact --config .gitleaks.toml
