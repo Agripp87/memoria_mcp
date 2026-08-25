@@ -7,8 +7,8 @@
     "name": "Agripp87",
     "url": "https://github.com/Agripp87"
   },
-  "homepage": "https://github.com/Agripp87/memoria#readme",
-  "repository": "https://github.com/Agripp87/memoria",
+  "homepage": "https://github.com/Agripp87/memoria_mcp#readme",
+  "repository": "https://github.com/Agripp87/memoria_mcp",
   "license": "Apache-2.0",
   "keywords": ["memory", "mcp", "markdown", "sync", "persistence"],
   "hooks": "./hooks/hooks.json"

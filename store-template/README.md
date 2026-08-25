@@ -13,8 +13,8 @@ Usage:
 ```bash
 cd ~/.memoria                 # or wherever $MEMORIA_DIR points
 git init -b main
-cp /path/to/memoria/store-template/.gitattributes .
-cp /path/to/memoria/store-template/.gitignore .
+cp /path/to/memoria_mcp/store-template/.gitattributes .
+cp /path/to/memoria_mcp/store-template/.gitignore .
 git add -A && git commit -m "Initial memory store"
 ```
 

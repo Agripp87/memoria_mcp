@@ -7,7 +7,7 @@ body:
       value: |
         **Before you write anything: no personal data.** No real memory files, daily logs, API keys, bearer tokens, refresh tokens, or your deployment's hostname. Redact log output. If you need a repro store, generate a fake one with `npm run demo:gen -- --out /tmp/store`.
 
-        Security vulnerabilities do **not** belong here — use [private reporting](https://github.com/Agripp87/memoria/security/advisories/new).
+        Security vulnerabilities do **not** belong here — use [private reporting](https://github.com/Agripp87/memoria_mcp/security/advisories/new).
 
   - type: textarea
     id: what-happened

@@ -560,7 +560,7 @@ export function createDashboardRouter(store: MemoryStore): Router {
 // Link shown in the dashboard's About card. Forks/self-hosters can point it
 // at their own repo or docs with MEMORIA_REPO_URL. Attribute-escaped because
 // it is interpolated into an href.
-const REPO_URL = (process.env.MEMORIA_REPO_URL || "https://github.com/Agripp87/memoria")
+const REPO_URL = (process.env.MEMORIA_REPO_URL || "https://github.com/Agripp87/memoria_mcp")
   .replace(/&/g, "&amp;")
   .replace(/"/g, "&quot;")
   .replace(/</g, "&lt;")

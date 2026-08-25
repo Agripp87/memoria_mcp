@@ -87,7 +87,7 @@ Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Co
 In Claude Code:
 
 ```
-/plugin marketplace add Agripp87/memoria
+/plugin marketplace add Agripp87/memoria_mcp
 /plugin install memoria@memoria
 ```
 
@@ -102,8 +102,8 @@ a manual install.
 ### Option B: build from source
 
 ```bash
-git clone https://github.com/Agripp87/memoria.git
-cd memoria/mcp-server
+git clone https://github.com/Agripp87/memoria_mcp.git
+cd memoria_mcp/mcp-server
 npm install
 npm run build
 ```
@@ -121,7 +121,7 @@ npm run demo
 ### Register with Claude Code (manual install)
 
 ```bash
-claude mcp add memoria -s user -- node /absolute/path/to/memoria/mcp-server/scripts/mcp-start.mjs
+claude mcp add memoria -s user -- node /absolute/path/to/memoria_mcp/mcp-server/scripts/mcp-start.mjs
 ```
 
 or add to `~/.claude.json` / your project's `.claude/settings.local.json`:
@@ -131,7 +131,7 @@ or add to `~/.claude.json` / your project's `.claude/settings.local.json`:
   "mcpServers": {
     "memoria": {
       "command": "node",
-      "args": ["/absolute/path/to/memoria/mcp-server/scripts/mcp-start.mjs"],
+      "args": ["/absolute/path/to/memoria_mcp/mcp-server/scripts/mcp-start.mjs"],
       "env": { "MEMORIA_DIR": "/path/to/your/memory-store" }
     }
   }
@@ -197,7 +197,7 @@ For a durable cloud deployment see [`deploy/gcp/README.md`](deploy/gcp/README.md
 | `MEMORIA_INSECURE_ALLOW_FALLBACKS` | `false` | **Breaking-change escape hatch (2026-07):** with `BIND_ALL=true` the server now refuses to start unless `MEMORIA_OAUTH_CLIENT_SECRET` and `MEMORIA_ENCRYPTION_KEY` are both set (previously it warned and fell back to the API key / an on-disk key). Self-hosted setups that accept those risks can set this to `true` to restore the old behavior. |
 | `MEMORIA_VECTOR_SCAN_CAP` | `5000` | Max chunks scanned per query for semantic candidate selection. |
 | `MEMORIA_DIR` | Auto-detected | Override the root Memoria directory. Auto-detects: `/data/memoria` in Docker, `~/.memoria` locally. |
-| `MEMORIA_REPO_URL` | `https://github.com/Agripp87/memoria` | Link shown in the dashboard's About card (forks: point it at your repo/docs). |
+| `MEMORIA_REPO_URL` | `https://github.com/Agripp87/memoria_mcp` | Link shown in the dashboard's About card (forks: point it at your repo/docs). |
 | `PORT` | `3100` | HTTP server port |
 | `BIND_ALL` | `false` | Set to `true` to bind to `0.0.0.0` instead of `127.0.0.1` (required for Docker/Cloud Run) |
 | `DOCKER` | `false` | Set to `true` to use Docker-optimized defaults |
@@ -641,8 +641,8 @@ Memoria deliberately has **no sync service**. The store is a directory of Markdo
 ```bash
 cd ~/.memoria                                   # your MEMORIA_DIR
 git init -b main
-cp /path/to/memoria/store-template/.gitattributes .   # <- the important bit
-cp /path/to/memoria/store-template/.gitignore .
+cp /path/to/memoria_mcp/store-template/.gitattributes .   # <- the important bit
+cp /path/to/memoria_mcp/store-template/.gitignore .
 git add -A && git commit -m "Initial memory store"
 gh repo create my-memoria-store --private --source=. --push
 ```
@@ -771,7 +771,7 @@ Honest accounting of what is *not* hardened or covered yet — tracked for follo
 - **~~Dashboard key in `localStorage`~~ — fixed in Phase 3 (2026-07):** the dashboard now exchanges the API key once at `POST /dashboard/login` for an **httpOnly, SameSite=Strict session cookie** scoped to `Path=/dashboard` (never sent to `/mcp`//`/ingest`, unreadable from JS). A legacy key found in localStorage is migrated to a cookie session and removed. Bearer auth is unchanged for API clients.
 - **Wiki edge cases.** `[[wikilinks]]` resolve by name/path/basename; ambiguous names resolve to the first match. A `[[link]]` inside a markdown link label renders as literal text (markdown-it can't nest anchors) rather than a navigable link — by design, to avoid producing invalid HTML.
 
-The last critical re-review confirmed the fixes above are live and left a set of high/medium/low items still open, concentrated in exactly these themes (the single-key perimeter, tool-handler/browser-JS coverage, and the lack of staging). These are tracked in [GitHub issues](https://github.com/Agripp87/memoria/issues).
+The last critical re-review confirmed the fixes above are live and left a set of high/medium/low items still open, concentrated in exactly these themes (the single-key perimeter, tool-handler/browser-JS coverage, and the lack of staging). These are tracked in [GitHub issues](https://github.com/Agripp87/memoria_mcp/issues).
 
 ## Design Decisions
 

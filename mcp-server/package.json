@@ -20,12 +20,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Agripp87/memoria.git",
+    "url": "git+https://github.com/Agripp87/memoria_mcp.git",
     "directory": "mcp-server"
   },
-  "homepage": "https://github.com/Agripp87/memoria#readme",
+  "homepage": "https://github.com/Agripp87/memoria_mcp#readme",
   "bugs": {
-    "url": "https://github.com/Agripp87/memoria/issues"
+    "url": "https://github.com/Agripp87/memoria_mcp/issues"
   },
   "scripts": {
     "build": "tsc",

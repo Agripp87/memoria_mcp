@@ -18,8 +18,8 @@ git init -b main
 
 # 2. Take the template's .gitattributes and .gitignore. The .gitattributes is
 #    the important half — it enables the union merge driver for daily logs.
-cp /path/to/memoria/store-template/.gitattributes .
-cp /path/to/memoria/store-template/.gitignore .
+cp /path/to/memoria_mcp/store-template/.gitattributes .
+cp /path/to/memoria_mcp/store-template/.gitignore .
 
 # 3. Commit and publish to a PRIVATE remote. This repo holds your memory.
 git add -A && git commit -m "Initial memory store"
@@ -45,7 +45,7 @@ published. In `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "/path/to/memoria/scripts/sync/memoria-sync-pull.sh"
+            "command": "/path/to/memoria_mcp/scripts/sync/memoria-sync-pull.sh"
           }
         ]
       }
@@ -55,7 +55,7 @@ published. In `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "/path/to/memoria/scripts/sync/memoria-sync-push.sh"
+            "command": "/path/to/memoria_mcp/scripts/sync/memoria-sync-push.sh"
           }
         ]
       }

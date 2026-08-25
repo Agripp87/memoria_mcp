@@ -7,7 +7,7 @@ trust model before you expose an instance to a network or enable a source.
 ## Reporting a vulnerability
 
 Please **do not open a public issue** for security problems. Use
-[GitHub private vulnerability reporting](https://github.com/Agripp87/memoria/security/advisories/new)
+[GitHub private vulnerability reporting](https://github.com/Agripp87/memoria_mcp/security/advisories/new)
 on this repository. You will get an acknowledgement within a few days (solo
 maintainer, spare time); fixes for confirmed issues are prioritized over
 everything else and credited in the release notes unless you prefer otherwise.

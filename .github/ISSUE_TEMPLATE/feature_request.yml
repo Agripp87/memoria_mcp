@@ -7,7 +7,7 @@ body:
       value: |
         Memoria is maintained by one person in spare time. A proposal that explains the *problem* — and why the existing tools do not solve it — is far more likely to land than a proposal that only describes a solution.
 
-        Please check the [Roadmap](https://github.com/Agripp87/memoria#roadmap) first; the near-term list is already planned.
+        Please check the [Roadmap](https://github.com/Agripp87/memoria_mcp#roadmap) first; the near-term list is already planned.
 
   - type: textarea
     id: problem

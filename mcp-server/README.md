@@ -9,7 +9,7 @@ SQLite + FTS5 index provides hybrid semantic + keyword search; agentic tools
 (reflect, lint, compact, compile) keep the store healthy.
 
 Full documentation, deployment guides and the multi-device sync setup live in
-the repository: **<https://github.com/Agripp87/memoria>**
+the repository: **<https://github.com/Agripp87/memoria_mcp>**
 
 ## Install
 
@@ -38,7 +38,7 @@ BIND_ALL=true memoria-mcp-http
 
 Serves MCP at `/mcp` with OAuth 2.1 (PKCE, client credentials, dynamic
 registration) plus a web dashboard at `/dashboard`. Put it behind TLS. See
-[SECURITY.md](https://github.com/Agripp87/memoria/blob/main/SECURITY.md) for the
+[SECURITY.md](https://github.com/Agripp87/memoria_mcp/blob/main/SECURITY.md) for the
 trust model before exposing it — Memoria is single-tenant, and the bearer key is
 the only access control.
 
@@ -58,7 +58,7 @@ the only access control.
 ## Configuration
 
 Every knob is an environment variable; the full table is in the
-[repository README](https://github.com/Agripp87/memoria#environment-variables).
+[repository README](https://github.com/Agripp87/memoria_mcp#environment-variables).
 The ones that matter most: `MEMORIA_DIR`, `MEMORIA_EMBEDDINGS`,
 `OPENAI_API_KEY`, and — for any network-exposed deployment —
 `MEMORIA_API_KEY`, `MEMORIA_OAUTH_CLIENT_SECRET`, `MEMORIA_ENCRYPTION_KEY` and
@@ -66,4 +66,4 @@ The ones that matter most: `MEMORIA_DIR`, `MEMORIA_EMBEDDINGS`,
 
 ## License
 
-[Apache-2.0](https://github.com/Agripp87/memoria/blob/main/LICENSE)
+[Apache-2.0](https://github.com/Agripp87/memoria_mcp/blob/main/LICENSE)

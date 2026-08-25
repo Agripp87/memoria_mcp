@@ -12,7 +12,7 @@ PR to be merged without a long back-and-forth.
   changes the memory file format, alters the search scoring, or touches the auth
   surface should start as an issue so we can agree on direction before you spend
   an evening on it. Small fixes can go straight to a PR.
-- **Questions belong in [Discussions](https://github.com/Agripp87/memoria/discussions)**,
+- **Questions belong in [Discussions](https://github.com/Agripp87/memoria_mcp/discussions)**,
   not issues. Issues are for bugs and concrete proposals.
 - **Security issues never go in a public issue.** See [SECURITY.md](SECURITY.md).
 
@@ -39,8 +39,8 @@ share.
 ## Development setup
 
 ```bash
-git clone https://github.com/Agripp87/memoria.git
-cd memoria/mcp-server
+git clone https://github.com/Agripp87/memoria_mcp.git
+cd memoria_mcp/mcp-server
 npm install
 npm run build
 npm test
@@ -81,7 +81,8 @@ MEMORIA_DIR=/tmp/memoria-dev node dist/http.js
 4. **Shell scripts pass `shellcheck --severity=warning`.**
 5. **Commits are signed off** — see below.
 6. Docs updated if you changed behavior: the env-var table, the tool table and
-   `SECURITY.md` are the three that go stale fastest.
+   `SECURITY.md` are the three that go stale fastest. User-visible changes get
+   a line under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md).
 
 ## Sign-off (DCO)
 
@@ -130,6 +131,7 @@ radius:
 ## Releasing (maintainer)
 
 1. `npm test && npm run build && npm run lint && npm run format:check`
-2. Bump `mcp-server/package.json`, update the changelog entry in the release
+2. Bump `mcp-server/package.json` and move the `[Unreleased]` section of
+   [CHANGELOG.md](CHANGELOG.md) into a dated version heading
 3. Tag `vX.Y.Z`, push, let CI go green
 4. `npm publish --access public` from `mcp-server/` (`prepublishOnly` builds)
