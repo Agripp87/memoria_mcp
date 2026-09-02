@@ -9,11 +9,13 @@
 const MODEL = "Xenova/all-MiniLM-L6-v2";
 
 try {
-  const { pipeline, env } = await import("@xenova/transformers");
+  const { pipeline, env } = await import("@huggingface/transformers");
   if (process.env.MEMORIA_MODEL_CACHE) {
     env.cacheDir = process.env.MEMORIA_MODEL_CACHE;
   }
-  await pipeline("feature-extraction", MODEL);
+  // Must match the dtype embeddings.ts requests, or the image pre-bakes
+  // weights the runtime will not use and downloads the real ones anyway.
+  await pipeline("feature-extraction", MODEL, { dtype: "q8" });
   process.stderr.write(`prefetch: cached ${MODEL} to ${env.cacheDir}\n`);
 } catch (err) {
   process.stderr.write(

@@ -11,7 +11,33 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
-Nothing yet.
+### Security
+
+- Replaced the unmaintained `@xenova/transformers` with its maintained
+  successor `@huggingface/transformers` v3, and pinned `sharp` to a patched
+  release. This clears all five open advisories — four high and one critical —
+  which all descended from that one optional dependency's `onnx-proto` /
+  `protobufjs` chain. `npm audit` now reports zero vulnerabilities.
+
+### Fixed
+
+- Pinned the local embedding model to its int8 weights (`dtype: "q8"`).
+  transformers.js v3 changed the default to fp32 under the same model id, which
+  would have shifted the vector space by cosine 0.993 — close enough to look
+  correct, and invisible to the provider-change check, which keys on provider
+  name and dimension. Existing stores would have silently mixed two vector
+  spaces. Vectors are now byte-identical to every previously written index, and
+  `npm run verify:vectors` guards that going forward.
+
+### Added
+
+- `scripts/verify-vector-space.mjs` and a committed reference-vector fixture:
+  a regression guard asserting the local embedding provider still produces the
+  same vectors. Run it whenever the embedding dependency, model id or dtype
+  changes.
+- CI now builds the Docker image and smoke-tests it against `/health`. Nothing
+  previously exercised the Dockerfile, so a base-image or native-module break
+  could reach `main` unverified.
 
 ## [0.1.0] — 2026-08-25
 

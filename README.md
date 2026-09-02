@@ -52,7 +52,7 @@ Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Co
 - **17 MCP tools** for memory management, data collection, lint, knowledge compilation, entity-page compilation, and digest compaction
 - **Sub-memory collector** with source adapters for iMessage, Calendar, Email (IMAP), and user-defined custom sources
 - **Three-signal retrieval**: `score = 0.2 x recency + 0.3 x importance + 0.5 x relevance`
-- **Hybrid search**: Vector cosine similarity (0.7) + FTS5 BM25 keyword scoring (0.3). Three embedding providers, auto-selected: OpenAI `text-embedding-3-small` (if `OPENAI_API_KEY` set) → local `all-MiniLM-L6-v2` via `@xenova/transformers` (true semantic, fully offline after a one-time ~23MB download) → n-gram hashing (lexical fallback). Control with `MEMORIA_EMBEDDINGS`.
+- **Hybrid search**: Vector cosine similarity (0.7) + FTS5 BM25 keyword scoring (0.3). Three embedding providers, auto-selected: OpenAI `text-embedding-3-small` (if `OPENAI_API_KEY` set) → local `all-MiniLM-L6-v2` via `@huggingface/transformers` (true semantic, fully offline after a one-time ~23MB download) → n-gram hashing (lexical fallback). Control with `MEMORIA_EMBEDDINGS`.
 - **Cross-source temporal fusion**: Detects correlated activities across sources within configurable time windows
 - **Write-time dedup**: Checks top-3 similar memories before every write, returns duplicates for agent review
 - **Encrypted at rest**: All collector data encrypted with AES-256-GCM; master key auto-generated (chmod 600)

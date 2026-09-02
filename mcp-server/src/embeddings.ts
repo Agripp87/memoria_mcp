@@ -2,7 +2,7 @@
  * Embedding provider abstraction. Three providers, selected at module load:
  *
  *   - "openai" : OpenAI text-embedding-3-small (1536-dim). Best quality.
- *   - "minilm" : local all-MiniLM-L6-v2 via @xenova/transformers (384-dim).
+ *   - "minilm" : local all-MiniLM-L6-v2 via @huggingface/transformers (384-dim).
  *                True semantic embeddings, fully offline after a one-time
  *                model download. This is the default when no OpenAI key is set
  *                and the transformers package is installed.
@@ -29,7 +29,7 @@ type Provider = "openai" | "minilm" | "local";
 
 function minilmInstalled(): boolean {
   try {
-    createRequire(import.meta.url).resolve("@xenova/transformers");
+    createRequire(import.meta.url).resolve("@huggingface/transformers");
     return true;
   } catch {
     return false;
@@ -77,7 +77,7 @@ switch (provider) {
   case "local":
     process.stderr.write(
       "Memoria: using local n-gram hash embeddings (384-dim, lexical approximation). " +
-        "Install @xenova/transformers or set OPENAI_API_KEY for semantic search.\n",
+        "Install @huggingface/transformers or set OPENAI_API_KEY for semantic search.\n",
     );
     break;
 }
@@ -123,9 +123,9 @@ let extractorPromise: Promise<
   (input: string[], opts: object) => Promise<{ data: Float32Array; dims: number[] }>
 > | null = null;
 
-// Hand-written structural type for the slice of @xenova/transformers we use.
+// Hand-written structural type for the slice of @huggingface/transformers we use.
 // The package is an OPTIONAL dependency, so the build must not depend on its
-// bundled types: a `typeof import("@xenova/transformers")` cast (the previous
+// bundled types: a `typeof import("@huggingface/transformers")` cast (the previous
 // approach) makes tsc resolve the package at compile time and hard-fails any
 // install where the optional dep was skipped (offline, --omit=optional).
 interface TransformersModule {
@@ -136,7 +136,7 @@ interface TransformersModule {
 // Module specifier via a variable: tsc does not try to resolve a non-literal
 // dynamic import, so type-checking succeeds whether or not the optional dep is
 // installed. Runtime behavior is identical.
-const TRANSFORMERS_PKG = "@xenova/transformers";
+const TRANSFORMERS_PKG = "@huggingface/transformers";
 
 function loadExtractor() {
   if (!extractorPromise) {
@@ -146,7 +146,7 @@ function loadExtractor() {
         mod = await import(TRANSFORMERS_PKG);
       } catch (err) {
         throw new Error(
-          `MEMORIA_EMBEDDINGS=minilm but @xenova/transformers is not installed ` +
+          `MEMORIA_EMBEDDINGS=minilm but @huggingface/transformers is not installed ` +
             `(${(err as Error).message}). Run \`npm install\` or set MEMORIA_EMBEDDINGS=hash.`,
           { cause: err },
         );
@@ -160,7 +160,22 @@ function loadExtractor() {
         env.allowRemoteModels = false;
       }
       try {
-        const extractor = await pipeline("feature-extraction", MINILM_MODEL);
+        // dtype MUST stay "q8". @xenova/transformers v2 defaulted to the int8
+        // quantized weights; @huggingface/transformers v3 defaults to fp32
+        // instead. Same model id, different numbers: measured on identical
+        // input, v3-default vectors sit at cosine 0.9929 to the v2 vectors
+        // (max element delta 0.0217), while dtype "q8" reproduces them exactly
+        // (cosine 1.00000000, delta 0.000000).
+        //
+        // That 0.993 is the dangerous case, not the safe one. Every store
+        // written before this upgrade holds v2 vectors, and the provider-change
+        // check keys on provider name and dimension -- both unchanged here -- so
+        // nothing would trigger a reindex. The store would silently mix two
+        // vector spaces and quietly return slightly worse neighbours forever.
+        // Pinning q8 keeps every existing index exactly valid.
+        const extractor = await pipeline("feature-extraction", MINILM_MODEL, {
+          dtype: "q8",
+        });
         process.stderr.write(`Memoria: loaded ${MINILM_MODEL}\n`);
         return extractor as unknown as (
           input: string[],
