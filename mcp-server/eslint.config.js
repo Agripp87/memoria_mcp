@@ -88,12 +88,18 @@ export default tseslint.config(
   },
 
   {
-    // Plain-JS helper scripts (build wrapper, demo generator). No type info.
-    files: ["scripts/**/*.mjs"],
+    // Plain-JS helper scripts (build wrapper, demo generator) and the
+    // retrieval eval harness. No type info for either.
+    files: ["scripts/**/*.mjs", "eval/**/*.mjs"],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: "module",
-      globals: { process: "readonly", console: "readonly", URL: "readonly" },
+      globals: {
+        process: "readonly",
+        console: "readonly",
+        URL: "readonly",
+        performance: "readonly",
+      },
     },
     rules: {
       "no-undef": "off", // node globals resolved at runtime; tsc does not cover .mjs

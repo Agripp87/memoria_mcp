@@ -42,7 +42,9 @@
     "demo": "node scripts/demo.mjs",
     "demo:gen": "node scripts/generate-demo-data.mjs",
     "prepublishOnly": "npm run build",
-    "verify:vectors": "node scripts/verify-vector-space.mjs"
+    "verify:vectors": "node scripts/verify-vector-space.mjs",
+    "eval": "node eval/run.mjs",
+    "eval:hash": "node eval/run.mjs --hash"
   },
   "keywords": [
     "mcp",
