@@ -1,4 +1,4 @@
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 
 # Install build dependencies for better-sqlite3
 RUN apk add --no-cache python3 make g++
@@ -22,7 +22,7 @@ ENV MEMORIA_MODEL_CACHE=/app/mcp-server/.models
 RUN mkdir -p /app/mcp-server/.models && (node scripts/prefetch-model.mjs || true)
 
 # --- Production stage ---
-FROM node:22-alpine
+FROM node:26-alpine
 
 RUN apk add --no-cache tini curl
 
