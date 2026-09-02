@@ -80,6 +80,47 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: shellcheck --severity=warning scripts/*.sh scripts/sync/*.sh deploy/gcp/*.sh
 
+  docker:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Nothing else in CI touches the Dockerfile, so a base-image bump or a
+      # native-module break reached main unverified -- the tests run on the
+      # runner's own Node, never on the image that actually ships. better-sqlite3
+      # compiles from source in the builder stage, which is exactly the step a
+      # Node major is most likely to break.
+      - name: Build the image
+        run: docker build -t memoria:ci .
+      # Building proves it compiles; running proves the runtime stage is not
+      # missing a file or a permission, and that the fail-closed posture check
+      # in http.ts accepts a correct config. BIND_ALL is required for the
+      # process to listen on 0.0.0.0 so the port mapping works, and BIND_ALL in
+      # turn makes the other three mandatory. All four are ephemeral values
+      # generated here for this container; none are real credentials.
+      - name: Smoke-test the built image
+        run: |
+          set -euo pipefail
+          docker run -d --name memoria-ci -p 3100:3100             -e BIND_ALL=true             -e MEMORIA_EMBEDDINGS=hash             -e MEMORIA_API_KEY="$(openssl rand -hex 16)"             -e MEMORIA_OAUTH_CLIENT_SECRET="$(openssl rand -hex 16)"             -e MEMORIA_ENCRYPTION_KEY="$(openssl rand -hex 32)"             -e MEMORIA_PUBLIC_URL=http://localhost:3100             memoria:ci
+          ok=0
+          for _ in $(seq 1 30); do
+            # /health is unauthenticated and rate-limit exempt. Require the
+            # actual body: any 5xx would otherwise pass as "it responded".
+            if curl -fsS http://localhost:3100/health 2>/dev/null | grep -q '"status":"ok"'; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::container never returned a healthy /health response"
+            docker logs memoria-ci
+            docker rm -f memoria-ci >/dev/null 2>&1 || true
+            exit 1
+          fi
+          echo "image serves /health"
+          docker rm -f memoria-ci >/dev/null
+
   secrets:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
