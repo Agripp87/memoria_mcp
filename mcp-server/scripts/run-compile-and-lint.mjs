@@ -8,12 +8,17 @@
  * Usage: node scripts/run-compile-and-lint.mjs   (from mcp-server/, after tsc)
  */
 
-process.env.MEMORIA_DIR = process.env.MEMORIA_DIR || "C:\\Users\\egber\\memoria";
+// The store location is resolved by tools.js: $MEMORIA_DIR, else
+// /data/memoria under Docker, else ~/.memoria. Export MEMORIA_DIR to run
+// against a store elsewhere. Both steps below WRITE to the store (entity
+// pages, index), so the resolved path is echoed before anything happens.
 
 const { MemoryStore } = await import("../dist/store.js");
 const tools = await import("../dist/tools.js");
 const { buildEntityPages } = await import("../dist/entities.js");
 const { runLint, formatLintReport } = await import("../dist/lint.js");
+
+console.error(`Store: ${tools.MEMORIA_DIR}`);
 
 const store = new MemoryStore(tools.DB_PATH);
 

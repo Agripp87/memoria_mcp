@@ -17,7 +17,12 @@
  * idempotent (no write when content is unchanged).
  */
 
-process.env.MEMORIA_DIR = process.env.MEMORIA_DIR || "C:\\Users\\egber\\memoria";
+// The store location is resolved by tools.js: $MEMORIA_DIR, else
+// /data/memoria under Docker, else ~/.memoria. Export MEMORIA_DIR to point
+// this at a store elsewhere. The resolved path is echoed to stderr because
+// rewriting the index of the wrong store is otherwise a silent surprise.
 
-const { rebuildMarkdownIndex } = await import("../dist/tools.js");
+const { rebuildMarkdownIndex, MEMORIA_DIR } = await import("../dist/tools.js");
+
+console.error(`Rebuilding MEMORY_INDEX.md in ${MEMORIA_DIR}`);
 console.log(rebuildMarkdownIndex());

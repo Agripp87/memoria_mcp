@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+# Every job here only reads the repository and runs tests. Declaring this at
+# the top level means the GITHUB_TOKEN handed to CI cannot write to the repo
+# even if a step is compromised, rather than inheriting whatever the account
+# default happens to be.
+permissions:
+  contents: read
+
 jobs:
   typescript:
     name: TypeScript build (mcp-server, ${{ matrix.os }})
