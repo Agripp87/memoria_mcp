@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memoria-mcp"
+version = "0.0.2"
+description = "Memoria — persistent, plain-text memory for Claude over MCP. Name reservation; the server itself is distributed on npm."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Agripp87" }]
+keywords = ["mcp", "claude", "memory", "model-context-protocol", "agent-memory"]
+classifiers = [
+  "Development Status :: 1 - Planning",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+Homepage = "https://github.com/Agripp87/memoria_mcp"
+Repository = "https://github.com/Agripp87/memoria_mcp"
+Issues = "https://github.com/Agripp87/memoria_mcp/issues"
+Changelog = "https://github.com/Agripp87/memoria_mcp/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memoria_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "README.md", "LICENSE"]

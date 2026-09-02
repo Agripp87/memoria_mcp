@@ -34,3 +34,7 @@ mcp-server/.build.lock
 # Personal memory store — never belongs in the code repo. Point MEMORIA_DIR at
 # a separate directory (or its own private git repo); see README.
 memories/
+
+# Python build artifacts (pypi/)
+pypi/dist/
+pypi/*.egg-info/
