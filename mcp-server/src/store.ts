@@ -363,6 +363,10 @@ export class MemoryStore {
     query: string,
     maxResults: number = 10,
     weights = { recency: 0.2, importance: 0.3, relevance: 0.5 },
+    // Split of the relevance signal between vector cosine and keyword score.
+    // Exposed as a parameter purely so eval/ can sweep it; every caller in the
+    // server uses the default, and the default is the shipped behaviour.
+    vectorMix: number = 0.7,
   ): Promise<SearchResult[]> {
     // Backstop against bad numeric input (float/NaN/huge): SQLite LIMIT needs a
     // sane non-negative integer. Tool schemas also constrain this upstream.
@@ -552,7 +556,7 @@ export class MemoryStore {
         keywordScore = Math.min(keywordScore, 0.6);
       }
 
-      const relevanceScore = 0.7 * vectorSim + 0.3 * keywordScore;
+      const relevanceScore = vectorMix * vectorSim + (1 - vectorMix) * keywordScore;
       // Recency = time since the memory was last TOUCHED — edited or read —
       // matching what users understand "recent" to mean. Previously this used
       // updated_at alone (B6): a heavily-consulted old memory ranked as
