@@ -18,11 +18,28 @@ export default defineConfig({
       // 2026-07 (Phase 4): global raised 33 -> 50 and per-file floors added for
       // every high-risk module after tools.test.ts + the phase 1-3 suites
       // lifted overall lines 37% -> ~55% (tools.ts 9% -> 56%).
+      //
+      // 2026-09: RE-BASELINED for vitest 4, which is a different instrument,
+      // not weaker tests. v4 makes AST-aware remapping the default, so it
+      // counts real syntactic branches and functions instead of v8's coarse
+      // ranges. Measured on identical source with the same 248 passing tests:
+      //
+      //             vitest 3              vitest 4
+      //   branches  827/1128  = 73.31%    914/2142 = 42.67%
+      //   functions 190/290   = 65.51%    280/489  = 57.25%
+      //   stmts     4423/7539 = 58.66%    2133/3885 = 54.90%
+      //
+      // Absolute covered branches went UP (827 -> 914); the denominator nearly
+      // doubled because v4 sees branches v3 never counted. The percentages
+      // below are therefore re-derived against the new instrument using the
+      // same "a few points under measured" policy. This is the one case where
+      // lowering a number is not a relaxation -- do not treat it as licence to
+      // lower them again. Against v4, ratcheting up still applies.
       thresholds: {
         lines: 50,
         statements: 50,
-        functions: 58,
-        branches: 65,
+        functions: 52,
+        branches: 38,
         // Per-file floors, buffered ~4-5pts below measured coverage.
         "src/http.ts": { lines: 52, statements: 52 },
         "src/dashboard.ts": { lines: 40, statements: 40 },
@@ -31,10 +48,10 @@ export default defineConfig({
         "src/embeddings.ts": { lines: 44, statements: 44 },
         "src/store.ts": { lines: 88, statements: 88 },
         "src/entities.ts": { lines: 90, statements: 90 },
-        "src/lint.ts": { lines: 75, statements: 75 },
+        "src/lint.ts": { lines: 72, statements: 69 },
         "src/collector/ingestion.ts": { lines: 85, statements: 85 },
         "src/collector/buffer.ts": { lines: 74, statements: 74 },
-        "src/collector/daemon.ts": { lines: 35, statements: 35 },
+        "src/collector/daemon.ts": { lines: 31, statements: 28 },
         "src/collector/provenance.ts": { lines: 80, statements: 80 },
       },
     },
