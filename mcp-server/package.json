@@ -87,7 +87,7 @@
     "vitest": "^4.1.11"
   },
   "optionalDependencies": {
-    "@huggingface/transformers": "^3.8.1"
+    "@huggingface/transformers": "^4.2.0"
   },
   "overrides": {
     "sharp": "^0.35.4"
