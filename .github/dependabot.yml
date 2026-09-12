@@ -20,6 +20,18 @@ updates:
       # bump it deliberately, not automatically.
       - dependency-name: better-sqlite3
         update-types: ["version-update:semver-major"]
+      # TypeScript 7 is not installable here yet: typescript-eslint (8.70.0,
+      # the latest at time of writing) declares peer typescript ">=4.8.4
+      # <6.1.0", so npm install fails with ERESOLVE before the compiler is
+      # ever run. The only ways through are --legacy-peer-deps or dropping
+      # typescript-eslint, and dropping it removes no-floating-promises --
+      # the one rule the whole type-aware lint setup exists for.
+      #
+      # REMOVE THIS ENTRY once typescript-eslint widens that peer range past
+      # 6.1.0. Until then the PR is red every week for a reason nothing in
+      # this repo can fix.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "deps"
       prefix-development: "deps(dev)"
