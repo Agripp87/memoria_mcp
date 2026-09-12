@@ -1,7 +1,7 @@
 {
   "name": "@memoria/mcp",
   "version": "0.1.0",
-  "description": "Memoria \u2014 persistent, plain-text memory for Claude over MCP. Markdown files you own, hybrid semantic + keyword search, OAuth 2.1 remote transport, and agentic self-maintenance.",
+  "description": "Memoria — persistent, plain-text memory for Claude over MCP. Markdown files you own, hybrid semantic + keyword search, OAuth 2.1 remote transport, and agentic self-maintenance.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -68,7 +68,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
     "js-yaml": "^4.3.2",
-    "markdown-it": "^14.2.0",
+    "markdown-it": "^15.0.2",
     "zod": "^4.5.4"
   },
   "devDependencies": {
