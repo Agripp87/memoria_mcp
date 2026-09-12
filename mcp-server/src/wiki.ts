@@ -99,7 +99,13 @@ md.inline.ruler.before("link", "wikilink", (state, silent) => {
 
 // Renderer: resolve the raw name against env.store and emit a safe anchor.
 md.renderer.rules.wikilink = (tokens, idx, _opts, env: any) => {
-  const name: string = tokens[idx].meta?.name ?? "";
+  // markdown-it 15 tightened Token.meta from `any` to
+  // `Record<string, unknown> | null`, so this value is genuinely unknown at
+  // the type level. Narrow it with a runtime check rather than asserting:
+  // meta is set by the inline rule above, but a third-party plugin emitting a
+  // "wikilink" token would otherwise reach escHtml() with a non-string.
+  const rawName = tokens[idx].meta?.name;
+  const name: string = typeof rawName === "string" ? rawName : "";
   const store: StoreEntry[] = (env && env.store) || [];
   const target = resolveLink(name, store);
   if (target) {
