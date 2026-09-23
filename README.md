@@ -78,7 +78,7 @@ Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Co
 
 ### Prerequisites
 
-- Node.js 18+ (22 recommended — matches the Docker image)
+- Node.js 20+ (`better-sqlite3` requires it; CI tests on 22, the Docker image runs 26)
 - npm
 - (Optional) an OpenAI API key for the highest-quality embeddings. Without one, a local `all-MiniLM-L6-v2` model provides semantic embeddings fully offline (one-time ~23 MB download).
 
@@ -108,7 +108,14 @@ npm install
 npm run build
 ```
 
-> An npm package (`@memoria/mcp`, `npx`-runnable) is on the [roadmap](#roadmap); until then the plugin or a source build are the two install paths.
+**From npm** (Node 20+):
+
+```bash
+npm install -g @agrippa87/memoria-mcp
+claude mcp add memoria -s user -- memoria-mcp
+# or, without a global install:
+claude mcp add memoria -s user -- npx -y @agrippa87/memoria-mcp
+```
 
 ### Try it on fake data (30 seconds)
 
@@ -791,7 +798,7 @@ The last critical re-review confirmed the fixes above are live and left a set of
 
 Near-term, roughly in order:
 
-- [ ] Publish `@memoria/mcp` to npm (`npx @memoria/mcp`) and `memoria-mcp` on PyPI (name reserved)
+- [x] Publish to npm as `@agrippa87/memoria-mcp` (`npx -y @agrippa87/memoria-mcp`); `memoria-mcp` reserved on PyPI
 - [ ] `server.json` + listing in the official MCP Registry; Docker MCP Catalog
 - [ ] Raise tool-handler and dashboard-JS coverage
 - [ ] Per-client API keys / scoped tokens (replace the single-key perimeter)

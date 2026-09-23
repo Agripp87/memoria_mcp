@@ -1,4 +1,4 @@
-# @memoria/mcp
+# @agrippa87/memoria-mcp
 
 **Persistent, plain-text memory for Claude over MCP — a Markdown repo you own.**
 
@@ -13,14 +13,22 @@ the repository: **<https://github.com/Agripp87/memoria_mcp>**
 
 ## Install
 
+Requires Node 20 or newer (`better-sqlite3` is a native module).
+
 ```bash
-npm install -g @memoria/mcp
+npm install -g @agrippa87/memoria-mcp
 ```
 
 ## Use with Claude Code
 
 ```bash
 claude mcp add memoria -s user -- memoria-mcp
+```
+
+Or without a global install:
+
+```bash
+claude mcp add memoria -s user -- npx -y @agrippa87/memoria-mcp
 ```
 
 The store defaults to `~/.memoria` and is created on first write. Point

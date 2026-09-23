@@ -46,8 +46,8 @@ npm run build
 npm test
 ```
 
-Node 18+ is required; CI builds on Node 22 (matching the Docker image) on both
-Ubuntu and Windows. `better-sqlite3` is a native module, so a first install
+Node 20+ is required (`better-sqlite3` supports nothing older); CI builds on
+Node 22 on both Ubuntu and Windows, and the Docker image runs Node 26. `better-sqlite3` is a native module, so a first install
 needs a working toolchain (build-essential / Xcode CLT / MSVC Build Tools).
 
 Useful commands, all from `mcp-server/`:
@@ -103,7 +103,7 @@ licensed the same way.
 
 ## Code conventions
 
-- **TypeScript, ESM, Node 18+ APIs.** `type: "module"`, `Node16` resolution —
+- **TypeScript, ESM, Node 20+ APIs.** `type: "module"`, `Node16` resolution —
   relative imports need the `.js` extension.
 - **Comments explain *why*.** The codebase's convention is a short paragraph
   above non-obvious code describing the failure it prevents (often with the date

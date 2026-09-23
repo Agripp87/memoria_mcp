@@ -15,7 +15,7 @@
  *      from source can take a while; the client's startup timeout is the real
  *      limit, so we log progress to stderr and let the user see it.
  *
- * Once `@memoria/mcp` is published, `npx -y @memoria/mcp` becomes the simpler
+ * For an npm install, `npx -y @agrippa87/memoria-mcp` is the simpler
  * command and this wrapper is only needed for a source install.
  */
 

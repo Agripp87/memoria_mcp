@@ -11,8 +11,20 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.0] — 2026-09-23
+
+First release published to npm, as **`@agrippa87/memoria-mcp`**. The name
+planned for 0.1.0, `@memoria/mcp`, turned out to be unavailable — the
+`@memoria` npm organisation belongs to an unrelated project — so it was never
+published. Do not install anything under `@memoria/*` expecting this project.
+
 ### Changed
 
+- **Requires Node 20 or newer.** `package.json` previously claimed Node 18, but
+  `better-sqlite3` supports nothing older than 20, so an install on Node 18
+  could not have worked. The declared range now tells the truth.
 - Upgraded `js-yaml` 4 → 5, the library that reads and writes every memory
   file's frontmatter. **The file format is unchanged**: across 190 real
   frontmatter blocks, v5 parses to identical values and writes byte-identical
@@ -106,12 +118,14 @@ so the public history starts here.
 
 ### Notes
 
-- Package names: `@memoria/mcp` on npm (publish pending), `memoria-mcp`
-  reserved on PyPI.
+- Package names: `memoria-mcp` reserved on PyPI. The npm name planned here,
+  `@memoria/mcp`, was never published — that scope belongs to an unrelated
+  project. See 0.2.0 for the real one.
 - Known limitations — single static key, partial coverage of the tool handlers
   and dashboard JS, no staging environment, and a single-writer scaling ceiling
   from the SQLite index living on a FUSE mount — are listed in the
   [README](README.md#known-limitations) rather than glossed over.
 
-[Unreleased]: https://github.com/Agripp87/memoria_mcp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Agripp87/memoria_mcp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Agripp87/memoria_mcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Agripp87/memoria_mcp/releases/tag/v0.1.0
