@@ -1,0 +1,110 @@
+name: Release
+
+# Publishes mcp-server to npm when a version tag is pushed, using npm trusted
+# publishing: the workflow proves its identity to npm over OIDC, so no npm
+# token is stored anywhere to leak, and npm attaches a provenance attestation
+# tying the published tarball to this repository and commit.
+#
+# Release:    bump mcp-server/package.json, cut the CHANGELOG section, merge,
+#             then  git tag -a vX.Y.Z -m "..." && git push public vX.Y.Z
+# Rehearsal:  run this workflow manually (Actions tab → Release → Run
+#             workflow). It does everything except upload, via --dry-run.
+#
+# The npm side is configured on npmjs.com → the package → Settings → Trusted
+# Publisher: user "Agripp87", repository "memoria_mcp", workflow "release.yml".
+# Those fields are case-sensitive, and package.json's repository.url must
+# match this repository exactly.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # the OIDC token npm trusted publishing exchanges
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to npm
+    # Trusted publishing does not support self-hosted runners.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp-server
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history, so the tag can be checked against main below.
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          # Trusted publishing needs Node >= 22.14 and npm >= 11.5.1; Node 24
+          # ships an npm that qualifies. No cache: a release builds from a
+          # clean install of the lockfile.
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      # A tag pushed from a branch would otherwise publish unreviewed code.
+      - name: Tag must point at a commit on main
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME points at a commit that is not on main; releases are cut from main only."
+            exit 1
+          fi
+
+      # npm would happily publish package.json's version under any tag name,
+      # leaving the tag and the published package silently disagreeing.
+      - name: Tag must match package.json version
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $pkg."
+            exit 1
+          fi
+
+      # Fail with a clear message rather than an opaque auth error if the
+      # runner image ever ships an npm too old for trusted publishing.
+      - name: npm supports trusted publishing
+        run: |
+          set -euo pipefail
+          v="$(npm --version)"
+          node -e '
+            const [maj, min, pat] = process.argv[1].split(".").map(Number);
+            const ok = maj > 11 || (maj === 11 && (min > 5 || (min === 5 && pat >= 1)));
+            process.exit(ok ? 0 : 1);
+          ' "$v" || { echo "::error::npm $v is older than 11.5.1, which trusted publishing requires."; exit 1; }
+          echo "npm $v, node $(node --version)"
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run test:coverage
+
+      # The one check pull-request CI deliberately skips, because it downloads
+      # a ~23MB model. A release is exactly when it matters: an embedding
+      # dependency or dtype change that moved the vector space would leave
+      # every existing store silently mixing two spaces, with no reindex
+      # triggered. Proven to fail on a moved space, not merely to pass.
+      - name: Embedding vector space unchanged
+        run: npm run verify:vectors
+
+      - name: Publish
+        if: github.event_name == 'push'
+        run: npm publish
+
+      - name: Rehearse publish (manual runs never upload)
+        if: github.event_name == 'workflow_dispatch'
+        run: npm publish --dry-run

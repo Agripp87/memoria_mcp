@@ -130,8 +130,28 @@ radius:
 
 ## Releasing (maintainer)
 
-1. `npm test && npm run build && npm run lint && npm run format:check`
-2. Bump `mcp-server/package.json` and move the `[Unreleased]` section of
-   [CHANGELOG.md](CHANGELOG.md) into a dated version heading
-3. Tag `vX.Y.Z`, push, let CI go green
-4. `npm publish --access public` from `mcp-server/` (`prepublishOnly` builds)
+Releases are published to npm by
+[`.github/workflows/release.yml`](.github/workflows/release.yml) using npm
+trusted publishing — no npm token exists anywhere, and every release carries a
+provenance attestation linking it to its commit.
+
+1. On a branch: bump `version` in `mcp-server/package.json` (and the `version`
+   strings in `src/index.ts` and `src/http.ts`), and move the `[Unreleased]`
+   section of [CHANGELOG.md](CHANGELOG.md) under a dated version heading.
+2. Merge it to `main` once CI is green.
+3. Tag the merge commit and push the tag:
+
+   ```bash
+   git tag -a vX.Y.Z -m "Memoria X.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+The tag push runs the release workflow, which refuses to publish if the tag is
+not on `main` or does not match `package.json`, re-runs the full check suite
+plus the embedding vector-space guard, and then publishes.
+
+To rehearse without publishing, run the **Release** workflow by hand from the
+Actions tab: it performs every step and finishes with `npm publish --dry-run`.
+
+Local `npm publish` still works for the account owner with 2FA, but should be
+the exception — a release from the workflow is the one that carries provenance.
