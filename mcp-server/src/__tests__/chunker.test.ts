@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseFrontmatter, chunkMarkdown } from "../chunker.js";
+import { dump } from "js-yaml";
+import { FRONTMATTER_WRITE_SCHEMA, parseFrontmatter, chunkMarkdown } from "../chunker.js";
 
 describe("parseFrontmatter", () => {
   it("parses YAML frontmatter with string, number, and array values", () => {
@@ -126,5 +127,108 @@ describe("chunkMarkdown", () => {
     expect(chunks).toHaveLength(1);
     // Frontmatter is 4 lines (---, name, type, ---), so body starts at line 5
     expect(chunks[0].startLine).toBeGreaterThanOrEqual(5);
+  });
+});
+
+// Frontmatter written by the compile path (tools.ts, FRONTMATTER_WRITE_SCHEMA)
+// is read back by parseFrontmatter (FRONTMATTER_READ_SCHEMA). Every string must
+// survive that trip as the identical string. This is the property that breaks
+// silently if someone "fixes" the write schema by adding YAML 1.1 int or float
+// tags for closer js-yaml 4 parity: "0o17" comes back as 15, "1e3" as 1000.
+describe("frontmatter write/read round trip", () => {
+  const TRICKY = [
+    "yes",
+    "no",
+    "on",
+    "off",
+    "y",
+    "n",
+    "Yes",
+    "NO",
+    "On",
+    "true",
+    "false",
+    "True",
+    "null",
+    "Null",
+    "~",
+    "",
+    " padded ",
+    "007",
+    "0o17",
+    "0x1F",
+    "0b101",
+    "1_000",
+    "1e3",
+    "+12",
+    "-0",
+    "1.0",
+    ".5",
+    ".inf",
+    "-.Inf",
+    ".nan",
+    "12:30",
+    "12:30:45",
+    "190:20:30",
+    "2026-09-23",
+    "2026-09-23T10:00:00Z",
+    "has: colon",
+    "# hash",
+    "- dash",
+    "@at",
+    "*star",
+    "&amp",
+    "!bang",
+    "%pct",
+    "[flow]",
+    "{map}",
+    "a, b",
+    "'quoted'",
+    '"dq"',
+    "café 日本語 🧠",
+  ];
+
+  // Mirrors how tools.ts assembles a compiled memory file.
+  const roundTrip = (obj: Record<string, unknown>) =>
+    parseFrontmatter(
+      `---\n${dump(obj, { lineWidth: 200, schema: FRONTMATTER_WRITE_SCHEMA })}---\n\nbody`,
+    ).metadata;
+
+  it.each(TRICKY)("string %j survives as a scalar value", (s) => {
+    expect(roundTrip({ v: s })).toEqual({ v: s });
+  });
+
+  it("every tricky string survives inside a tags array", () => {
+    expect(roundTrip({ tags: TRICKY })).toEqual({ tags: TRICKY });
+  });
+
+  it("quotes YAML 1.1 boolean words so other YAML readers do not see booleans", () => {
+    const out = dump(
+      { a: "yes", b: "no", c: "on", d: "off" },
+      { schema: FRONTMATTER_WRITE_SCHEMA },
+    );
+    expect(out).toBe("a: 'yes'\nb: 'no'\nc: 'on'\nd: 'off'\n");
+  });
+
+  it("leaves date strings unquoted, matching the rest of the store", () => {
+    const out = dump({ created: "2026-09-23" }, { schema: FRONTMATTER_WRITE_SCHEMA });
+    expect(out).toBe("created: 2026-09-23\n");
+  });
+
+  it("round-trips the exact shape the compile path writes", () => {
+    const compiled = {
+      name: "entity-acme",
+      description: "Acme is a series-B fintech we work with: pricing, security review.",
+      type: "reference",
+      importance: 7,
+      created: "2026-09-23",
+      updated: "2026-09-23",
+      last_accessed: "2026-09-23",
+      access_count: 0,
+      tags: ["acme", "on", "fintech"],
+      origin: "compiled",
+      related: ["project/acme-pricing.md"],
+    };
+    expect(roundTrip(compiled)).toEqual(compiled);
   });
 });

@@ -7,8 +7,8 @@ import { z } from "zod";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import yaml from "js-yaml";
-import { chunkMarkdown, parseFrontmatter } from "./chunker.js";
+import { dump } from "js-yaml";
+import { FRONTMATTER_WRITE_SCHEMA, chunkMarkdown, parseFrontmatter } from "./chunker.js";
 import { MemoryStore } from "./store.js";
 import { runOptimize } from "./optimize.js";
 import { runLint, formatLintReport } from "./lint.js";
@@ -1051,9 +1051,9 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       if (related && related.length > 0) {
         frontmatterObj.related = related;
       }
-      const frontmatterYaml = yaml.dump(frontmatterObj, {
+      const frontmatterYaml = dump(frontmatterObj, {
         lineWidth: 200,
-        schema: yaml.CORE_SCHEMA,
+        schema: FRONTMATTER_WRITE_SCHEMA,
       });
       const fileContent = `---\n${frontmatterYaml}---\n\n${bodyContent}`;
 
