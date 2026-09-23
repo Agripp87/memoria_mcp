@@ -11,6 +11,19 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
+### Changed
+
+- Upgraded `js-yaml` 4 → 5, the library that reads and writes every memory
+  file's frontmatter. **The file format is unchanged**: across 190 real
+  frontmatter blocks, v5 parses to identical values and writes byte-identical
+  YAML. Two things needed care. v5 has no default export, and under this
+  project's TypeScript settings the old `import yaml from "js-yaml"` still
+  compiled — then failed at link time in Node, which would have stopped the
+  server starting. And v5's core schema stopped quoting `yes`, `no`, `on` and
+  `off` on write; Memoria reads those correctly either way, but YAML 1.1 readers
+  such as PyYAML would see booleans, so the write schema restores the quotes.
+  A new round-trip test pins that every string written comes back identical.
+
 ### Security
 
 - Replaced the unmaintained `@xenova/transformers` with its maintained
