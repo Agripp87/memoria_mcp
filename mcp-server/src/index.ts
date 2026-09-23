@@ -18,6 +18,7 @@ import {
   registerTools,
   registerCollectorTools,
   destroyCollector,
+  SERVER_DESCRIPTION,
 } from "./tools.js";
 
 const store = new MemoryStore(DB_PATH);
@@ -25,8 +26,7 @@ const store = new MemoryStore(DB_PATH);
 const server = new McpServer({
   name: "memoria",
   version: "0.2.0",
-  description:
-    "Persistent, plain-text memory for Claude. MANDATORY: Every session MUST produce at least one daily log entry via memory_daily. At session start, read today's daily log. Before session ends, write a session summary. A session without a daily log entry is a failed session.",
+  description: SERVER_DESCRIPTION,
 });
 
 registerTools(server, store);
