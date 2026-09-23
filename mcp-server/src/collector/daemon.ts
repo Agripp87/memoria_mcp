@@ -314,7 +314,7 @@ export class CollectorDaemon {
       // Map event identity → buffer rowid so per-event outcomes can be applied.
       const rowidByKey = new Map<string, number>();
       for (const b of batch) {
-        rowidByKey.set(`${b.event.source} ${b.event.id}`, b.rowid);
+        rowidByKey.set(`${b.event.source}\u0000${b.event.id}`, b.rowid);
       }
 
       // Send to core memory for processing
@@ -335,7 +335,7 @@ export class CollectorDaemon {
       const errored: number[] = [];
       let deferred = 0;
       for (const o of result.outcomes) {
-        const rowid = rowidByKey.get(`${o.source} ${o.id}`);
+        const rowid = rowidByKey.get(`${o.source}\u0000${o.id}`);
         if (rowid === undefined) continue;
         if (o.outcome === "rate_limited") {
           deferred++;
