@@ -22,6 +22,14 @@ published. Do not install anything under `@memoria/*` expecting this project.
 
 ### Changed
 
+- **Gentler default guidance to connected clients.** The server description and
+  the `memory_daily` tool previously told every client that each session MUST
+  write a daily log entry and that a session without one "is a failed session".
+  That was the maintainer's own workflow, stated as a rule for everyone. Both
+  now encourage logging what is worth keeping, and say routine sessions need no
+  entry. If you want the stricter discipline, put it in your own instructions
+  (a `CLAUDE.md`, a hook). The description is now defined once and shared by the
+  stdio and HTTP servers, so the two cannot drift apart.
 - **Requires Node 20 or newer.** `package.json` previously claimed Node 18, but
   `better-sqlite3` supports nothing older than 20, so an install on Node 18
   could not have worked. The declared range now tells the truth.

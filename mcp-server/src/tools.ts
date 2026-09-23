@@ -405,6 +405,23 @@ export function drainCompileQueue(): string[] {
 
 // ─── Tool registration ──────────────────────────────────────
 
+/**
+ * Server description sent to every connecting client, shared by the stdio
+ * (index.ts) and HTTP (http.ts) entry points so the two cannot drift apart.
+ *
+ * Deliberately encouraging rather than mandatory. Earlier versions told every
+ * client that each session MUST write a daily log entry and that a session
+ * without one "is a failed session" — the maintainer's own workflow, stated as
+ * a rule for everyone who installs the package. Users who want that discipline
+ * can still say so in their own instructions (a CLAUDE.md, a hook).
+ */
+export const SERVER_DESCRIPTION =
+  "Persistent, plain-text memory for Claude: Markdown files the user owns, " +
+  "searchable across sessions and devices. Search it when earlier context " +
+  "would help. Record what is worth keeping — decisions, preferences, problems " +
+  "solved, how a piece of work ended — with memory_daily, or memory_write for " +
+  "lasting facts. A short entry after substantial work is usually enough.";
+
 export function registerTools(server: McpServer, store: MemoryStore): void {
   // Tool 1: memory_search
   server.tool(
@@ -693,7 +710,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
   // Tool 6: memory_daily
   server.tool(
     "memory_daily",
-    "Append an entry to today's daily log. Creates the file if it doesn't exist. IMPORTANT: Call this at least once per session — at session start to check context, and before session ends with a summary. A session without a daily log entry is a failed session.",
+    "Append an entry to today's daily log (the file is created if it doesn't exist). Use it for what is worth remembering later: decisions made, preferences learned, problems solved, how a piece of work ended. A short summary after substantial work is a good default; routine or trivial sessions don't need one.",
     {
       entry: z.string().describe("The text to append to today's daily log"),
     },
