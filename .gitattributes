@@ -1,4 +1,13 @@
-# Normalize line endings. Shell scripts run in Linux containers (Alpine sh)
-# and MUST be LF — CRLF causes "set: illegal option" / container start failures.
+# Line endings: every text file is stored AND checked out as LF, on every
+# platform. .prettierrc already declares endOfLine: lf, and CI runs on Linux;
+# without this rule a Windows checkout (core.autocrlf=true) arrives CRLF, and a
+# local `npm run format:check` flags every file that CI then passes — so the
+# check could not be used as a pre-push gate on the maintainer's own machine.
+# `text=auto` leaves genuinely binary files alone.
+* text=auto eol=lf
+
+# Shell scripts run in Linux containers (Alpine sh) and MUST be LF — CRLF
+# causes "set: illegal option" / container start failures. Already covered by
+# the rule above; kept explicit because the failure mode is severe.
 *.sh text eol=lf
 *.mjs text eol=lf
