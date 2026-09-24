@@ -13,6 +13,7 @@ import { MemoryStore } from "./store.js";
 import { runOptimize } from "./optimize.js";
 import { runLint, formatLintReport } from "./lint.js";
 import { buildEntityPages } from "./entities.js";
+import { TIME_LABEL_SRC } from "./daily-format.js";
 import { SourceRegistry } from "./collector/registry.js";
 import { EventBuffer } from "./collector/buffer.js";
 import { CollectorDaemon } from "./collector/daemon.js";
@@ -712,9 +713,12 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
     "memory_daily",
     "Append an entry to today's daily log (the file is created if it doesn't exist). Use it for what is worth remembering later: decisions made, preferences learned, problems solved, how a piece of work ended. A short summary after substantial work is a good default; routine or trivial sessions don't need one.",
     {
-      entry: z.string().describe("The text to append to today's daily log"),
+      // Same ceiling as the dashboard journal. Without one, a single call
+      // could append megabytes to a file every later read and reindex pays for.
+      entry: z.string().max(50_000).describe("The text to append to today's daily log"),
     },
     async ({ entry }) => {
+      // Daily logs are UTC days (the dashboard journal and ingestion agree).
       const today = new Date().toISOString().split("T")[0];
       const dailyDir = path.join(MEMORIES_DIR, "daily");
       const dailyFile = path.join(dailyDir, `${today}.md`);
@@ -864,7 +868,9 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         dailyLogCount = recent.length;
         for (const f of recent) {
           const content = fs.readFileSync(path.join(dailyDir, f), "utf-8");
-          const matches = content.matchAll(/^## [\d:APM ]+ — ([\w-]+)/gm);
+          const matches = content.matchAll(
+            new RegExp(String.raw`^## ${TIME_LABEL_SRC} — ([\w-]+)`, "gm"),
+          );
           for (const m of matches) {
             sourceCounts.set(m[1], (sourceCounts.get(m[1]) || 0) + 1);
             totalRecentEvents++;
@@ -1173,8 +1179,10 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         const date = path.basename(file, ".md");
 
         // Parse `## TIME — SOURCE\n\nCONTENT\n*importance: N*` blocks
-        const entryRegex =
-          /## ([\d:APM ]+) — ([\w-]+)(?:\s*\*\([^)]+\)\*)?\s*\n([\s\S]*?)(?=\n## |$)/g;
+        const entryRegex = new RegExp(
+          String.raw`## (${TIME_LABEL_SRC}) — ([\w-]+)(?:\s*\*\([^)]+\)\*)?\s*\n([\s\S]*?)(?=\n## |$)`,
+          "g",
+        );
         let m: RegExpExecArray | null;
         while ((m = entryRegex.exec(content)) !== null) {
           const [, time, source, body] = m;

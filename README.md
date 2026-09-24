@@ -223,7 +223,7 @@ For a durable cloud deployment see [`deploy/gcp/README.md`](deploy/gcp/README.md
 | `memory_write` | Create/update memory with dedup check (top-3 similar). Use `force: true` to skip. |
 | `memory_list` | List all memories, filter by type or tag |
 | `memory_index` | Rebuild vector + FTS5 search index and MEMORY_INDEX.md catalog |
-| `memory_daily` | Append an entry to today's daily log |
+| `memory_daily` | Append an entry (up to 50,000 characters) to today's daily log. Daily logs are UTC days, and entry times in them are UTC. |
 | `memory_optimize` | Run `decay`, `promote`, `detect_stale`, or `find_duplicates` |
 | `memory_reflect` | Read recent daily logs for agent reflection/synthesis |
 | `memory_stats` | Health metrics: importance distribution, stale count, access patterns, warnings |

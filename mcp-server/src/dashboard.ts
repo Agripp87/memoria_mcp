@@ -13,10 +13,11 @@
 
 import { Router } from "express";
 import type { Response } from "express";
-import { randomUUID } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
 import { parseFrontmatter } from "./chunker.js";
+import { utcTimeLabel } from "./daily-format.js";
 import { MemoryStore } from "./store.js";
 import {
   MEMORIES_DIR,
@@ -44,6 +45,15 @@ import {
 // the instant the file hits disk, so the next request reflects the change; an
 // external change (git pull on another device) appears within the TTL.
 const SCAN_TTL_MS = 15_000;
+
+// The journal's mood picker offers exactly these (data-mood in the page).
+const JOURNAL_MOODS: ReadonlySet<unknown> = new Set([
+  "great",
+  "good",
+  "neutral",
+  "tired",
+  "stressed",
+]);
 
 // Return a generic 500 to the client while logging the real error server-side.
 // Raw err.message routinely embeds absolute container paths (/data/memoria/...,
@@ -476,6 +486,29 @@ export function createDashboardRouter(store: MemoryStore): Router {
         res.status(400).json({ error: "Entry too long (max 50,000 chars)" });
         return;
       }
+      // mood and tags are written into the daily log's Markdown, so they are
+      // held to what the page's own picker and tag box can produce. A newline
+      // in either could forge a heading in the log; a non-array `tags` used to
+      // reach .join() and throw.
+      if (mood !== undefined && mood !== null && !JOURNAL_MOODS.has(mood)) {
+        res.status(400).json({ error: "Invalid mood" });
+        return;
+      }
+      if (
+        tags !== undefined &&
+        tags !== null &&
+        !(
+          Array.isArray(tags) &&
+          tags.length <= 20 &&
+          tags.every(
+            (t: unknown) =>
+              typeof t === "string" && t.length > 0 && t.length <= 50 && !/[\r\n]/.test(t),
+          )
+        )
+      ) {
+        res.status(400).json({ error: "Invalid tags (up to 20, each 1-50 chars, one line)" });
+        return;
+      }
 
       const today = date || new Date().toISOString().slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) {
@@ -487,10 +520,10 @@ export function createDashboardRouter(store: MemoryStore): Router {
       fs.mkdirSync(dailyDir, { recursive: true });
       const dailyFile = path.join(dailyDir, `${today}.md`);
 
-      const time = new Date().toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+      // UTC, like the file's date: daily logs are UTC days everywhere in
+      // Memoria. A server-local label made an evening entry west of UTC read
+      // "09:00 PM" inside the NEXT day's log.
+      const time = utcTimeLabel();
 
       // Format journal entry with optional mood and tags
       const moodTag = mood ? ` (${mood})` : "";
@@ -548,14 +581,38 @@ export function createDashboardRouter(store: MemoryStore): Router {
 
   // ── Dashboard HTML ───────────────────────────────────────
 
+  // The page's one inline <script> carries a fresh nonce per response, and
+  // the CSP runs only that script: no inline on*= handlers, no injected
+  // <script>, no javascript: URLs. It backs up escapeHtml rather than
+  // replacing it, so a value that slips through unescaped still cannot
+  // execute. Inline style attributes are everywhere in the page, so styles
+  // stay 'unsafe-inline' — a far smaller risk than script.
   router.get("/", (_req, res) => {
-    res.type("html").send(DASHBOARD_HTML);
+    const nonce = randomBytes(16).toString("base64");
+    res.set("Content-Security-Policy", dashboardCsp(nonce));
+    res.type("html").send(DASHBOARD_HTML.replace("__CSP_NONCE__", nonce));
   });
 
   return router;
 }
 
 // ── Dashboard HTML (single-page app) ─────────────────────────
+
+/** Content-Security-Policy for the dashboard page, given its script nonce. */
+export function dashboardCsp(nonce: string): string {
+  return [
+    "default-src 'self'",
+    `script-src 'nonce-${nonce}'`,
+    "style-src 'self' 'unsafe-inline'",
+    // Memories can embed remote images in Markdown; keep them working.
+    "img-src 'self' data: https:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+}
 
 // Link shown in the dashboard's About card. Forks/self-hosters can point it
 // at their own repo or docs with MEMORIA_REPO_URL. Attribute-escaped because
@@ -924,7 +981,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <p style="color:var(--text2);font-size:13px;margin-bottom:16px">Enable data sources to collect memory context from your personal tools. All data is encrypted at rest.</p>
       <div id="sources-list"><span class="loading"><span class="spin">&#9696;</span> Loading...</span></div>
       <div style="margin-top:16px">
-        <button class="btn btn-primary" onclick="showAddCustomModal()">+ Add Custom Source</button>
+        <button class="btn btn-primary" data-action="show-add-custom">+ Add Custom Source</button>
       </div>
     </section>
 
@@ -944,7 +1001,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           </div>
           <input class="tag-input" id="journal-tags" placeholder="Tags (comma-separated)">
         </div>
-        <button class="btn btn-primary" onclick="saveJournal()">Save Entry</button>
+        <button class="btn btn-primary" data-action="save-journal">Save Entry</button>
       </div>
       <div style="margin-top:24px">
         <h3 style="font-size:14px;color:var(--text2);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px">Recent Entries</h3>
@@ -956,9 +1013,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     <section id="tab-memories" class="section">
       <h2>Memories</h2>
       <div style="display:flex;gap:8px;margin-bottom:16px">
-        <input class="tag-input" style="flex:1;width:auto" id="search-input" placeholder="Search memories..." onkeyup="if(event.key==='Enter')searchMemories()">
-        <button class="btn btn-primary" onclick="searchMemories()">Search</button>
-        <button class="btn" onclick="loadMemories()">Show All</button>
+        <input class="tag-input" style="flex:1;width:auto" id="search-input" placeholder="Search memories...">
+        <button class="btn btn-primary" data-action="search-memories">Search</button>
+        <button class="btn" data-action="load-memories">Show All</button>
       </div>
       <div id="memories-list"><span class="loading"><span class="spin">&#9696;</span> Loading...</span></div>
     </section>
@@ -969,7 +1026,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <p style="color:var(--text2);font-size:13px;margin-bottom:12px">Browse the whole memory store as a cross-linked wiki. Click a memory to read it, follow related links &amp; backlinks, and add append-only notes for extra context.</p>
       <div class="wiki-grid">
         <aside class="wiki-index">
-          <input class="tag-input wiki-search" id="wiki-search" placeholder="Search..." onkeyup="if(event.key==='Enter')wikiSearch()">
+          <input class="tag-input wiki-search" id="wiki-search" placeholder="Search...">
           <div id="wiki-index-list"><span class="loading"><span class="spin">&#9696;</span> Loading...</span></div>
         </aside>
         <article class="wiki-page" id="wiki-page"><div class="wiki-empty">Select a memory on the left to start reading.</div></article>
@@ -983,7 +1040,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <div class="card">
         <h3>Index Management</h3>
         <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Rebuild the search index from all memory files. Use after bulk edits or imports.</p>
-        <button class="btn" id="reindex-btn" onclick="reindex()">Rebuild Index</button>
+        <button class="btn" id="reindex-btn" data-action="reindex">Rebuild Index</button>
       </div>
       <div class="card">
         <h3>Collector Buffer</h3>
@@ -1002,11 +1059,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 </div>
 
 <!-- Config Modal -->
-<div class="modal-overlay" id="modal" style="display:none" onclick="if(event.target===this)closeModal()">
+<div class="modal-overlay" id="modal" style="display:none">
   <div class="modal" id="modal-content"></div>
 </div>
 
-<script>
+<script nonce="__CSP_NONCE__">
 const API = '/dashboard/api';
 let currentMood = null;
 
@@ -1126,7 +1183,7 @@ async function loadOverview() {
       (t.inBackoff ? ' <span class="badge badge-err">backoff</span>' : ' <span class="badge badge-on">ok</span>') +
       '</div>'
     ).join('');
-    el.innerHTML = running + ' &middot; ' + status.activeSources + ' active source(s)' + timers;
+    el.innerHTML = running + ' &middot; ' + escapeHtml(String(status.activeSources)) + ' active source(s)' + timers;
   } catch { document.getElementById('collector-status').innerHTML = '<span class="badge badge-off">Not running</span>'; }
 
   try {
@@ -1134,7 +1191,7 @@ async function loadOverview() {
     const el = document.getElementById('recent-journal');
     if (!logs.length) { el.innerHTML = '<span style="color:var(--text2);font-size:13px">No journal entries yet. Go to Journal to write your first entry.</span>'; return; }
     el.innerHTML = logs.slice(0, 3).map(l =>
-      '<div class="journal-entry"><div class="journal-entry-date">' + l.date + '</div>' +
+      '<div class="journal-entry"><div class="journal-entry-date">' + escapeHtml(l.date) + '</div>' +
       '<div class="journal-entry-text">' + escapeHtml(l.content.slice(0, 300)) + (l.content.length > 300 ? '...' : '') + '</div></div>'
     ).join('');
   } catch {}
@@ -1151,8 +1208,8 @@ async function loadSources() {
                     s.enabled ? '<span class="badge badge-on">Enabled</span>' :
                     '<span class="badge badge-off">Disabled</span>';
       const actions = s.enabled
-        ? '<button class="btn btn-sm btn-danger" onclick="toggleSource(\\'' + s.id + '\\',false)">Disable</button>'
-        : '<button class="btn btn-sm btn-primary" onclick="enableSource(\\'' + s.id + '\\')">Enable</button>';
+        ? '<button class="btn btn-sm btn-danger" data-action="disable-source" data-id="' + escapeHtml(s.id) + '">Disable</button>'
+        : '<button class="btn btn-sm btn-primary" data-action="enable-source" data-id="' + escapeHtml(s.id) + '">Enable</button>';
       return '<div class="source-item">' +
         '<div class="source-info">' +
           '<div class="source-name">' + escapeHtml(s.name) + ' ' + badge + '</div>' +
@@ -1166,7 +1223,7 @@ async function loadSources() {
           '</div>' +
         '</div>' +
         '<div class="btn-group">' +
-          '<button class="btn btn-sm" onclick="configureSource(\\'' + s.id + '\\')">Configure</button>' +
+          '<button class="btn btn-sm" data-action="configure-source" data-id="' + escapeHtml(s.id) + '">Configure</button>' +
           actions +
         '</div>' +
       '</div>';
@@ -1245,11 +1302,11 @@ function configureSource(id, enableAfter = false) {
   }
 
   document.getElementById('modal-content').innerHTML = \`
-    <h3>Configure: \${id}</h3>
+    <h3>Configure: \${escapeHtml(id)}</h3>
     \${fields}
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
-      <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveConfig('\${id}', \${enableAfter})">Save\${enableAfter ? ' & Enable' : ''}</button>
+      <button class="btn" data-action="close-modal">Cancel</button>
+      <button class="btn btn-primary" data-action="save-config" data-id="\${escapeHtml(id)}" data-enable-after="\${enableAfter ? 'true' : 'false'}">Save\${enableAfter ? ' &amp; Enable' : ''}</button>
     </div>
   \`;
   document.getElementById('modal').style.display = 'flex';
@@ -1312,15 +1369,15 @@ function showAddCustomModal() {
     <div class="field"><label>Name</label><input id="custom-name" placeholder="My Custom Source"></div>
     <div class="field"><label>Description</label><input id="custom-desc" placeholder="What does this source collect?"></div>
     <div class="field"><label>Mode</label>
-      <select id="custom-mode" onchange="updateCustomFields()">
+      <select id="custom-mode">
         <option value="file_watcher">File Watcher</option>
         <option value="shell_command">Shell Command</option>
       </select>
     </div>
     <div id="custom-mode-fields"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
-      <button class="btn" onclick="closeModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="addCustomSource()">Add Source</button>
+      <button class="btn" data-action="close-modal">Cancel</button>
+      <button class="btn btn-primary" data-action="add-custom-source">Add Source</button>
     </div>
   \`;
   updateCustomFields();
@@ -1490,13 +1547,13 @@ async function loadWiki() {
     for (const cat of Object.keys(cats).sort()) {
       h += '<div class="wiki-cat">' + escapeHtml(cat) + '</div>';
       for (const m of cats[cat]) {
-        h += '<a class="wiki-link" data-file="' + escapeHtml(m.file) + '" onclick="openWikiPage(this.dataset.file)">' + escapeHtml(m.name) + '</a>';
+        h += '<a class="wiki-link" data-file="' + escapeHtml(m.file) + '" data-action="open-wiki">' + escapeHtml(m.name) + '</a>';
       }
     }
     if ((idx.daily || []).length) {
       h += '<div class="wiki-cat">Daily logs</div>';
       for (const d of idx.daily.slice(0, 90)) {
-        h += '<a class="wiki-link" data-file="' + escapeHtml(d.file) + '" onclick="openWikiPage(this.dataset.file)">' + escapeHtml(d.date) + '</a>';
+        h += '<a class="wiki-link" data-file="' + escapeHtml(d.file) + '" data-action="open-wiki">' + escapeHtml(d.date) + '</a>';
       }
     }
     el.innerHTML = h;
@@ -1517,7 +1574,7 @@ async function wikiSearch() {
     const seen = {};
     for (const r of (results || [])) {
       if (!r.file || seen[r.file]) continue; seen[r.file] = 1;
-      h += '<a class="wiki-link" data-file="' + escapeHtml(r.file) + '" onclick="openWikiPage(this.dataset.file)">' + escapeHtml(r.file) + '</a>';
+      h += '<a class="wiki-link" data-file="' + escapeHtml(r.file) + '" data-action="open-wiki">' + escapeHtml(r.file) + '</a>';
     }
     if (!Object.keys(seen).length) h += '<div style="color:var(--text2);padding:4px 6px">No results</div>';
     el.innerHTML = h;
@@ -1547,7 +1604,7 @@ async function openWikiPage(file) {
     mh += '<h4>Backlinks</h4>' + wikiLinkList(doc.backlinks);
     mh += '<h4>Add note (append-only)</h4>';
     mh += '<textarea class="tag-input wiki-note-box" id="wiki-note" placeholder="Add context... supports [[links]]"></textarea>';
-    mh += '<button class="btn btn-primary" style="margin-top:6px;width:100%" data-file="' + escapeHtml(doc.file) + '" onclick="addWikiNote(this.dataset.file)">Append note</button>';
+    mh += '<button class="btn btn-primary" style="margin-top:6px;width:100%" data-file="' + escapeHtml(doc.file) + '" data-action="add-wiki-note">Append note</button>';
     meta.innerHTML = mh;
   } catch (err) {
     page.innerHTML = '<div class="wiki-empty">Failed to load: ' + escapeHtml(err && err.message) + '</div>';
@@ -1561,7 +1618,7 @@ function wikiMetaRow(label, val) {
 
 function wikiLinkList(items) {
   if (!items || !items.length) return '<div style="color:var(--text2);font-size:12px">None</div>';
-  return items.map(it => '<a class="wiki-link" data-file="' + escapeHtml(it.file) + '" onclick="openWikiPage(this.dataset.file)">' + escapeHtml(it.name || it.file) + '</a>').join('');
+  return items.map(it => '<a class="wiki-link" data-file="' + escapeHtml(it.file) + '" data-action="open-wiki">' + escapeHtml(it.name || it.file) + '</a>').join('');
 }
 
 async function addWikiNote(file) {
@@ -1581,7 +1638,52 @@ document.addEventListener('click', function (e) {
   if (a) { e.preventDefault(); openWikiPage(a.getAttribute('data-wikilink-file')); }
 });
 
-function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+// Every button and link declares data-action and gets its arguments from
+// data-* attributes, dispatched here. There are no inline on*= handlers: the
+// page's Content-Security-Policy forbids them, so an injected attribute cannot
+// run script even if something slips past escapeHtml.
+const ACTIONS = {
+  'open-wiki': el => openWikiPage(el.dataset.file),
+  'add-wiki-note': el => addWikiNote(el.dataset.file),
+  'enable-source': el => enableSource(el.dataset.id),
+  'disable-source': el => toggleSource(el.dataset.id, false),
+  'configure-source': el => configureSource(el.dataset.id),
+  'save-config': el => saveConfig(el.dataset.id, el.dataset.enableAfter === 'true'),
+  'close-modal': () => closeModal(),
+  'show-add-custom': () => showAddCustomModal(),
+  'add-custom-source': () => addCustomSource(),
+  'save-journal': () => saveJournal(),
+  'search-memories': () => searchMemories(),
+  'load-memories': () => loadMemories(),
+  'reindex': () => reindex(),
+};
+document.addEventListener('click', function (e) {
+  const el = e.target && e.target.closest && e.target.closest('[data-action]');
+  if (!el || !Object.prototype.hasOwnProperty.call(ACTIONS, el.dataset.action)) return;
+  e.preventDefault();
+  ACTIONS[el.dataset.action](el);
+});
+document.addEventListener('change', function (e) {
+  if (e.target && e.target.id === 'custom-mode') updateCustomFields();
+});
+document.getElementById('modal').addEventListener('click', function (e) {
+  if (e.target === this) closeModal();
+});
+document.getElementById('search-input').addEventListener('keyup', function (e) {
+  if (e.key === 'Enter') searchMemories();
+});
+document.getElementById('wiki-search').addEventListener('keyup', function (e) {
+  if (e.key === 'Enter') wikiSearch();
+});
+
+// Escapes all five HTML-significant characters, so the result is safe in text
+// AND in a quoted attribute. The previous DOM-based version (textContent in,
+// innerHTML out) left quotes alone, and values from memory frontmatter went
+// into data-file="..." attributes, so a crafted value could break out of one.
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function escapeHtml(s) {
+  return String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, c => HTML_ESCAPES[c]);
+}
 
 // ── Init ───────────────────────────────────────────────────
 loadOverview();
