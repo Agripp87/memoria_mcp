@@ -22,11 +22,19 @@ name: Release
 #             workflow). It runs everything and stages a throwaway pre-release
 #             version with --dry-run, so nothing is written to the registry.
 #
-# The npm side is configured on npmjs.com → the package → Settings → Trusted
-# Publisher: user "Agripp87", repository "memoria_mcp", workflow "release.yml",
-# with "Allow npm publish" deliberately left UNCHECKED, so this workflow can
-# only stage. Those fields are case-sensitive, and package.json's
-# repository.url must match this repository exactly.
+# The npm side is a trusted-publisher entry that allows STAGING ONLY, so this
+# workflow cannot publish even if edited to try. It was created (2026-09-24,
+# trust id 6da11094-9f02-4e6e-844e-0f0a7909f2ca) with:
+#
+#     npx -y npm@11 trust github @agrippa87/memoria-mcp \
+#       --file release.yml --repo Agripp87/memoria_mcp --allow-stage-publish
+#
+# Inspect with `npx -y npm@11 trust list @agrippa87/memoria-mcp`. Entries
+# cannot be edited: renaming this file or the repository means
+# `npm trust revoke --id=<id>` and re-running the command above. The owner,
+# repository and file are case-sensitive, and package.json's repository.url
+# must match this repository exactly. Every `npm trust` command asks for the
+# maintainer's second factor.
 
 on:
   push:
