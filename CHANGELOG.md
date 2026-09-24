@@ -51,7 +51,6 @@ Fixes from a full review of 0.2.0.
   longer rewrites the whole file from a copy read a moment earlier, which could
   drop an entry appended in between. Cross-source fusion no longer creates a
   daily log without frontmatter when it is the first writer of the day.
-
 - **Keyword search ignored any word with a non-ASCII letter.** The query
   sanitiser kept only ASCII word characters, so `Müller` became `M ller`,
   `café` became `caf`, and Chinese or Japanese text vanished: the keyword half
@@ -73,6 +72,15 @@ Fixes from a full review of 0.2.0.
   there. The install also no longer freezes the server while it runs. If an
   earlier attempt left `package.json`, `package-lock.json` or `node_modules`
   in your Memoria directory, you can delete them.
+- Symlinked `.md` files under `memories/` are no longer indexed. The memory
+  tools already refused to read or write through a symlink, but indexing
+  followed one, so a link pointing outside the store put that file's content
+  into search results.
+- `scripts/sync-from-claude-memory.sh` imported into the directory the script
+  was checked out in, rather than your store, and picked whichever Claude Code
+  project had "memoria" in its name. It now uses `MEMORIA_DIR` (default
+  `~/.memoria`, like the server) and takes the auto-memory directory as an
+  argument, choosing automatically only when there is exactly one.
 
 ### Changed
 
@@ -82,6 +90,13 @@ Fixes from a full review of 0.2.0.
   showed an evening time inside the next day's log. Entries already in your
   logs are unchanged, and the entity compiler, `memory_compact` and
   `memory_stats` read both forms.
+
+### Removed
+
+- `scripts/lib-union-merge.sh`. The docs described it as the way to merge
+  daily logs without git, but it needed git itself plus a hook that never
+  shipped. The multi-device guide now says plainly that only a git-synced store
+  merges two devices' entries in the same daily log.
 
 ### Security
 
@@ -108,6 +123,14 @@ Fixes from a full review of 0.2.0.
   whatever the first had encrypted unreadable. A corrupt or truncated key file
   is now reported by name at startup, not as a confusing "Invalid key length"
   at the first decryption.
+- **Docker image:** the runtime image no longer ships the development
+  toolchain (TypeScript, Vitest, ESLint and their dependencies). The service
+  user no longer owns the application code, so a compromised process cannot
+  rewrite it; it owns only `/data` and the model cache. The embedding model
+  download at build time no longer fails silently. A failure now fails the
+  build, where before the image quietly fetched the model on first use (skip
+  the download with `--build-arg PREFETCH_MODEL=false`). CI checks all three
+  on the built image.
 - OAuth redirects to `localhost` / `127.0.0.1` must use `http` or `https`.
   Other schemes with a local host were accepted.
 - Documented `MEMORIA_TOKEN_DB_DIR`, `MEMORIA_OAUTH_CLIENT_ID` and

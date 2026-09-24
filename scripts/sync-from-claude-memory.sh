@@ -1,28 +1,54 @@
 #!/bin/bash
 # Sync memories from Claude Code's built-in memory into Memoria's canonical store
-# This is a one-way pull: ~/.claude/projects/*/memory/ → Memoria/memories/
-# Usage: ./scripts/sync-from-claude-memory.sh
+# This is a one-way pull: ~/.claude/projects/<project>/memory/ → $MEMORIA_DIR/memories/
+#
+# Usage: scripts/sync-from-claude-memory.sh [CLAUDE_MEMORY_DIR]
+#
+#   MEMORIA_DIR        the Memoria store. Defaults to ~/.memoria, like the
+#                      server; set it if your store lives elsewhere.
+#   CLAUDE_MEMORY_DIR  the auto-memory directory to import, as an argument or
+#                      in the environment. Optional when only one Claude Code
+#                      project has one; with several, the script lists them.
 
 set -euo pipefail
 
-MEMORIA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# Until 2026-09 this used the script's own checkout as the store and imported
+# the first project whose name matched *memoria*: right on the maintainer's
+# machine, and wrong everywhere else.
+MEMORIA_DIR="${MEMORIA_DIR:-$HOME/.memoria}"
 MEMORIES_DIR="$MEMORIA_DIR/memories"
+CLAUDE_MEMORY_DIR="${1:-${CLAUDE_MEMORY_DIR:-}}"
 
-# Derive Claude Code's per-project memory dir from THIS repo's location (Claude
-# mangles a project path by replacing "/" with "-"), instead of hardcoding one
-# machine's path. Fall back to a glob so a differently-mangled path (e.g. a
-# Windows drive prefix) is still found.
-_mangled="$(printf '%s' "$MEMORIA_DIR" | sed 's|/|-|g; s|^-||')"
-CLAUDE_MEMORY_DIR="$HOME/.claude/projects/$_mangled/memory"
-if [ ! -d "$CLAUDE_MEMORY_DIR" ]; then
-  for _cand in "$HOME"/.claude/projects/*[Mm]emoria*/memory; do
-    [ -d "$_cand" ] && CLAUDE_MEMORY_DIR="$_cand" && break
+if [ ! -d "$MEMORIES_DIR" ]; then
+  echo "No Memoria store at $MEMORIES_DIR. Set MEMORIA_DIR to your store's directory." >&2
+  exit 1
+fi
+
+if [ -z "$CLAUDE_MEMORY_DIR" ]; then
+  candidates=()
+  for _cand in "$HOME"/.claude/projects/*/memory; do
+    [ -d "$_cand" ] && candidates+=("$_cand")
   done
+  case ${#candidates[@]} in
+    0)
+      echo "No Claude Code auto-memory found under $HOME/.claude/projects/."
+      exit 0
+      ;;
+    1)
+      CLAUDE_MEMORY_DIR="${candidates[0]}"
+      ;;
+    *)
+      echo "Several Claude Code projects have auto-memory. Choose one:" >&2
+      printf '  %s\n' "${candidates[@]}" >&2
+      echo "Usage: $0 <CLAUDE_MEMORY_DIR>   (or set CLAUDE_MEMORY_DIR)" >&2
+      exit 1
+      ;;
+  esac
 fi
 
 if [ ! -d "$CLAUDE_MEMORY_DIR" ]; then
-  echo "No Claude Code memory found at: $CLAUDE_MEMORY_DIR"
-  exit 0
+  echo "Not a directory: $CLAUDE_MEMORY_DIR" >&2
+  exit 1
 fi
 
 echo "Syncing from: $CLAUDE_MEMORY_DIR"

@@ -113,3 +113,30 @@ describe("isValidMemoryFilename (real validator — shape only)", () => {
     expect(() => resolveMemoryPath("../../etc/passwd.md")).toThrow(/traversal/i);
   });
 });
+
+describe("indexing skips symlinked memory files (2026-09 review, L1)", () => {
+  it("getAllMemoryFiles and reindexFile ignore a symlink pointing outside the store", async () => {
+    const { getAllMemoryFiles, reindexFile } = await import("../tools.js");
+    const { MemoryStore } = await import("../store.js");
+    const outside = path.join(ROOT, "outside-secret.md");
+    fs.writeFileSync(outside, "---\nname: secret\n---\nsecret-outside-content\n");
+    const link = path.join(MEMORIES_DIR, "project", "linked-secret.md");
+    if (!trySymlink(outside, link)) return; // platform can't symlink — skip
+    const regular = path.join(MEMORIES_DIR, "project", "regular-note.md");
+    fs.writeFileSync(regular, "---\nname: note\n---\nregular content\n");
+
+    const files = getAllMemoryFiles();
+    expect(files).toContain(regular);
+    expect(files).not.toContain(link);
+
+    const store = new MemoryStore(path.join(ROOT, "l1.sqlite"));
+    try {
+      expect(await reindexFile(store, link)).toBe(0);
+      expect(await reindexFile(store, regular)).toBeGreaterThan(0);
+      expect(store.getIndexedFiles()).not.toContain("project/linked-secret.md");
+    } finally {
+      store.close();
+      fs.unlinkSync(link);
+    }
+  });
+});

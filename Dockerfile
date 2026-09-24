@@ -17,9 +17,19 @@ COPY mcp-server/scripts ./scripts
 RUN npm run build
 
 # Pre-bake the local embedding model (all-MiniLM-L6-v2) so the runtime image
-# doesn't download it on first request. Best-effort — won't fail the build.
+# doesn't download it on first request. A failed download fails the build: it
+# used to be swallowed, shipping an image that quietly fetched the model from
+# the network on its first search. Building for OpenAI or hash embeddings, or
+# without network? Pass --build-arg PREFETCH_MODEL=false to skip it on purpose.
+ARG PREFETCH_MODEL=true
 ENV MEMORIA_MODEL_CACHE=/app/mcp-server/.models
-RUN mkdir -p /app/mcp-server/.models && (node scripts/prefetch-model.mjs || true)
+RUN mkdir -p /app/mcp-server/.models && \
+    if [ "$PREFETCH_MODEL" = "true" ]; then node scripts/prefetch-model.mjs; \
+    else echo "prefetch: skipped (PREFETCH_MODEL=$PREFETCH_MODEL)"; fi
+
+# Ship runtime dependencies only. The optional embedding dependency stays;
+# TypeScript, Vitest, ESLint and the rest of the toolchain go.
+RUN npm prune --omit=dev
 
 # --- Production stage ---
 FROM node:26-alpine
@@ -44,15 +54,17 @@ COPY --from=builder /app/mcp-server/scripts ./scripts
 # Pre-baked embedding model cache (may be empty if prefetch was skipped)
 COPY --from=builder /app/mcp-server/.models ./.models
 
-# Copy the generic helper scripts (sync library etc). NOTE: memory files are deliberately NOT baked
+# Copy the generic helper scripts (sync hooks etc). NOTE: memory files are deliberately NOT baked
 # into the image — at runtime MEMORIA_DIR=/data/memoria (the mounted volume) is
 # the store, so a baked /app/memories would only be stale personal data shipped
 # inside the container image. The runtime memories dir is created below.
 COPY scripts /app/scripts
 
-# Create data directory for SQLite persistence with correct ownership
+# The runtime user owns its data and the model cache, and nothing else: the
+# application code under /app stays root-owned, so a compromised process
+# cannot rewrite the server it runs as.
 RUN mkdir -p /data/memoria/memories /data/memoria/data && \
-    chown -R memoria:memoria /data /app
+    chown -R memoria:memoria /data /app/mcp-server/.models
 
 ENV NODE_ENV=production
 ENV DOCKER=true
