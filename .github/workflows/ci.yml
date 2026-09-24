@@ -110,6 +110,7 @@ jobs:
               echo "::error::application code is writable by the runtime user"; exit 1
             fi
             [ -w /data/memoria ] || { echo "::error::/data/memoria is not writable"; exit 1; }
+            [ -w "$HOME" ] || { echo "::error::HOME ($HOME) is not writable"; exit 1; }
             [ -n "$(ls -A .models)" ] || { echo "::error::no embedding model in .models"; exit 1; }
             echo "image contents OK, running as $(id -un)"
           '
@@ -127,6 +128,22 @@ jobs:
               if (v.length !== 384) throw new Error("unexpected dimension " + v.length);
               console.log("MiniLM loads offline in the runtime image");
             '
+      # Enabling the email source installs imapflow at runtime, as the runtime
+      # user. Run that exact path with the real package: it caught a home-less
+      # user whose npm could not create its cache, and it checks the named
+      # export the adapter destructures survives the import.
+      - name: On-demand adapter install works in the image
+        run: |
+          docker run --rm --entrypoint node memoria:ci --input-type=module -e '
+            const deps = await import("./dist/collector/deps.js");
+            deps.setAdapterModulesDir("/data/memoria/data/adapter-modules");
+            const r = await deps.installDependencies(["imapflow"]);
+            // "Installed", not "already installed": the step must run npm.
+            if (!r.success || !r.message.startsWith("Installed")) throw new Error(r.message);
+            const { ImapFlow } = await deps.importDependency("imapflow");
+            if (typeof ImapFlow !== "function") throw new Error("ImapFlow export missing");
+            console.log("adapter install + import OK:", r.message);
+          '
       # Building proves it compiles; running proves the runtime stage is not
       # missing a file or a permission, and that the fail-closed posture check
       # in http.ts accepts a correct config. BIND_ALL is required for the

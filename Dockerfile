@@ -45,9 +45,11 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends tini curl && \
     rm -rf /var/lib/apt/lists/*
 
-# Create non-root user (use GID/UID 1001 since 1000 is taken by 'node')
+# Create non-root user (use GID/UID 1001 since 1000 is taken by 'node'), with
+# a home of its own (-m): enabling an email or Google source runs npm install
+# at runtime, and npm needs a writable ~/.npm for its cache.
 RUN groupadd -g 1001 memoria && \
-    useradd -u 1001 -g memoria -M -s /usr/sbin/nologin memoria
+    useradd -u 1001 -g memoria -m -s /usr/sbin/nologin memoria
 
 WORKDIR /app/mcp-server
 

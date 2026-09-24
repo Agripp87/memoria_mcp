@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { MemoryStore, toFtsQuery } from "../store.js";
+import { MemoryStore, headWithoutCutWord, toFtsQuery } from "../store.js";
 import { chunkMarkdown } from "../chunker.js";
 import os from "os";
 import path from "path";
@@ -270,5 +270,22 @@ describe("keyword search across scripts and operators (2026-09 review, M2)", () 
   it("search() ranks the keyword match first for a non-ASCII query", async () => {
     const results = await store.search("Müller", 3);
     expect(results[0].file).toBe("de.md");
+  });
+});
+
+describe("headWithoutCutWord (2026-09 re-review)", () => {
+  it("drops a word the cut went through, keeps a whole one", () => {
+    expect(headWithoutCutWord("meeting with Müller today", 17)).toBe("meeting with ");
+    expect(headWithoutCutWord("meeting with Müller today", 19)).toBe("meeting with Müller");
+    expect(headWithoutCutWord("short", 200)).toBe("short");
+  });
+});
+
+describe("headWithoutCutWord outside the BMP (2026-09 re-review, round 4)", () => {
+  it("drops a word whose cut falls inside a surrogate pair", () => {
+    // U+20000 is a CJK Extension B letter: two UTF-16 units.
+    const text = "note 𠀀𠀀𠀀 end";
+    expect(headWithoutCutWord(text, 7)).toBe("note ");
+    expect(headWithoutCutWord(text, 8)).toBe("note ");
   });
 });

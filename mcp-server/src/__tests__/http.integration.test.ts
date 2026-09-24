@@ -610,3 +610,45 @@ describe("entry-point detection (2026-09 review, H1)", () => {
     30_000,
   );
 });
+
+describe("/ingest timestamps (2026-09 re-review)", () => {
+  it("writes events with unparsable or absurd timestamps, labelled at ingest time", async () => {
+    const r = await request(app)
+      .post("/ingest")
+      .set(auth)
+      .send({
+        events: [
+          {
+            id: "bad-ts-1",
+            source: "http-test",
+            content: "An ingested event whose timestamp is day-first and unparsable by JS.",
+            timestamp: "24/09/2026",
+          },
+          {
+            id: "far-ts-1",
+            source: "http-test",
+            content: "A second event, sent with epoch microseconds where milliseconds belong.",
+            timestamp: 1727186400000000,
+          },
+        ],
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.failed).toBe(0);
+    expect(r.body.written).toBe(2);
+    const today = new Date().toISOString().slice(0, 10);
+    const log = fs.readFileSync(path.join(ROOT, "memories", "daily", `${today}.md`), "utf-8");
+    expect(log.match(/## \d{2}:\d{2} UTC — http-test/g)).toHaveLength(2);
+  });
+});
+
+describe("normalizeTimestamp (2026-09 re-review, round 4)", () => {
+  it("keeps a usable timestamp and replaces the rest with now", async () => {
+    const { normalizeTimestamp } = await import("../http.js");
+    const now = new Date("2026-09-24T12:00:00Z");
+    expect(normalizeTimestamp("2026-09-24T14:05:00+02:00", now)).toBe("2026-09-24T12:05:00.000Z");
+    expect(normalizeTimestamp(Date.UTC(2026, 0, 2), now)).toBe("2026-01-02T00:00:00.000Z");
+    for (const bad of ["24/09/2026", 1727186400000000, {}, [], null, undefined, true]) {
+      expect(normalizeTimestamp(bad, now), String(bad)).toBe(now.toISOString());
+    }
+  });
+});

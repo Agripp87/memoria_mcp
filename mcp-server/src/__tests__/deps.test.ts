@@ -68,13 +68,44 @@ describe("installing optional dependencies", () => {
     }
   });
 
-  it("uses npm.cmd through a shell on Windows, npm without one elsewhere", () => {
-    const win = npmInstallCommand(["imapflow"], "win32");
-    expect(win).toMatchObject({ args: [], shell: true });
-    expect(win.file).toMatch(/^npm\.cmd install .* imapflow$/);
-    const linux = npmInstallCommand(["imapflow"], "linux");
-    expect(linux).toMatchObject({ file: "npm", shell: false });
-    expect(linux.args.at(-1)).toBe("imapflow");
+  it("runs npm's CLI script with the Node binary itself: no shell, no command lookup", () => {
+    // On Windows a bare npm.cmd went through cmd.exe, which looks in the
+    // current directory (adapter-modules) before PATH.
+    const node = path.join(ROOT, "nodejs", "node.exe");
+    const cli = path.join(ROOT, "nodejs", "node_modules", "npm", "bin", "npm-cli.js");
+    const cmd = npmInstallCommand(["imapflow"], "win32", node, (p) => p === cli);
+    expect(cmd!.file).toBe(node);
+    expect(cmd!.args[0]).toBe(cli);
+    expect(Object.keys(cmd!)).not.toContain("shell");
+    expect(cmd!.args.at(-1)).toBe("imapflow");
+    expect(cmd!.args).toContain("--ignore-scripts");
+  });
+
+  it("finds npm under ../lib on POSIX layouts, and never falls back to a Windows lookup", () => {
+    const node = "/usr/local/bin/node";
+    const posixCli = path.join(
+      "/usr/local/bin",
+      "..",
+      "lib",
+      "node_modules",
+      "npm",
+      "bin",
+      "npm-cli.js",
+    );
+    expect(npmInstallCommand(["x"], "linux", node, (p) => p === posixCli)?.args[0]).toBe(posixCli);
+    expect(npmInstallCommand(["x"], "linux", node, () => false)).toEqual({
+      file: "npm",
+      args: expect.arrayContaining(["install", "x"]),
+    });
+    expect(npmInstallCommand(["x"], "win32", "C:\\node\\node.exe", () => false)).toBeNull();
+  });
+
+  it("finds a usable npm for the Node running this test", () => {
+    // Every supported layout resolves to npm's CLI script; one this code does
+    // not know falls back to plain `npm` on POSIX, which is still usable.
+    const cmd = npmInstallCommand(["x"]);
+    expect(cmd).not.toBeNull();
+    if (process.platform === "win32") expect(cmd!.file).toBe(process.execPath);
   });
 
   it("refuses an invalid name without running npm", async () => {
@@ -102,5 +133,61 @@ describe("SourceRegistry sees on-demand installs", () => {
     fs.writeFileSync(path.join(modules, "package.json"), "{}");
     fakeInstall(modules, "googleapis", "module.exports = { google: {} };");
     expect(gmail()?.installed).toBe(true);
+  });
+});
+
+describe("adapter-modules resolution stays inside its own node_modules (2026-09 re-review)", () => {
+  it("ignores a package in an ancestor node_modules, such as the Memoria directory's root", async () => {
+    // Node resolution walks up from adapter-modules into the Memoria
+    // directory, which is user data and often git-synced; the old installer
+    // also left a node_modules at its root. Nothing up there may load.
+    fakeInstall(ROOT, "memoria-planted-dep", "module.exports = { planted: true };");
+    expect(isDependencyAvailable("memoria-planted-dep")).toBe(false);
+    await expect(importDependency("memoria-planted-dep")).rejects.toThrow(/not installed/);
+
+    fakeInstall(MODULES, "memoria-planted-dep", "module.exports = { planted: false };");
+    expect(isDependencyAvailable("memoria-planted-dep")).toBe(true);
+    expect((await importDependency<{ planted: boolean }>("memoria-planted-dep")).planted).toBe(
+      false,
+    );
+  });
+});
+
+describe("adapter-modules resolution details (2026-09 re-review, round 4)", () => {
+  it("honours a package's exports map when it has no main", async () => {
+    const pkgDir = path.join(MODULES, "node_modules", "memoria-exports-only");
+    fs.mkdirSync(path.join(pkgDir, "lib"), { recursive: true });
+    fs.writeFileSync(
+      path.join(pkgDir, "package.json"),
+      JSON.stringify({ name: "memoria-exports-only", exports: { require: "./lib/entry.js" } }),
+    );
+    fs.writeFileSync(
+      path.join(pkgDir, "lib", "entry.js"),
+      "module.exports = { viaExports: true };",
+    );
+    expect(isDependencyAvailable("memoria-exports-only")).toBe(true);
+    const mod = await importDependency<{ viaExports: boolean }>("memoria-exports-only");
+    expect(mod.viaExports).toBe(true);
+  });
+
+  it("knows the Homebrew and Debian npm locations", () => {
+    const brewNode = "/opt/homebrew/Cellar/node/26.0.0/bin/node";
+    const brewCli = path.join(
+      "/opt/homebrew/Cellar/node/26.0.0/bin",
+      "..",
+      "libexec",
+      "lib",
+      "node_modules",
+      "npm",
+      "bin",
+      "npm-cli.js",
+    );
+    expect(npmInstallCommand(["x"], "darwin", brewNode, (p) => p === brewCli)?.args[0]).toBe(
+      brewCli,
+    );
+    const debCli = path.join("/usr/bin", "..", "share", "nodejs", "npm", "bin", "npm-cli.js");
+    expect(npmInstallCommand(["x"], "linux", "/usr/bin/node", (p) => p === debCli)?.args[0]).toBe(
+      debCli,
+    );
   });
 });

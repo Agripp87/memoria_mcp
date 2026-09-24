@@ -70,7 +70,7 @@ Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Co
 - **Docker-first deployment**: multi-stage image, non-root user, persistent volume; a reference Cloud Run + GCS FUSE template under [`deploy/gcp/`](deploy/gcp/README.md)
 - **Spec-compliant YAML parser**: Uses `js-yaml` for frontmatter (handles quoted colons, multi-line strings, special chars in tags) — gracefully degrades on malformed YAML
 - **Bounded lint operations**: Contradiction scan capped at top 30 memories by importance, batched 5-in-parallel to control embedding API cost
-- **Buffer capacity reporting**: `/ingest` returns `bufferDropped` count and `bufferUsage` so callers know when events are dropped at capacity
+- **Buffer capacity reporting**: `/ingest` returns `bufferDropped` count and `bufferUsage` so callers know when events are dropped at capacity, and `failed` for events that could not be written this time (kept for retry)
 - **Test suite**: covers chunker, embeddings, store, optimizer, ingestion, path resolution (incl. symlink-leaf containment), file_watcher allowlisting, privacy-tier classification + sink-side redaction, AES-256-GCM crypto (round-trip/tamper/strict-key), YAML edge cases, access tracking, plus an **HTTP integration suite** (supertest over the real Express app: the `/dashboard/api` Bearer auth-gate, the full OAuth `authorization_code`+PKCE flow end-to-end, client-credential + API-key-decoupling checks, redirect allowlisting) and **wiki rendering** (code-safe `[[wikilink]]` resolution, stored-XSS escaping, link-label safety). CI fails on coverage regression via per-file floors.
 - **File watcher**: Auto-reindex on change with 1.5s debounce, plus a periodic reindex sweep (default 5 min) as a fallback for mounts where `fs.watch` is inert (e.g. GCS FUSE on Cloud Run)
 
@@ -378,7 +378,7 @@ All events are classified into privacy tiers before leaving the device:
 
 ### Encryption
 
-- **Master key**: AES-256-GCM. Sourced from `MEMORIA_ENCRYPTION_KEY` (recommended — pin from a secret manager), else auto-generated on first run at `data/collector.key`, created owner-only (0600; a warning is logged when the filesystem ignores the mode). Set `MEMORIA_REQUIRE_ENCRYPTION_KEY=true` to require the env var and refuse the on-disk fallback.
+- **Master key**: AES-256-GCM. Sourced from `MEMORIA_ENCRYPTION_KEY` (recommended — pin from a secret manager), else auto-generated on first run at `data/collector.key`, created owner-only (0600 on Linux and macOS, with a warning when the filesystem ignores the mode; on Windows it inherits the data folder's permissions). Set `MEMORIA_REQUIRE_ENCRYPTION_KEY=true` to require the env var and refuse the on-disk fallback.
 - **Ring buffer**: All event content encrypted before SQLite storage
 - **Config**: Source configurations (including IMAP credentials) encrypted at `data/collector-config.enc`
 - **Access**: Only the Memoria agent and the user have access to decrypted data
@@ -431,7 +431,7 @@ curl -X POST https://<your-host>/ingest \
   }'
 ```
 
-Response: `{ "accepted": 1, "buffered": 1, "written": 1, "deduplicated": 0, "rateLimited": 0 }`
+Response: `{ "accepted": 1, "buffered": 1, "written": 1, "deduplicated": 0, "rateLimited": 0, "failed": 0, "bufferDropped": 0, "bufferUsage": { … } }`
 
 
 **Python hook.** [`integrations/orchestrator_hook.py`](integrations/orchestrator_hook.py) is a dependency-light (`httpx` or `requests`) client that buffers events and flushes them every 30 s in the background — originally written for a multi-agent orchestrator, but generic: `record_agent_result`, `record_metric`, `record_conversation`, `record_training_eval`, plus raw `record(...)`. All calls are best-effort; a Memoria outage never breaks the caller.

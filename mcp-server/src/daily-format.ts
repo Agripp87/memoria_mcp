@@ -1,7 +1,7 @@
 /**
  * The daily-log entry heading format, shared by the writers (journal,
  * ingestion, fusion) and the readers that parse it back (entities,
- * memory_compact, memory_reflect).
+ * memory_compact, memory_stats).
  */
 
 /**
@@ -11,7 +11,15 @@
  * entry west of UTC, labelled in the evening, inside the NEXT day's log.
  */
 export function utcTimeLabel(d: Date = new Date()): string {
-  return `${d.toISOString().slice(11, 16)} UTC`;
+  // An invalid Date labels as the current time: toISOString() would throw,
+  // failing the whole entry, and a placeholder like "??:??" would hide the
+  // entry from every heading parser.
+  const t = Number.isNaN(d.getTime()) ? new Date() : d;
+  // From the UTC fields, not toISOString(): past year 9999 that becomes
+  // "+056702-05-12T08:…", and a fixed slice of it read "12T08".
+  const hh = String(t.getUTCHours()).padStart(2, "0");
+  const mm = String(t.getUTCMinutes()).padStart(2, "0");
+  return `${hh}:${mm} UTC`;
 }
 
 /**

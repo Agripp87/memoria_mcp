@@ -899,6 +899,21 @@ app.get("/health", (_req, res) => {
 // Direct HTTP endpoint for external sub-memory collectors to push events
 // (e.g., a mobile companion app or remote collector)
 
+/**
+ * An event timestamp as ISO 8601, or `now` when it cannot be used. An
+ * unparsable value becomes "now", as custom sources already do, rather than an
+ * event that fails every ingest attempt and is dead-lettered while the caller
+ * is told it was accepted. Years outside 1970–9999 are treated the same way:
+ * epoch microseconds sent as milliseconds land around year 56,000, which is
+ * no one's intent.
+ */
+export function normalizeTimestamp(v: unknown, now: Date = new Date()): string {
+  const d = new Date(typeof v === "string" || typeof v === "number" ? v : NaN);
+  const year = d.getUTCFullYear();
+  const plausible = !Number.isNaN(d.getTime()) && year >= 1970 && year <= 9999;
+  return (plausible ? d : now).toISOString();
+}
+
 app.post("/ingest", writeLimiter, authenticate, async (req, res) => {
   const events = req.body?.events;
   if (!Array.isArray(events) || events.length === 0) {
@@ -940,7 +955,7 @@ app.post("/ingest", writeLimiter, authenticate, async (req, res) => {
       source: String(e.source),
       eventType: String(e.eventType || "external"),
       content: String(e.content),
-      timestamp: e.timestamp || new Date().toISOString(),
+      timestamp: normalizeTimestamp(e.timestamp),
       meta: e.meta || {},
       importanceEstimate: clampImportance(e.importance),
       privacyTier: VALID_TIERS.has(e.privacyTier) ? e.privacyTier : "send",
@@ -964,9 +979,13 @@ app.post("/ingest", writeLimiter, authenticate, async (req, res) => {
 
     process.stderr.write(
       `Memoria: /ingest received ${events.length} events, buffered ${buffered}, ` +
-        `written ${result.written}, deduped ${result.deduplicated}` +
+        `written ${result.written}, deduped ${result.deduplicated}, failed ${result.errors.length}` +
         (bufferDropped > 0 ? `, BUFFER FULL: ${bufferDropped} dropped` : "") +
-        "\n",
+        "\n" +
+        result.errors
+          .slice(0, 5)
+          .map((e) => `  failed: ${e}\n`)
+          .join(""),
     );
 
     // Warn the caller if buffer is near capacity
@@ -980,6 +999,9 @@ app.post("/ingest", writeLimiter, authenticate, async (req, res) => {
       written: result.written,
       deduplicated: result.deduplicated,
       rateLimited: result.rateLimited,
+      // Events that failed to write. They stay buffered and are retried; the
+      // messages are logged server-side, not returned (they can hold paths).
+      failed: result.errors.length,
       bufferDropped,
       bufferUsage: { current: total, max: cap, nearCapacity },
       ...(bufferDropped > 0 && {
@@ -1022,8 +1044,12 @@ async function main(): Promise<void> {
     process.stderr.write("Memoria: full reindex triggered by provider change...\n");
   }
   for (const f of files) {
+    // A stop signal during a long first index: stop here, before shutdown()
+    // closes the store under the next reindexFile.
+    if (shuttingDown) return;
     await reindexFile(store, f);
   }
+  if (shuttingDown) return;
   process.stderr.write(`Indexed ${files.length} memory files.\n`);
 
   // fs.watch is inert on the GCS FUSE / Cloud Run mount, so sweep periodically
@@ -1099,6 +1125,9 @@ if (isEntryPoint(process.argv[1], import.meta.url)) {
     process.on(signal, () => void shutdown(signal));
   }
   main().catch((err) => {
+    // Once shutting down, an error from work cut short is expected; exiting 1
+    // here would pre-empt shutdown()'s clean exit(0).
+    if (shuttingDown) return;
     process.stderr.write(`Fatal error: ${err}\n`);
     process.exit(1);
   });

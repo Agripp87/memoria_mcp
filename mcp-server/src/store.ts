@@ -102,6 +102,26 @@ export function selectEvenSample(
 // A word, in any script: letters, combining marks, digits, underscore.
 const FTS_TERM_RE = /[\p{L}\p{M}\p{N}_]+/gu;
 const FTS_MAX_TERMS = 32;
+const FTS_WORD_CHAR_RE = /[\p{L}\p{M}\p{N}_]/u;
+const FTS_TRAILING_WORD_RE = /[\p{L}\p{M}\p{N}_]+$/u;
+
+/**
+ * The first `max` UTF-16 units of `text`, minus a word the cut went through.
+ * A truncated last term ("Müll" of "Müller") matches nothing, and because the
+ * terms are ANDed, one such term emptied the whole keyword pre-filter behind
+ * memory_write's duplicate check for any text longer than the cut. A cut
+ * inside a surrogate pair moves back one unit, so a letter outside the BMP
+ * (CJK Extension B, say) counts as the word character it is.
+ */
+export function headWithoutCutWord(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let cut = max;
+  const unit = text.charCodeAt(cut);
+  if (unit >= 0xdc00 && unit <= 0xdfff) cut -= 1;
+  const head = text.slice(0, cut);
+  const next = String.fromCodePoint(text.codePointAt(cut) ?? 0x20);
+  return FTS_WORD_CHAR_RE.test(next) ? head.replace(FTS_TRAILING_WORD_RE, "") : head;
+}
 
 /**
  * Turn free text into a safe FTS5 MATCH expression: each word becomes a
@@ -965,7 +985,7 @@ export class MemoryStore {
     const candidateIds = new Set<number>();
     if (this.hasFts5()) {
       try {
-        const ftsQuery = toFtsQuery(text.slice(0, 200));
+        const ftsQuery = toFtsQuery(headWithoutCutWord(text, 200));
         if (ftsQuery) {
           const ftsRows = this.db
             .prepare(`SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? LIMIT ?`)

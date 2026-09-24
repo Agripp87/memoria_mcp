@@ -8,3 +8,9 @@ data/
 # The object-storage mirror hook, if you use one: it tends to hold bucket
 # names and account details specific to one person.
 .memoria-mirror.sh
+
+# Code never belongs in a memory store. Collector adapters can load packages
+# from a node_modules here, and earlier Memoria versions put one at the root.
+node_modules/
+package.json
+package-lock.json
