@@ -52,6 +52,18 @@ Fixes from a full review of 0.2.0.
   drop an entry appended in between. Cross-source fusion no longer creates a
   daily log without frontmatter when it is the first writer of the day.
 
+- **Keyword search ignored any word with a non-ASCII letter.** The query
+  sanitiser kept only ASCII word characters, so `Müller` became `M ller`,
+  `café` became `caf`, and Chinese or Japanese text vanished: the keyword half
+  of search matched nothing, and only the vector half could find those
+  memories. The words `AND`, `OR`, `NOT` and `NEAR` passed through as search
+  operators instead, so a query containing one of them either changed meaning
+  or was a syntax error that search swallowed without a word. Every query word
+  is now passed as a quoted term. Accents are optional (`cafe` finds `café`).
+  Chinese and Japanese words match when the text separates them with spaces,
+  as the full-text index does not segment unspaced CJK text. On the retrieval
+  eval's English gold set the scores are unchanged, as they should be.
+
 ### Changed
 
 - **Entry times in daily logs are now UTC**, written as `14:05 UTC`. The file
