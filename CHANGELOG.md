@@ -37,6 +37,20 @@ Fixes from a full review of 0.2.0.
   either could forge a heading in the daily log, and a `tags` value that was
   not a list caused an error. `memory_daily` entries are capped at 50,000
   characters, the same limit the journal already had.
+- **A crash could leave a file truncated.** Memory files (`memory_write`,
+  `memory_compile`), `MEMORY_INDEX.md`, entity pages, the compile queue, the
+  ingestion dedup state and the collector's encrypted credential store were
+  overwritten in place. A crash, a full disk or a reader arriving mid-write
+  found a truncated file. For the credential store that meant every stored
+  credential was lost. They are now written to a temporary file beside the
+  target and renamed over it, so the old content or the new is always intact.
+- **Daily logs could lose an entry.** When two writers found today's log
+  missing at the same moment (say, the collector and `memory_daily`), the
+  second one's create overwrote the first one's entry. Creation is now
+  exclusive and the second writer appends. Raising a daily log's importance no
+  longer rewrites the whole file from a copy read a moment earlier, which could
+  drop an entry appended in between. Cross-source fusion no longer creates a
+  daily log without frontmatter when it is the first writer of the day.
 
 ### Changed
 
@@ -66,6 +80,12 @@ Fixes from a full review of 0.2.0.
 - `tokens.sqlite` is created readable by its owner only (`0600`). Before, it
   was created with the default permissions and there was a window before they
   were tightened.
+- The auto-generated encryption key file, `collector.key`, is likewise created
+  owner-only from the first byte, and never over an existing key. Two
+  processes starting together could each write a key of their own, leaving
+  whatever the first had encrypted unreadable. A corrupt or truncated key file
+  is now reported by name at startup, not as a confusing "Invalid key length"
+  at the first decryption.
 - OAuth redirects to `localhost` / `127.0.0.1` must use `http` or `https`.
   Other schemes with a local host were accepted.
 - Documented `MEMORIA_TOKEN_DB_DIR`, `MEMORIA_OAUTH_CLIENT_ID` and

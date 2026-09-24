@@ -6,7 +6,7 @@
  * Uses AES-256-GCM for symmetric encryption (authenticated).
  * The master key is sourced, in order, from: the MEMORIA_ENCRYPTION_KEY env var
  * (hex; recommended — pin it from a secret manager), then a local key file at
- * <dataDir>/collector.key (chmod 600, auto-generated on first run). Set
+ * <dataDir>/collector.key (owner-only 0600, auto-generated on first run). Set
  * MEMORIA_REQUIRE_ENCRYPTION_KEY=true to require the env var and refuse the
  * on-disk fallback. (deriveKey() offers scrypt passphrase derivation for
  * callers that want it, but the master-key bootstrap does not use a passphrase.)
@@ -14,6 +14,7 @@
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from "node:crypto";
 import * as fs from "node:fs";
+import { sleepSync } from "../atomic-fs.js";
 import * as path from "node:path";
 
 const ALGO = "aes-256-gcm";
@@ -43,7 +44,7 @@ export function deriveKey(passphrase: string, salt: Buffer): Buffer {
  * Initialize or load the master encryption key.
  * Order of precedence:
  *   1. MEMORIA_ENCRYPTION_KEY env var (hex-encoded 32-byte key)
- *   2. Key file at <dataDir>/collector.key (auto-generated, chmod 600)
+ *   2. Key file at <dataDir>/collector.key (auto-generated, owner-only 0600)
  *
  * When MEMORIA_REQUIRE_ENCRYPTION_KEY=true (recommended for any shared/cloud
  * deployment), only (1) is allowed: the function refuses to read or generate an
@@ -79,9 +80,9 @@ export function initMasterKey(dataDir: string): Buffer {
 
   // 2. Key file
   const keyFile = path.join(dataDir, "collector.key");
-  if (fs.existsSync(keyFile)) {
-    const hex = fs.readFileSync(keyFile, "utf-8").trim();
-    _masterKey = Buffer.from(hex, "hex");
+  const existing = readKeyFile(keyFile);
+  if (existing) {
+    _masterKey = existing;
     return _masterKey;
   }
 
@@ -94,20 +95,71 @@ export function initMasterKey(dataDir: string): Buffer {
         "MEMORIA_REQUIRE_ENCRYPTION_KEY=true for production.\n",
     );
   }
-  _masterKey = randomBytes(KEY_LEN);
+  const fresh = randomBytes(KEY_LEN);
   fs.mkdirSync(path.dirname(keyFile), { recursive: true });
-  fs.writeFileSync(keyFile, _masterKey.toString("hex") + "\n");
   try {
-    fs.chmodSync(keyFile, 0o600);
+    // "wx" with mode 0600: owner-only from the first byte (writing first and
+    // chmod-ing after left a window where a default umask made the key
+    // world-readable), and never over an existing file. Two processes starting
+    // together would otherwise each write their own key, and everything the
+    // loser had encrypted would be unreadable for good. The loser reads the
+    // winner's key instead.
+    fs.writeFileSync(keyFile, fresh.toString("hex") + "\n", { flag: "wx", mode: 0o600 });
   } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    const winner = readKeyFile(keyFile);
+    if (!winner) {
+      throw new Error(`Encryption key file ${keyFile} vanished while being created`, {
+        cause: err,
+      });
+    }
+    _masterKey = winner;
+    return _masterKey;
+  }
+  if (process.platform !== "win32" && (fs.statSync(keyFile).mode & 0o077) !== 0) {
+    // FUSE and network mounts can ignore the requested mode.
     process.stderr.write(
-      `Memoria: chmod 0600 on encryption key file ${keyFile} failed (${(err as Error).message}). ` +
+      `Memoria: the filesystem did not apply mode 0600 to encryption key file ${keyFile}. ` +
         `SECURITY: ensure bucket/volume ACLs restrict access — the master key is at risk if the storage is readable.\n`,
     );
   }
   process.stderr.write(`Memoria: generated encryption key at ${keyFile}\n`);
 
+  _masterKey = fresh;
   return _masterKey;
+}
+
+/**
+ * Read and validate the on-disk master key; null when there is no key file.
+ *
+ * An empty file is another process between creating the key file and
+ * writing it, so wait briefly for the content. Anything but 64 hex characters
+ * is refused loudly: Buffer.from(hex, "hex") silently stops at the first
+ * non-hex character, so a truncated or edited file used to yield a short key
+ * and a baffling "Invalid key length" much later, at the first decrypt.
+ */
+function readKeyFile(keyFile: string): Buffer | null {
+  for (let attempt = 0; ; attempt++) {
+    let hex: string;
+    try {
+      hex = fs.readFileSync(keyFile, "utf-8").trim();
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw err;
+    }
+    if (hex === "" && attempt < 20) {
+      sleepSync(50);
+      continue;
+    }
+    if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length !== KEY_LEN * 2) {
+      throw new Error(
+        `Encryption key file ${keyFile} is not a valid key (expected ${KEY_LEN * 2} hex characters). ` +
+          `Restore the original file: a new key cannot decrypt anything encrypted with the old one. ` +
+          `If nothing was ever encrypted with it, delete the file and a new key is generated.`,
+      );
+    }
+    return Buffer.from(hex, "hex");
+  }
 }
 
 /**

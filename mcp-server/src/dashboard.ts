@@ -18,6 +18,7 @@ import fs from "fs";
 import path from "path";
 import { parseFrontmatter } from "./chunker.js";
 import { utcTimeLabel } from "./daily-format.js";
+import { createOrAppend } from "./atomic-fs.js";
 import { MemoryStore } from "./store.js";
 import {
   MEMORIES_DIR,
@@ -530,28 +531,26 @@ export function createDashboardRouter(store: MemoryStore): Router {
       const tagLine = tags?.length ? `\n*Tags: ${tags.join(", ")}*` : "";
       const journalEntry = `\n## ${time} — Journal${moodTag}\n\n${entry.trim()}${tagLine}\n`;
 
-      if (fs.existsSync(dailyFile)) {
-        fs.appendFileSync(dailyFile, journalEntry);
-      } else {
-        const header = [
-          "---",
-          `name: Daily log ${today}`,
-          `description: Journal and collected events for ${today}`,
-          "type: session",
-          "importance: 5",
-          `created: ${today}`,
-          `updated: ${today}`,
-          `last_accessed: ${today}`,
-          "access_count: 0",
-          "tags: [daily, journal]",
-          "origin: dashboard",
-          "---",
-          "",
-          `# Daily Log — ${today}`,
-          "",
-        ].join("\n");
-        fs.writeFileSync(dailyFile, header + journalEntry, { encoding: "utf-8" });
-      }
+      const header = [
+        "---",
+        `name: Daily log ${today}`,
+        `description: Journal and collected events for ${today}`,
+        "type: session",
+        "importance: 5",
+        `created: ${today}`,
+        `updated: ${today}`,
+        `last_accessed: ${today}`,
+        "access_count: 0",
+        "tags: [daily, journal]",
+        "origin: dashboard",
+        "---",
+        "",
+        `# Daily Log — ${today}`,
+        "",
+      ].join("\n");
+      // Created exclusively, else appended: the collector may be creating
+      // today's log at the same moment (see createOrAppend).
+      createOrAppend(dailyFile, header + journalEntry, journalEntry);
 
       // Daily log changed on disk — invalidate now, before the index rebuild
       // (which can fail), so the wiki index/calendar reflects the entry.
