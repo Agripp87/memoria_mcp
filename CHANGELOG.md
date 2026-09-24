@@ -32,9 +32,31 @@ Fixes from a full review of 0.2.0.
   all throw. Each now gets the proper 4xx response. A final error handler
   also makes sure an unexpected error never sends a stack trace, whatever
   `NODE_ENV` is set to (only the Docker image set it to `production`).
+- The dashboard journal accepts only the moods its picker offers, and tags as
+  a list of up to 20 single-line strings of at most 50 characters. A newline in
+  either could forge a heading in the daily log, and a `tags` value that was
+  not a list caused an error. `memory_daily` entries are capped at 50,000
+  characters, the same limit the journal already had.
+
+### Changed
+
+- **Entry times in daily logs are now UTC**, written as `14:05 UTC`. The file
+  for each day was already chosen by the UTC date, but times were labelled in
+  the server's local time zone, so on a server west of UTC an evening entry
+  showed an evening time inside the next day's log. Entries already in your
+  logs are unchanged, and the entity compiler, `memory_compact` and
+  `memory_stats` read both forms.
 
 ### Security
 
+- **Dashboard: values from memory files could break out of an HTML
+  attribute.** The page's escaping function left quotes unescaped, and file
+  names and `related` links from frontmatter went into `data-file="..."`
+  attributes. It now escapes all five HTML-significant characters. The page also
+  sends a Content-Security-Policy that runs only its own nonce-tagged script,
+  and its 21 inline `onclick`-style handlers were replaced by event listeners,
+  so markup that slipped past escaping still could not run script. The page
+  also refuses to load inside a frame.
 - **OAuth access tokens and authorization codes are stored hashed** (SHA-256)
   in `tokens.sqlite`, and the logs show a prefix of the hash rather than of the
   token. A copied token database no longer contains a usable credential.

@@ -19,6 +19,7 @@
  */
 
 import type { RawEvent } from "./adapters/base.js";
+import { utcTimeLabel } from "../daily-format.js";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -217,10 +218,7 @@ export class TemporalFusion {
 
     // Fall back to a generic label
     const sources = [...new Set(events.map((e) => e.source))];
-    const time = new Date(events[0].timestamp).toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    const time = utcTimeLabel(new Date(events[0].timestamp));
     return `Activity at ${time} (${sources.join(" + ")})`;
   }
 
@@ -297,14 +295,8 @@ export class TemporalFusion {
 
 export function formatFusedActivity(activity: FusedActivity): string {
   const date = new Date(activity.startTime).toISOString().slice(0, 10);
-  const startTime = new Date(activity.startTime).toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  const endTime = new Date(activity.endTime).toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const startTime = utcTimeLabel(new Date(activity.startTime));
+  const endTime = utcTimeLabel(new Date(activity.endTime));
 
   return [
     `## ${activity.label}`,

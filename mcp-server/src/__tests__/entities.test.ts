@@ -30,6 +30,20 @@ afterEach(() => {
   } catch {}
 });
 
+describe("buildEntityPages — entry time labels (2026-09 review, L9)", () => {
+  it("parses UTC labels and legacy AM/PM labels alike", () => {
+    // New writers label in UTC; older logs hold server-local "10:00 AM".
+    writeDaily(
+      "2026-06-01",
+      entry("14:05 UTC", "research-agent", "found paper A") +
+        entry("10:00 AM", "research-agent", "found paper B") +
+        entry("13:30 UTC", "research-agent", "found paper C"),
+    );
+    const res = buildEntityPages(MEM, { minEvents: 3 });
+    expect(res.written).toContain("entities/research-agent.md");
+  });
+});
+
 describe("buildEntityPages (P0)", () => {
   it("compiles per-source pages once a source clears the event threshold", () => {
     writeDaily(

@@ -13,6 +13,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { contentHash } from "./crypto.js";
+import { utcTimeLabel } from "../daily-format.js";
 import { getProvider } from "../embeddings.js";
 import { classifyPrivacy, mostRestrictiveTier } from "./adapters/base.js";
 import { appendRawArchive, flushRawArchive, rawArchiveEnabled } from "./provenance.js";
@@ -482,10 +483,7 @@ export class IngestionPipeline {
   // ── Formatting ─────────────────────────────────────────────
 
   private formatDailyEntry(event: RawEvent, importance: number): string {
-    const time = new Date(event.timestamp).toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    const time = utcTimeLabel(new Date(event.timestamp));
 
     const sourceLabel = this.getSourceLabel(event.source);
     const privacyNote = event.privacyTier === "summarize" ? " *(summarized)*" : "";
