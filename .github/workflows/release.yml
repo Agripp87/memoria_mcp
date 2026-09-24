@@ -3,7 +3,12 @@ name: Release
 # STAGES mcp-server on npm when a version tag is pushed. Nothing goes public
 # until the maintainer approves it with 2FA:
 #
-#     npx -y npm@11 stage approve @agrippa87/memoria-mcp@X.Y.Z
+#     npx -y npm@11 stage approve <stage-id>
+#
+# The run summary prints that command with the id filled in, and
+# `npx -y npm@11 stage list @agrippa87/memoria-mcp` shows it too. approve,
+# reject, view and download take the staging id; given a package spec instead
+# they fail with "stage-id must be a valid UUID".
 #
 # The workflow authenticates with npm trusted publishing: it proves its
 # identity over OIDC, so no npm token is stored anywhere to leak, and npm
@@ -17,7 +22,8 @@ name: Release
 #
 # Release:    bump mcp-server/package.json, cut the CHANGELOG section, merge,
 #             tag:   git tag -a vX.Y.Z -m "..." && git push public vX.Y.Z
-#             then approve with the command above (the run summary prints it).
+#             then approve with the command above (the run summary prints it,
+#             id included).
 # Rehearsal:  run this workflow manually (Actions tab → Release → Run
 #             workflow). It runs everything and stages a throwaway pre-release
 #             version with --dry-run, so nothing is written to the registry.
@@ -131,19 +137,31 @@ jobs:
         if: github.event_name == 'push'
         run: |
           set -euo pipefail
-          npm stage publish
+          out="$(npm stage publish 2>&1 | tee /dev/stderr)"
           spec="$(node -p "const p=require('./package.json'); p.name+'@'+p.version")"
+          # approve/reject/view/download take the staging id, which npm prints
+          # as "staged with id <uuid>". Staging has already succeeded here, so
+          # failing to read the id only degrades the summary.
+          # sed, not grep: under pipefail a grep that matches nothing would
+          # exit 1 and fail a release that has already been staged.
+          id="$(printf '%s\n' "$out" | sed -nE 's/.*staged with id ([0-9a-fA-F-]{36}).*/\1/p' | head -n 1)"
+          if [ -z "$id" ]; then
+            echo "::warning::Could not read the staging id; find it with: npx -y npm@11 stage list $spec"
+            id="<stage-id from: npx -y npm@11 stage list $spec>"
+          fi
+          echo "::notice::Staged $spec with id $id"
           {
             echo "## Staged, not yet public: \`$spec\`"
             echo
             echo "Inspect it, then approve with your authenticator:"
             echo
             echo '```sh'
-            echo "npx -y npm@11 stage download $spec   # optional: inspect the tarball"
-            echo "npx -y npm@11 stage approve $spec"
+            echo "npx -y npm@11 stage view $id       # optional: what is staged"
+            echo "npx -y npm@11 stage download $id   # optional: the tarball itself"
+            echo "npx -y npm@11 stage approve $id"
             echo '```'
             echo
-            echo "Or discard it with \`npx -y npm@11 stage reject $spec\`."
+            echo "Or discard it with \`npx -y npm@11 stage reject $id\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
       # Staging the real version would fail here: between releases main

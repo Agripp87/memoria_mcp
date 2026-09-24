@@ -150,12 +150,18 @@ without the maintainer's second factor as well.
    ```
 
 4. Approve the staged release. The workflow's run summary prints the exact
-   commands:
+   commands with the staging id filled in; `npx -y npm@11 stage list
+   @agrippa87/memoria-mcp` lists it too:
 
    ```bash
-   npx -y npm@11 stage download @agrippa87/memoria-mcp@X.Y.Z   # optional: inspect
-   npx -y npm@11 stage approve  @agrippa87/memoria-mcp@X.Y.Z   # prompts for 2FA
+   npx -y npm@11 stage view     <stage-id>   # optional: what is staged
+   npx -y npm@11 stage download <stage-id>   # optional: the tarball itself
+   npx -y npm@11 stage approve  <stage-id>   # prompts for 2FA
    ```
+
+   These take the staging id, not the package name. Given
+   `@agrippa87/memoria-mcp@X.Y.Z` they fail with "stage-id must be a valid
+   UUID".
 
    `npx -y npm@11` runs an npm that has the `stage` command without changing
    your global npm; npm before 11.15 does not have it. `npm stage reject`
