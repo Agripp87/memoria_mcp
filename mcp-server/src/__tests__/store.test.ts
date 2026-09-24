@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { MemoryStore } from "../store.js";
+import { MemoryStore, toFtsQuery } from "../store.js";
 import { chunkMarkdown } from "../chunker.js";
 import os from "os";
 import path from "path";
@@ -212,5 +212,63 @@ This is a test memory about TypeScript programming.`;
     expect(Array.isArray(results)).toBe(true);
     // The fallback returns up to maxResults entries
     expect(results.length).toBeLessThanOrEqual(5);
+  });
+});
+
+describe("keyword search across scripts and operators (2026-09 review, M2)", () => {
+  const docs: Record<string, string> = {
+    "de.md": "Meeting with Herr Müller in Zürich about the café budget.",
+    "ja.md": "東京 タワー の 見学",
+    "ops.md": "The plan and the budget were approved, not rejected.",
+  };
+
+  beforeEach(async () => {
+    for (const [file, body] of Object.entries(docs)) {
+      const content = `---\nname: ${file}\nimportance: 5\n---\n\n${body}`;
+      await store.indexChunks(chunkMarkdown(content, file), 5, content);
+    }
+  });
+
+  // What the FTS5 stage alone matches — the keyword signal the old sanitiser
+  // destroyed. (search() also has recency and vector candidates, which can
+  // hide a dead keyword stage in a store this small.)
+  const ftsFiles = (q: string): string[] => {
+    const expr = toFtsQuery(q);
+    if (!expr) return [];
+    const rows = (store as any).db
+      .prepare("SELECT file FROM chunks_fts WHERE chunks_fts MATCH ?")
+      .all(expr) as { file: string }[];
+    return rows.map((r) => r.file);
+  };
+
+  it("toFtsQuery quotes every word, keeps non-ASCII, and caps the term count", () => {
+    expect(toFtsQuery("Müller café")).toBe('"Müller" "café"');
+    expect(toFtsQuery("plan AND budget")).toBe('"plan" "AND" "budget"');
+    expect(toFtsQuery("東京タワー")).toBe('"東京タワー"');
+    expect(toFtsQuery("?! -- ()")).toBe("");
+    expect(toFtsQuery(Array(40).fill("w").join(" ")).split(" ")).toHaveLength(32);
+  });
+
+  it("finds words with diacritics, with or without the accent", () => {
+    expect(ftsFiles("Müller")).toContain("de.md");
+    expect(ftsFiles("Zürich")).toContain("de.md");
+    expect(ftsFiles("café")).toContain("de.md");
+    expect(ftsFiles("cafe")).toContain("de.md"); // unicode61 folds diacritics
+  });
+
+  it("finds CJK words (space-delimited; unicode61 does not segment CJK)", () => {
+    expect(ftsFiles("東京")).toContain("ja.md");
+  });
+
+  it("treats AND / OR / NOT / NEAR as words, not operators or syntax errors", () => {
+    expect(ftsFiles("plan AND budget")).toContain("ops.md");
+    expect(ftsFiles("not rejected")).toContain("ops.md");
+    expect(() => ftsFiles("NEAR OR")).not.toThrow();
+    expect(() => ftsFiles('"unbalanced quote')).not.toThrow();
+  });
+
+  it("search() ranks the keyword match first for a non-ASCII query", async () => {
+    const results = await store.search("Müller", 3);
+    expect(results[0].file).toBe("de.md");
   });
 });

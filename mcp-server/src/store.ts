@@ -99,6 +99,33 @@ export function selectEvenSample(
     .all(p, c, t, p, c, t, BigInt(cap)) as Array<{ id: number; embedding: Buffer }>;
 }
 
+// A word, in any script: letters, combining marks, digits, underscore.
+const FTS_TERM_RE = /[\p{L}\p{M}\p{N}_]+/gu;
+const FTS_MAX_TERMS = 32;
+
+/**
+ * Turn free text into a safe FTS5 MATCH expression: each word becomes a
+ * quoted string, and the strings are joined by spaces, FTS5's implicit AND.
+ * Returns "" when the text has no words.
+ *
+ * The previous sanitiser, `text.replace(/[^\w\s]/g, " ")`, had two failures.
+ * JavaScript's \w is ASCII-only, so it cut "Müller" to "M ller" and "café" to
+ * "caf", and dropped CJK text entirely — keyword search missed exactly the
+ * words it existed to find. And it let FTS5 operators through: a query with
+ * AND, OR, NOT or NEAR in it either changed meaning or was a syntax error
+ * that the search swallowed, silently returning no keyword matches at all.
+ * Quoted, "AND" is just a word, and FTS5's own tokenizer (unicode61, which
+ * also folds diacritics) splits each quoted term exactly as it split the
+ * indexed text.
+ */
+export function toFtsQuery(text: string, maxTerms = FTS_MAX_TERMS): string {
+  const terms = text.match(FTS_TERM_RE) ?? [];
+  return terms
+    .slice(0, maxTerms)
+    .map((t) => `"${t}"`)
+    .join(" ");
+}
+
 export class MemoryStore {
   private db: Database.Database;
   private dimension: number;
@@ -392,7 +419,7 @@ export class MemoryStore {
     // FTS5 candidates (keyword relevance)
     if (useFts) {
       try {
-        const ftsQuery = query.replace(/[^\w\s]/g, " ").trim();
+        const ftsQuery = toFtsQuery(query);
         if (ftsQuery) {
           const ftsRows = this.db
             .prepare(
@@ -416,8 +443,10 @@ export class MemoryStore {
             }
           }
         }
-      } catch {
-        // FTS query failed
+      } catch (err) {
+        // Quoted terms cannot be a syntax error, so this is unexpected:
+        // say so rather than quietly searching without keywords.
+        process.stderr.write(`Memoria: keyword search failed: ${(err as Error).message}\n`);
       }
     }
 
@@ -936,18 +965,17 @@ export class MemoryStore {
     const candidateIds = new Set<number>();
     if (this.hasFts5()) {
       try {
-        const ftsQuery = text
-          .replace(/[^\w\s]/g, " ")
-          .trim()
-          .slice(0, 200);
+        const ftsQuery = toFtsQuery(text.slice(0, 200));
         if (ftsQuery) {
           const ftsRows = this.db
             .prepare(`SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? LIMIT ?`)
             .all(ftsQuery, topN * 20) as Array<{ rowid: number }>;
           for (const row of ftsRows) candidateIds.add(row.rowid);
         }
-      } catch {
-        /* FTS query failed */
+      } catch (err) {
+        process.stderr.write(
+          `Memoria: keyword pre-filter for similarity failed: ${(err as Error).message}\n`,
+        );
       }
     }
 
