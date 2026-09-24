@@ -25,7 +25,8 @@ Fixes from a full review of 0.2.0.
   `docker stop`, Cloud Run and systemd send. Only `SIGINT` (Ctrl-C) was
   handled, so every stop in production was a hard kill that skipped closing
   the databases and flushing the collector. The stdio server handles `SIGTERM`
-  too.
+  too, and a stop that arrives during the first index at startup now exits
+  cleanly instead of with an error.
 - **Malformed requests got a 500 instead of an error response.** A `/token`
   request with no body, a credential containing non-ASCII characters, a JSON
   field of the wrong type, or a repeated query parameter on `/authorize` could
@@ -49,8 +50,17 @@ Fixes from a full review of 0.2.0.
   second one's create overwrote the first one's entry. Creation is now
   exclusive and the second writer appends. Raising a daily log's importance no
   longer rewrites the whole file from a copy read a moment earlier, which could
-  drop an entry appended in between. Cross-source fusion no longer creates a
-  daily log without frontmatter when it is the first writer of the day.
+  drop an entry appended in between. It now changes only the digits in the
+  frontmatter, byte for byte, so a log containing text that is not valid UTF-8
+  is no longer re-encoded, and an `importance:` line in the body of a log
+  whose frontmatter has none is left alone. Cross-source fusion no longer
+  creates a daily log without frontmatter when it is the first writer of the
+  day.
+- `/ingest` accepts an event whose `timestamp` cannot be parsed and records
+  it at the time it arrived. Before, such an event failed on every attempt
+  and was eventually dropped, while the response still counted it as
+  accepted. The response now also includes `failed`, the number of events
+  that could not be written this time (they stay buffered for retry).
 - **Keyword search ignored any word with a non-ASCII letter.** The query
   sanitiser kept only ASCII word characters, so `Müller` became `M ller`,
   `café` became `caf`, and Chinese or Japanese text vanished: the keyword half
@@ -69,7 +79,9 @@ Fixes from a full review of 0.2.0.
   them. The "is it installed?" check always said no, and on Windows the install
   itself failed. Dependencies now install into `<data dir>/adapter-modules`
   with install scripts disabled, and both the check and the adapters look
-  there. The install also no longer freezes the server while it runs. If an
+  there. npm runs as its own script under the server's Node binary, with no
+  shell and no command lookup, so no file in that directory can stand in for
+  npm. The install also no longer freezes the server while it runs. If an
   earlier attempt left `package.json`, `package-lock.json` or `node_modules`
   in your Memoria directory, you can delete them.
 - **The Docker image could not run its default embedding model.** The image

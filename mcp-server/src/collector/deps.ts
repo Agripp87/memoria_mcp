@@ -74,31 +74,49 @@ export async function importDependency<T>(name: string): Promise<T> {
 }
 
 // Bare package names only: no versions, paths, URLs or flags. Adapters declare
-// their dependencies in code, so nothing user-supplied reaches this. It also
-// has to be shell-safe: on Windows npm is npm.cmd, which Node refuses to spawn
-// without a shell (CVE-2024-27980), so there the arguments pass through
-// cmd.exe, and this pattern admits no character cmd.exe treats specially.
+// their dependencies in code, so nothing user-supplied reaches this.
 const PACKAGE_NAME = /^(@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 
 export function isInstallableName(name: string): boolean {
   return PACKAGE_NAME.test(name);
 }
 
-/** The npm invocation that installs `names` into the current directory. */
+/**
+ * Where npm's own CLI script sits relative to a Node binary: beside it on
+ * Windows (C:\Program Files\nodejs\node_modules\npm), under ../lib on
+ * POSIX installs and the official Docker images (/usr/local/lib/node_modules).
+ */
+export function npmCliCandidates(nodePath: string): string[] {
+  const dir = path.dirname(nodePath);
+  return [
+    path.join(dir, "node_modules", "npm", "bin", "npm-cli.js"),
+    path.join(dir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+  ];
+}
+
+/**
+ * The npm invocation that installs `names` into the current directory, or
+ * null when no npm can be found safely.
+ *
+ * It runs npm's CLI script with this very Node binary: no shell, and no
+ * command-name lookup. Both mattered on Windows. npm is npm.cmd there, which
+ * Node will only spawn through cmd.exe (CVE-2024-27980), and cmd.exe looks
+ * for a bare command in the current directory before PATH. The current
+ * directory is adapter-modules, so an npm.cmd placed there would have run
+ * instead of npm. On POSIX, a bare `npm` found on PATH remains a fallback.
+ */
 export function npmInstallCommand(
   names: string[],
   platform: NodeJS.Platform = process.platform,
-): { file: string; args: string[]; shell: boolean } {
+  nodePath: string = process.execPath,
+  exists: (p: string) => boolean = fs.existsSync,
+): { file: string; args: string[] } | null {
   // --ignore-scripts: imapflow and googleapis need no install scripts, and
   // without them installing runs no package code at all.
   const args = ["install", "--save", "--ignore-scripts", "--no-audit", "--no-fund", ...names];
-  // Through a shell, pass one command string: Node deprecates (DEP0190) an
-  // argument array with shell: true, since it is concatenated unescaped
-  // anyway. Every part here is a fixed flag or a name isInstallableName
-  // passed, so the joined string is safe for cmd.exe.
-  return platform === "win32"
-    ? { file: ["npm.cmd", ...args].join(" "), args: [], shell: true }
-    : { file: "npm", args, shell: false };
+  const cli = npmCliCandidates(nodePath).find(exists);
+  if (cli) return { file: nodePath, args: [cli, ...args] };
+  return platform === "win32" ? null : { file: "npm", args };
 }
 
 /**
@@ -144,11 +162,16 @@ export async function installDependencies(
   }
 
   process.stderr.write(`Memoria: installing adapter dependencies: ${missing.join(", ")}\n`);
-  const { file, args, shell } = npmInstallCommand(missing);
+  const command = npmInstallCommand(missing);
+  if (!command) {
+    return {
+      success: false,
+      message: `Cannot find npm next to ${process.execPath}; install ${missing.join(", ")} into ${modulesDir} by hand.`,
+    };
+  }
   try {
-    await execFileAsync(file, args, {
+    await execFileAsync(command.file, command.args, {
       cwd: modulesDir,
-      shell,
       timeout: 300_000,
       maxBuffer: 16 * 1024 * 1024,
       windowsHide: true,

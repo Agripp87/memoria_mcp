@@ -68,13 +68,41 @@ describe("installing optional dependencies", () => {
     }
   });
 
-  it("uses npm.cmd through a shell on Windows, npm without one elsewhere", () => {
-    const win = npmInstallCommand(["imapflow"], "win32");
-    expect(win).toMatchObject({ args: [], shell: true });
-    expect(win.file).toMatch(/^npm\.cmd install .* imapflow$/);
-    const linux = npmInstallCommand(["imapflow"], "linux");
-    expect(linux).toMatchObject({ file: "npm", shell: false });
-    expect(linux.args.at(-1)).toBe("imapflow");
+  it("runs npm's CLI script with the Node binary itself: no shell, no command lookup", () => {
+    // On Windows a bare npm.cmd went through cmd.exe, which looks in the
+    // current directory (adapter-modules) before PATH.
+    const node = path.join(ROOT, "nodejs", "node.exe");
+    const cli = path.join(ROOT, "nodejs", "node_modules", "npm", "bin", "npm-cli.js");
+    const cmd = npmInstallCommand(["imapflow"], "win32", node, (p) => p === cli);
+    expect(cmd!.file).toBe(node);
+    expect(cmd!.args[0]).toBe(cli);
+    expect(Object.keys(cmd!)).not.toContain("shell");
+    expect(cmd!.args.at(-1)).toBe("imapflow");
+    expect(cmd!.args).toContain("--ignore-scripts");
+  });
+
+  it("finds npm under ../lib on POSIX layouts, and never falls back to a Windows lookup", () => {
+    const node = "/usr/local/bin/node";
+    const posixCli = path.join(
+      "/usr/local/bin",
+      "..",
+      "lib",
+      "node_modules",
+      "npm",
+      "bin",
+      "npm-cli.js",
+    );
+    expect(npmInstallCommand(["x"], "linux", node, (p) => p === posixCli)?.args[0]).toBe(posixCli);
+    expect(npmInstallCommand(["x"], "linux", node, () => false)).toEqual({
+      file: "npm",
+      args: expect.arrayContaining(["install", "x"]),
+    });
+    expect(npmInstallCommand(["x"], "win32", "C:\\node\\node.exe", () => false)).toBeNull();
+  });
+
+  it("the real Node on this machine has an npm CLI beside it", () => {
+    const cmd = npmInstallCommand(["x"]);
+    expect(cmd?.file).toBe(process.execPath);
   });
 
   it("refuses an invalid name without running npm", async () => {

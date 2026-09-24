@@ -130,3 +130,11 @@ describe("buildEntityPages (P0)", () => {
     expect(fs.existsSync(path.join(MEM, "entities/src-a.md"))).toBe(false);
   });
 });
+
+describe("utcTimeLabel (2026-09 re-review)", () => {
+  it("labels an invalid Date with the current time instead of throwing", async () => {
+    const { utcTimeLabel } = await import("../daily-format.js");
+    expect(utcTimeLabel(new Date("not a date"))).toMatch(/^\d{2}:\d{2} UTC$/);
+    expect(utcTimeLabel(new Date("2026-09-24T14:05:59Z"))).toBe("14:05 UTC");
+  });
+});

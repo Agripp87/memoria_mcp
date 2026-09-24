@@ -134,3 +134,21 @@ describe("IngestionPipeline — M3: daily-log importance only bumps for high-sig
     expect(fm).toMatch(/^importance: 9$/m);
   });
 });
+
+describe("IngestionPipeline — an unparsable timestamp (2026-09 re-review)", () => {
+  it("still writes the event, labelled with the ingest time", async () => {
+    // utcTimeLabel threw on an Invalid Date, so the event failed every ingest
+    // attempt and was dead-lettered while /ingest reported it accepted.
+    const pipeline = new IngestionPipeline({ memoriesDir });
+    const r = await pipeline.ingest([
+      ev({
+        id: "bad-ts",
+        timestamp: "24/09/2026",
+        content: "Event with a day-first timestamp that JS cannot parse.",
+      }),
+    ]);
+    expect(r.errors).toEqual([]);
+    expect(r.written).toBe(1);
+    expect(fs.readFileSync(todayDailyPath(), "utf-8")).toContain("## 12:00 UTC");
+  });
+});

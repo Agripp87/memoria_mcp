@@ -502,32 +502,49 @@ export class IngestionPipeline {
  * 10), the digits are overwritten in place: appends land at the end of the
  * file and cannot be touched. A bump that changes the length replaces the
  * file atomically instead, and only if its size is unchanged since it was
- * read; otherwise it re-reads and tries again.
+ * read; otherwise it re-reads and tries again. (A writer appending in the
+ * instant between that size check and the rename is the one residual window.)
+ *
+ * The file is handled as bytes, never decoded and re-encoded. It is searched
+ * through a latin1 view, where each character is exactly one byte, so a match
+ * offset is a byte offset. Decoding as UTF-8 put the in-place write in the
+ * wrong place after any invalid byte (each became a 3-byte U+FFFD), which
+ * overwrote the next key instead of the digits.
  */
 export function bumpFileImportance(filePath: string, eventImportance: number): void {
   try {
     for (let attempt = 0; attempt < 3; attempt++) {
-      const content = fs.readFileSync(filePath, "utf-8");
-      const m = content.match(/^(---\n[\s\S]*?\nimportance:\s*)(\d+)([\s\S]*?\n---)/);
-      if (!m) return;
-      const current = parseInt(m[2], 10);
+      const bytes = fs.readFileSync(filePath);
+      const text = bytes.toString("latin1");
+      // Only inside the frontmatter block: a lazy match across the whole file
+      // found an `importance:` line in the body when the frontmatter had none.
+      const fm = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
+      if (!fm) return;
+      const imp = /(?:^|\n)importance:[ \t]*(\d+)/.exec(fm[1]);
+      if (!imp) return;
+      const current = parseInt(imp[1], 10);
       if (!Number.isFinite(current) || eventImportance <= current) return;
       const next = String(eventImportance);
+      const start = "---\n".length + imp.index + imp[0].length - imp[1].length;
+      const end = start + imp[1].length;
 
-      if (next.length === m[2].length) {
+      if (next.length === imp[1].length) {
         const fd = fs.openSync(filePath, "r+");
         try {
-          fs.writeSync(fd, next, Buffer.byteLength(m[1], "utf-8"), "utf-8");
+          fs.writeSync(fd, next, start, "latin1");
         } finally {
           fs.closeSync(fd);
         }
         return;
       }
 
-      const size = Buffer.byteLength(content, "utf-8");
-      const updated = `${m[1]}${next}${m[3]}${content.slice(m[0].length)}`;
+      const updated = Buffer.concat([
+        bytes.subarray(0, start),
+        Buffer.from(next, "latin1"),
+        bytes.subarray(end),
+      ]);
       const written = writeFileAtomic(filePath, updated, {
-        precondition: () => fs.statSync(filePath).size === size,
+        precondition: () => fs.statSync(filePath).size === bytes.length,
       });
       if (written) return;
     }

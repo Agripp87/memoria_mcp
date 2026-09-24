@@ -170,3 +170,57 @@ describe("on-disk master key (2026-09 review, M1/L6)", () => {
     expect(() => initMasterKey(DIR)).toThrow(/not a valid key/);
   });
 });
+
+describe("bumpFileImportance on unusual files (2026-09 re-review)", () => {
+  it("writes the digit at the right byte after invalid UTF-8 earlier in the frontmatter", () => {
+    // Offsets came from UTF-8-decoded text, where each invalid byte became a
+    // 3-byte U+FFFD: the digit landed two bytes late per bad byte, over the
+    // next key.
+    const f = path.join(DIR, "latin1.md");
+    const before = Buffer.concat([
+      Buffer.from("---\nname: Caf"),
+      Buffer.from([0xe9]), // Latin-1 é: not valid UTF-8
+      Buffer.from("\nimportance: 5\ntags: [daily]\n---\n\nbody\n"),
+    ]);
+    fs.writeFileSync(f, before);
+    bumpFileImportance(f, 8);
+    const after = fs.readFileSync(f);
+    expect(after.length).toBe(before.length);
+    expect(after.toString("latin1")).toBe(
+      before.toString("latin1").replace("importance: 5", "importance: 8"),
+    );
+  });
+
+  it("keeps bytes intact on a width change too", () => {
+    const f = path.join(DIR, "latin1-10.md");
+    const before = Buffer.concat([
+      Buffer.from("---\nname: Caf"),
+      Buffer.from([0xe9]),
+      Buffer.from("\nimportance: 9\n---\n"),
+    ]);
+    fs.writeFileSync(f, before);
+    bumpFileImportance(f, 10);
+    expect(fs.readFileSync(f).toString("latin1")).toBe(
+      before.toString("latin1").replace("importance: 9", "importance: 10"),
+    );
+  });
+
+  it("never edits an `importance:` line in the body when the frontmatter has none", () => {
+    const f = path.join(DIR, "no-fm-importance.md");
+    const text = "---\nname: Log\n---\n\nimportance: 5 in the body\n\n---\n";
+    fs.writeFileSync(f, text);
+    bumpFileImportance(f, 8);
+    expect(fs.readFileSync(f, "utf-8")).toBe(text);
+  });
+});
+
+describe("writeFileAtomic onto a directory (2026-09 re-review)", () => {
+  it("fails at once, without the retry delay, and leaves no temp file", () => {
+    const target = path.join(DIR, "a-directory");
+    fs.mkdirSync(target);
+    const t0 = Date.now();
+    expect(() => writeFileAtomic(target, "x")).toThrow();
+    expect(Date.now() - t0).toBeLessThan(500);
+    expect(leftovers()).toEqual([]);
+  });
+});

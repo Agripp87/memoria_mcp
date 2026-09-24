@@ -32,6 +32,8 @@ function renameWithRetry(from: string, to: string): void {
       const code = (err as NodeJS.ErrnoException).code ?? "";
       if (process.platform !== "win32" || !RENAME_RETRY_CODES.has(code)) throw err;
       if (attempt >= RENAME_ATTEMPTS) throw err;
+      // A directory in the way is permanent; no amount of waiting fixes it.
+      if (fs.statSync(to, { throwIfNoEntry: false })?.isDirectory()) throw err;
       sleepSync(attempt * 20);
     }
   }

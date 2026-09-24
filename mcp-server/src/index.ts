@@ -32,14 +32,22 @@ const server = new McpServer({
 registerTools(server, store);
 registerCollectorTools(server, store);
 
+// Declared before main() runs: its first loop iteration reads it
+// synchronously, before the rest of this module has been evaluated.
+let shuttingDown = false;
+
 async function main(): Promise<void> {
   const files = getAllMemoryFiles();
   if (store.needsReindex) {
     process.stderr.write("Memoria: full reindex triggered by provider change...\n");
   }
   for (const f of files) {
+    // A stop signal during a long first index: stop here, before shutdown()
+    // closes the store under the next reindexFile.
+    if (shuttingDown) return;
     await reindexFile(store, f);
   }
+  if (shuttingDown) return;
   process.stderr.write(`Memoria MCP server started. Indexed ${files.length} files.\n`);
 
   setupWatcher(store);
@@ -52,6 +60,9 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
+  // Once shutting down, an error from work cut short is expected; exiting 1
+  // here would pre-empt shutdown()'s clean exit(0).
+  if (shuttingDown) return;
   process.stderr.write(`Fatal error: ${err}\n`);
   process.exit(1);
 });
@@ -60,7 +71,6 @@ main().catch((err) => {
 // manager, or a container runtime sends SIGTERM, and without a handler the
 // process died without closing SQLite or flushing the collector. A second
 // signal while shutting down forces the exit.
-let shuttingDown = false;
 
 async function shutdown(): Promise<void> {
   if (shuttingDown) {
