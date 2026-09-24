@@ -17,6 +17,7 @@
 import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
 import { estimateImportance, classifyPrivacy } from "./base.js";
 import { getGoogleAuth, extractGoogleAuthConfig } from "./google-auth.js";
+import { importDependency } from "../deps.js";
 
 // MIME types we can extract text content from
 const TEXT_EXPORTABLE: Record<string, string> = {
@@ -73,7 +74,7 @@ export class GoogleDriveAdapter implements SourceAdapter {
     const authConfig = extractGoogleAuthConfig(config.settings as Record<string, any>);
     const auth = await getGoogleAuth(authConfig);
 
-    const { google } = await import("googleapis");
+    const { google } = await importDependency<typeof import("googleapis")>("googleapis");
     this.drive = google.drive({ version: "v3", auth });
 
     // Restore checkpoint

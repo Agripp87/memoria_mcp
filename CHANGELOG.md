@@ -63,6 +63,16 @@ Fixes from a full review of 0.2.0.
   Chinese and Japanese words match when the text separates them with spaces,
   as the full-text index does not segment unspaced CJK text. On the retrieval
   eval's English gold set the scores are unchanged, as they should be.
+- **The email and Google sources could not be enabled.** Enabling one
+  installs its optional dependency (`imapflow` or `googleapis`). That install
+  ran inside the Memoria directory (`MEMORIA_DIR`), adding a `package.json`
+  and `node_modules` next to your memories, where the adapters could not load
+  them. The "is it installed?" check always said no, and on Windows the install
+  itself failed. Dependencies now install into `<data dir>/adapter-modules`
+  with install scripts disabled, and both the check and the adapters look
+  there. The install also no longer freezes the server while it runs. If an
+  earlier attempt left `package.json`, `package-lock.json` or `node_modules`
+  in your Memoria directory, you can delete them.
 
 ### Changed
 

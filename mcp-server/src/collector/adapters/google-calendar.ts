@@ -17,6 +17,7 @@
 import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
 import { estimateImportance, classifyPrivacy } from "./base.js";
 import { getGoogleAuth, extractGoogleAuthConfig } from "./google-auth.js";
+import { importDependency } from "../deps.js";
 
 export class GoogleCalendarAdapter implements SourceAdapter {
   readonly info: AdapterInfo = {
@@ -58,7 +59,7 @@ export class GoogleCalendarAdapter implements SourceAdapter {
     const authConfig = extractGoogleAuthConfig(config.settings as Record<string, any>);
     const auth = await getGoogleAuth(authConfig);
 
-    const { google } = await import("googleapis");
+    const { google } = await importDependency<typeof import("googleapis")>("googleapis");
     this.calendar = google.calendar({ version: "v3", auth });
 
     // Restore sync tokens from checkpoint

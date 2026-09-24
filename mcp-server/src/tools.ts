@@ -1574,7 +1574,7 @@ async function ensureCollector(store: MemoryStore): Promise<void> {
 }
 
 async function doInitCollector(store: MemoryStore): Promise<void> {
-  registry = new SourceRegistry(DATA_DIR, MEMORIA_DIR);
+  registry = new SourceRegistry(DATA_DIR);
   buffer = new EventBuffer(DATA_DIR);
   await buffer.init();
 

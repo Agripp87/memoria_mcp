@@ -24,7 +24,7 @@ beforeEach(() => {
   delete process.env.MEMORIA_FILE_WATCHER_ROOTS;
   root = fs.mkdtempSync(path.join(os.tmpdir(), "memoria-reg-"));
   dataDir = path.join(root, "data");
-  reg = new SourceRegistry(dataDir, root); // constructor inits the master key
+  reg = new SourceRegistry(dataDir); // constructor inits the master key
 });
 
 afterEach(() => {

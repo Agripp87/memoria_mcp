@@ -15,6 +15,8 @@
  * The refresh_token is stored encrypted in the collector config.
  */
 
+import { importDependency } from "../deps.js";
+
 // Type-only interface — actual googleapis loaded dynamically
 export interface GoogleAuthConfig {
   clientId: string;
@@ -40,7 +42,7 @@ export async function getGoogleAuth(config: GoogleAuthConfig): Promise<any> {
     return cachedAuth;
   }
 
-  const { google } = await import("googleapis");
+  const { google } = await importDependency<typeof import("googleapis")>("googleapis");
 
   const oauth2 = new google.auth.OAuth2(
     config.clientId,

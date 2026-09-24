@@ -6,6 +6,7 @@
 
 import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
 import { estimateImportance, classifyPrivacy } from "./base.js";
+import { importDependency } from "../deps.js";
 
 export class EmailAdapter implements SourceAdapter {
   readonly info: AdapterInfo = {
@@ -47,7 +48,7 @@ export class EmailAdapter implements SourceAdapter {
     }
 
     try {
-      const { ImapFlow } = await import("imapflow");
+      const { ImapFlow } = await importDependency<typeof import("imapflow")>("imapflow");
       this.client = new ImapFlow({
         host,
         port: port ?? 993,
