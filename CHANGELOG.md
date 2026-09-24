@@ -11,7 +11,21 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
-Fixes from a full review of 0.2.0.
+Nothing yet.
+
+## [0.2.1] — 2026-09-24
+
+Fixes from a full review of 0.2.0, and from the independent re-reviews of
+those fixes. The memory file format is unchanged.
+
+**Upgrading from 0.2.0:**
+- OAuth clients, claude.ai among them, sign in once more, because stored
+  tokens are now hashed. The static API key is unaffected.
+- The Docker image is now built on Debian (`node:26-slim`) instead of Alpine.
+  If you derive your own image from it, switch `apk` to `apt-get`.
+- If you ever enabled an email or Google source, and `package.json`,
+  `package-lock.json` or `node_modules` appeared in your Memoria directory,
+  delete them. The server warns about them at startup.
 
 ### Fixed
 
@@ -291,6 +305,7 @@ so the public history starts here.
   from the SQLite index living on a FUSE mount — are listed in the
   [README](README.md#known-limitations) rather than glossed over.
 
-[Unreleased]: https://github.com/Agripp87/memoria_mcp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Agripp87/memoria_mcp/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Agripp87/memoria_mcp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Agripp87/memoria_mcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Agripp87/memoria_mcp/releases/tag/v0.1.0
