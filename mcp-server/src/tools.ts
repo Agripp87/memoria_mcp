@@ -13,7 +13,8 @@ import { MemoryStore } from "./store.js";
 import { runOptimize } from "./optimize.js";
 import { runLint, formatLintReport } from "./lint.js";
 import { buildEntityPages } from "./entities.js";
-import { TIME_LABEL_SRC } from "./daily-format.js";
+import { TIME_LABEL_SRC, collectorDailyHeader } from "./daily-format.js";
+import { createOrAppend, writeFileAtomic } from "./atomic-fs.js";
 import { SourceRegistry } from "./collector/registry.js";
 import { EventBuffer } from "./collector/buffer.js";
 import { CollectorDaemon } from "./collector/daemon.js";
@@ -376,7 +377,7 @@ export function enqueueCompileSources(sources: string[]): void {
     const existing = drainCompileQueuePeek();
     const merged = new Set([...existing, ...sources.filter((s) => s && s.trim())]);
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(compileQueuePath(), JSON.stringify([...merged]), "utf-8");
+    writeFileAtomic(compileQueuePath(), JSON.stringify([...merged]));
   } catch (err) {
     process.stderr.write(
       `Memoria: compile-queue enqueue failed (non-fatal): ${(err as Error).message}\n`,
@@ -603,7 +604,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       }
 
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-      fs.writeFileSync(fullPath, fileContent, "utf-8");
+      writeFileAtomic(fullPath, fileContent);
 
       const chunksIndexed = await reindexFile(store, fullPath);
 
@@ -728,13 +729,11 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       // Daily logs are append-only and may be written concurrently by the
       // collector's ingestion path (which uses appendFileSync). A
       // read-modify-write here would clobber an append that landed between our
-      // read and write, so append atomically (O_APPEND) instead.
-      if (fs.existsSync(dailyFile)) {
-        fs.appendFileSync(dailyFile, `\n${entry}`, "utf-8");
-      } else {
-        const header = `---\nname: Daily log ${today}\ndescription: Session log for ${today}\ntype: session\nimportance: 3\ncreated: ${today}\nupdated: ${today}\ntags: [daily]\n---\n\n# Daily Log — ${today}\n\n${entry}`;
-        fs.writeFileSync(dailyFile, header, "utf-8");
-      }
+      // read and write, so append atomically (O_APPEND) instead — and create
+      // the file exclusively, so two writers that both find it missing cannot
+      // truncate each other's first entry.
+      const header = `---\nname: Daily log ${today}\ndescription: Session log for ${today}\ntype: session\nimportance: 3\ncreated: ${today}\nupdated: ${today}\ntags: [daily]\n---\n\n# Daily Log — ${today}\n\n`;
+      createOrAppend(dailyFile, header + entry, `\n${entry}`);
 
       await reindexFile(store, dailyFile);
       // Refresh the index so a new day's log is immediately navigable
@@ -1108,7 +1107,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         // Write file
         const fullPath = resolveMemoryPath(relFile);
         fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-        fs.writeFileSync(fullPath, fileContent, "utf-8");
+        writeFileAtomic(fullPath, fileContent);
 
         const chunksIndexed = await reindexFile(store, fullPath);
         const indexSummary = rebuildMarkdownIndex();
@@ -1547,7 +1546,7 @@ export function rebuildMarkdownIndex(): string {
   } catch {
     changed = true;
   }
-  if (changed) fs.writeFileSync(indexPath, body, "utf-8");
+  if (changed) writeFileAtomic(indexPath, body);
 
   const typeCount = Array.from(groups.values()).reduce((sum, g) => sum + g.length, 0);
   return `Rebuilt MEMORY_INDEX.md: ${typeCount} memories in ${groups.size} categories${changed ? "" : " (unchanged)"}`;
@@ -1623,9 +1622,11 @@ async function doInitCollector(store: MemoryStore): Promise<void> {
           fs.mkdirSync(fusionDir, { recursive: true });
           const fusionFile = path.join(fusionDir, `${today}.md`);
 
+          // createOrAppend, not a bare append: when no event has been written
+          // today yet, a bare append created a daily log with no frontmatter.
           for (const activity of activities) {
             const entry = formatFusedActivity(activity);
-            fs.appendFileSync(fusionFile, `\n${entry}`);
+            createOrAppend(fusionFile, collectorDailyHeader(today) + entry, `\n${entry}`);
           }
         }
       } catch (err) {
@@ -1896,7 +1897,7 @@ export function registerCollectorTools(server: McpServer, store: MemoryStore): v
 
       for (const activity of activities) {
         const entry = formatFusedActivity(activity);
-        fs.appendFileSync(dailyFile, `\n${entry}`);
+        createOrAppend(dailyFile, collectorDailyHeader(today) + entry, `\n${entry}`);
       }
 
       const summary = activities

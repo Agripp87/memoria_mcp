@@ -21,6 +21,7 @@ import fs from "fs";
 import path from "path";
 import { parseFrontmatter } from "./chunker.js";
 import { TIME_LABEL_SRC } from "./daily-format.js";
+import { writeFileAtomic } from "./atomic-fs.js";
 
 /** Marker placed in entity-page frontmatter so we only ever overwrite our own
  * generated files — never something a human took over. */
@@ -286,7 +287,7 @@ export function buildEntityPages(
     }
     if (changed) {
       fs.mkdirSync(entitiesDir, { recursive: true });
-      fs.writeFileSync(abs, page, "utf-8");
+      writeFileAtomic(abs, page);
       result.written.push(rel);
     }
   }

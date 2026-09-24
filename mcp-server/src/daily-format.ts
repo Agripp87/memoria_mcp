@@ -15,6 +15,31 @@ export function utcTimeLabel(d: Date = new Date()): string {
 }
 
 /**
+ * Frontmatter and title for a daily log first created by the collector
+ * (ingestion or fusion). High-signal first events start the file at their
+ * own importance; everything else starts at 5.
+ */
+export function collectorDailyHeader(date: string, importance = 5): string {
+  return [
+    "---",
+    `name: Daily log ${date}`,
+    `description: Auto-collected events for ${date}`,
+    "type: session",
+    `importance: ${importance}`,
+    `created: ${date}`,
+    `updated: ${date}`,
+    `last_accessed: ${date}`,
+    "access_count: 0",
+    "tags: [daily, auto-collected]",
+    "origin: collector",
+    "---",
+    "",
+    `# Daily Log — ${date}`,
+    "",
+  ].join("\n");
+}
+
+/**
  * Regex source matching an entry heading's time label, current and legacy:
  * "14:05 UTC", and the server-local "02:05 PM" that older logs hold. A strict
  * superset of the `[\d:APM ]+` the parsers used before, so every heading

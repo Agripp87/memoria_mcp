@@ -13,7 +13,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { contentHash } from "./crypto.js";
-import { utcTimeLabel } from "../daily-format.js";
+import { collectorDailyHeader, utcTimeLabel } from "../daily-format.js";
+import { createOrAppend, writeFileAtomic } from "../atomic-fs.js";
 import { getProvider } from "../embeddings.js";
 import { classifyPrivacy, mostRestrictiveTier } from "./adapters/base.js";
 import { appendRawArchive, flushRawArchive, rawArchiveEnabled } from "./provenance.js";
@@ -281,7 +282,7 @@ export class IngestionPipeline {
       fs.mkdirSync(path.dirname(this.dedupPath), { recursive: true });
       const obj: Record<string, number> = {};
       for (const [k, t] of this.recentBySource) obj[k] = t;
-      fs.writeFileSync(this.dedupPath, JSON.stringify(obj), { encoding: "utf-8" });
+      writeFileAtomic(this.dedupPath, JSON.stringify(obj));
       this.dedupDirty = false;
     } catch {
       // best-effort — never block ingestion on dedup persistence
@@ -428,55 +429,23 @@ export class IngestionPipeline {
     // Format the event as a daily log entry
     const entry = this.formatDailyEntry(event, importance);
 
-    if (fs.existsSync(dailyFile)) {
-      fs.appendFileSync(dailyFile, `\n${entry}`);
-      // Only let genuinely high-signal events (>=7: decisions, failures,
-      // user-flagged) raise the file's importance. Routine rich-content
-      // events (which get a +1 to importance ~6 in rescoring) must NOT
-      // creep every daily log up to 6-7, which would just re-flatten the
-      // distribution at a higher value and defeat the point.
-      if (importance >= 7) this.maybeBumpFileImportance(dailyFile, importance);
-    } else {
-      // New daily log: base importance 5, unless the first event is itself
-      // high-signal (>=7), in which case start there.
-      const initialImportance = importance >= 7 ? importance : 5;
-      const header = [
-        "---",
-        `name: Daily log ${today}`,
-        `description: Auto-collected events for ${today}`,
-        "type: session",
-        `importance: ${initialImportance}`,
-        `created: ${today}`,
-        `updated: ${today}`,
-        `last_accessed: ${today}`,
-        "access_count: 0",
-        "tags: [daily, auto-collected]",
-        "origin: collector",
-        "---",
-        "",
-        `# Daily Log — ${today}`,
-        "",
-      ].join("\n");
-
-      fs.writeFileSync(dailyFile, header + entry, { encoding: "utf-8" });
-    }
-  }
-
-  /**
-   * Bump the file-level `importance` value to max(current, eventImportance)
-   * so high-signal events surface in search even when buried in a daily log.
-   */
-  private maybeBumpFileImportance(filePath: string, eventImportance: number): void {
-    try {
-      const content = fs.readFileSync(filePath, "utf-8");
-      const m = content.match(/^(---\n[\s\S]*?\nimportance:\s*)(\d+)([\s\S]*?\n---)/);
-      if (!m) return;
-      const current = parseInt(m[2], 10);
-      if (!Number.isFinite(current) || eventImportance <= current) return;
-      const updated = content.replace(m[0], `${m[1]}${eventImportance}${m[3]}`);
-      fs.writeFileSync(filePath, updated, { encoding: "utf-8" });
-    } catch {
-      // best-effort — never block ingestion on importance bumping
+    // New daily log: base importance 5, unless the first event is itself
+    // high-signal (>=7), in which case start there. Created exclusively, else
+    // appended, so a concurrent writer creating the same log cannot truncate
+    // this entry or be truncated by it.
+    const initialImportance = importance >= 7 ? importance : 5;
+    const outcome = createOrAppend(
+      dailyFile,
+      collectorDailyHeader(today, initialImportance) + entry,
+      `\n${entry}`,
+    );
+    // Only let genuinely high-signal events (>=7: decisions, failures,
+    // user-flagged) raise an existing file's importance. Routine rich-content
+    // events (which get a +1 to importance ~6 in rescoring) must NOT creep
+    // every daily log up to 6-7, which would just re-flatten the distribution
+    // at a higher value and defeat the point.
+    if (outcome === "appended" && importance >= 7) {
+      bumpFileImportance(dailyFile, importance);
     }
   }
 
@@ -519,5 +488,50 @@ export class IngestionPipeline {
       email: "Email",
     };
     return labels[source] ?? source;
+  }
+}
+
+/**
+ * Raise a daily log's frontmatter `importance` to `eventImportance` if that is
+ * higher, so a high-signal event surfaces in search even when buried in a long
+ * log. Best-effort: never throws.
+ *
+ * Other writers append to this file concurrently, so it must never be
+ * rewritten from a stale read — that dropped any entry appended in between.
+ * When the new value has as many digits as the old (every bump except one to
+ * 10), the digits are overwritten in place: appends land at the end of the
+ * file and cannot be touched. A bump that changes the length replaces the
+ * file atomically instead, and only if its size is unchanged since it was
+ * read; otherwise it re-reads and tries again.
+ */
+export function bumpFileImportance(filePath: string, eventImportance: number): void {
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const content = fs.readFileSync(filePath, "utf-8");
+      const m = content.match(/^(---\n[\s\S]*?\nimportance:\s*)(\d+)([\s\S]*?\n---)/);
+      if (!m) return;
+      const current = parseInt(m[2], 10);
+      if (!Number.isFinite(current) || eventImportance <= current) return;
+      const next = String(eventImportance);
+
+      if (next.length === m[2].length) {
+        const fd = fs.openSync(filePath, "r+");
+        try {
+          fs.writeSync(fd, next, Buffer.byteLength(m[1], "utf-8"), "utf-8");
+        } finally {
+          fs.closeSync(fd);
+        }
+        return;
+      }
+
+      const size = Buffer.byteLength(content, "utf-8");
+      const updated = `${m[1]}${next}${m[3]}${content.slice(m[0].length)}`;
+      const written = writeFileAtomic(filePath, updated, {
+        precondition: () => fs.statSync(filePath).size === size,
+      });
+      if (written) return;
+    }
+  } catch {
+    // best-effort — never block ingestion on importance bumping
   }
 }

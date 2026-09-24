@@ -10,6 +10,7 @@
  */
 
 import * as fs from "node:fs";
+import { writeFileAtomic } from "../atomic-fs.js";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import type { SourceAdapter, AdapterConfig } from "./adapters/base.js";
@@ -563,7 +564,9 @@ export class SourceRegistry {
   private saveState(): void {
     const encrypted = encryptJSON(this.state);
     fs.mkdirSync(path.dirname(this.configPath), { recursive: true });
-    fs.writeFileSync(this.configPath, encrypted);
+    // Atomic: a crash or full disk mid-write used to leave a truncated
+    // ciphertext that fails to decrypt, i.e. every stored credential gone.
+    writeFileAtomic(this.configPath, encrypted, { mode: 0o600 });
   }
 
   // ── Cleanup ──────────────────────────────────────────────
