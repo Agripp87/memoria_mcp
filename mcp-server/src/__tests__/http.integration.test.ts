@@ -3,6 +3,10 @@ import os from "os";
 import path from "path";
 import fs from "fs";
 import { createHash, randomBytes } from "node:crypto";
+import { spawn } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // http.ts reads MEMORIA_API_KEY + MEMORIA_DIR at module load and exits if the
 // key is unset — set both BEFORE importing it. Importing does NOT start a
@@ -396,4 +400,213 @@ describe("pinned public URL (C7)", () => {
     expect(r.status).toBe(200);
     expect(r.body.issuer).toContain("example.test");
   });
+});
+
+// ─── 2026-09 review: malformed input must be a 4xx, never a 500 ───
+
+// The suites above already spend most of the 20/min auth rate-limit budget of
+// the default client address. Each request below presents its own address
+// (the app trusts one proxy hop), so these exercise the real limiter config
+// without depending on test order.
+let clientIp = 0;
+describe("request hardening (2026-09 review, M4)", () => {
+  it("POST /token with no body -> 400 unsupported_grant_type (was a 500)", async () => {
+    const r = await request(app).post("/token").set("X-Forwarded-For", `198.51.100.${++clientIp}`);
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("unsupported_grant_type");
+  });
+
+  it("POST /token with a non-string code -> 400 invalid_request", async () => {
+    const r = await request(app)
+      .post("/token")
+      .set("X-Forwarded-For", `198.51.100.${++clientIp}`)
+      .send({
+        grant_type: "authorization_code",
+        code: { toString: 1 },
+        code_verifier: "v",
+        client_id: "memoria",
+        client_secret: OAUTH_SECRET,
+      });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("invalid_request");
+  });
+
+  it("a non-ASCII client_secret of the right character length -> 401 (was a RangeError 500)", async () => {
+    // Same number of characters as the real secret, twice the bytes: the old
+    // character-length guard let it through to timingSafeEqual, which threw.
+    const r = await request(app)
+      .post("/token")
+      .set("X-Forwarded-For", `198.51.100.${++clientIp}`)
+      .type("form")
+      .send({
+        grant_type: "client_credentials",
+        client_id: "memoria",
+        client_secret: "é".repeat(OAUTH_SECRET.length),
+      });
+    expect(r.status).toBe(401);
+    expect(r.body.error).toBe("invalid_client");
+  });
+
+  it("a non-ASCII bearer token of the API key's character length -> 401 (was a RangeError 500)", async () => {
+    const r = await request(app)
+      .get("/dashboard/api/stats")
+      .set("Authorization", `Bearer ${"é".repeat(KEY.length)}`);
+    expect(r.status).toBe(401);
+  });
+
+  it("malformed JSON -> generic JSON 400, no stack trace", async () => {
+    const r = await request(app)
+      .post("/token")
+      .set("X-Forwarded-For", `198.51.100.${++clientIp}`)
+      .set("Content-Type", "application/json")
+      .send("{not json");
+    expect(r.status).toBe(400);
+    expect(r.body).toEqual({ error: "Bad Request" });
+    expect(r.text).not.toMatch(/at \w|node_modules|SyntaxError/);
+  });
+
+  it("GET /authorize with a repeated redirect_uri -> 400, not a 500", async () => {
+    const r = await request(app)
+      .get(
+        "/authorize?redirect_uri=https://claude.ai/cb&redirect_uri=https://claude.ai/x" +
+          "&code_challenge=abc&code_challenge_method=S256",
+      )
+      .set("X-Forwarded-For", `198.51.100.${++clientIp}`)
+      .redirects(0);
+    expect(r.status).toBe(400);
+  });
+
+  it("GET /authorize rejects a non-http(s) scheme on a localhost redirect (L4)", async () => {
+    const r = await request(app)
+      .get("/authorize")
+      .set("X-Forwarded-For", `198.51.100.${++clientIp}`)
+      .query({
+        redirect_uri: "javascript://localhost/%0Aalert(1)",
+        code_challenge: "abc",
+        code_challenge_method: "S256",
+      });
+    expect(r.status).toBe(400);
+  });
+});
+
+describe("token store at rest (2026-09 review, L5/L6)", () => {
+  const TOKEN_DB = path.join(ROOT, "tok", "tokens.sqlite");
+
+  it("stores a SHA-256 hash of an issued token, never the token", async () => {
+    const r = await request(app)
+      .post("/token")
+      .set("X-Forwarded-For", `198.51.100.${++clientIp}`)
+      .type("form")
+      .send({
+        grant_type: "client_credentials",
+        client_id: "memoria",
+        client_secret: OAUTH_SECRET,
+      });
+    expect(r.status).toBe(200);
+    const token: string = r.body.access_token;
+
+    const Database = (await import("better-sqlite3")).default;
+    const db = new Database(TOKEN_DB, { readonly: true });
+    try {
+      const rows = db.prepare("SELECT token FROM tokens").all() as { token: string }[];
+      const stored = rows.map((row) => row.token);
+      expect(stored).not.toContain(token);
+      expect(stored).toContain(createHash("sha256").update(token).digest("hex"));
+    } finally {
+      db.close();
+    }
+
+    // And the token still authenticates: lookups hash the presented value.
+    const gated = await request(app)
+      .get("/dashboard/api/stats")
+      .set("Authorization", `Bearer ${token}`);
+    expect(gated.status).toBe(200);
+  });
+
+  it.skipIf(process.platform === "win32")("creates tokens.sqlite owner-only (0600)", () => {
+    expect(fs.statSync(TOKEN_DB).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe("entry-point detection (2026-09 review, H1)", () => {
+  // A directory junction (Windows) / directory symlink (POSIX) reproduces what
+  // `npm install -g` does on Linux and macOS: the bin is a symlink, so
+  // process.argv[1] is not the real path of the module Node loaded.
+  const DIST = path.resolve(__dirname, "..", "..", "dist");
+  const LINK = path.join(ROOT, "linked-dist");
+  const haveDist = fs.existsSync(path.join(DIST, "http.js"));
+
+  beforeAll(() => {
+    if (haveDist) fs.symlinkSync(DIST, LINK, "junction");
+  });
+
+  it("isEntryPoint matches through a symlinked path", async () => {
+    const { isEntryPoint } = await import("../http.js");
+    const real = path.join(ROOT, "real-entry.js");
+    fs.writeFileSync(real, "");
+    const linkDir = path.join(ROOT, "entry-link");
+    fs.symlinkSync(ROOT, linkDir, "junction");
+    const moduleUrl = pathToFileURL(real).href;
+
+    expect(isEntryPoint(real, moduleUrl)).toBe(true);
+    expect(isEntryPoint(path.join(linkDir, "real-entry.js"), moduleUrl)).toBe(true);
+    expect(isEntryPoint(path.join(ROOT, "other.js"), moduleUrl)).toBe(false);
+    expect(isEntryPoint(undefined, moduleUrl)).toBe(false);
+  });
+
+  it.skipIf(!haveDist)(
+    "the built server starts when launched through a symlinked path",
+    async () => {
+      const store = fs.mkdtempSync(path.join(os.tmpdir(), "memoria-entry-"));
+      const child = spawn(process.execPath, [path.join(LINK, "http.js")], {
+        env: {
+          ...process.env,
+          MEMORIA_API_KEY: KEY,
+          MEMORIA_OAUTH_CLIENT_SECRET: OAUTH_SECRET,
+          MEMORIA_DIR: store,
+          MEMORIA_EMBEDDINGS: "hash",
+          MEMORIA_TOKEN_DB_DIR: path.join(store, "tok"),
+          PORT: "0",
+          BIND_ALL: "",
+        },
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      let stderr = "";
+      child.stderr.on("data", (d) => (stderr += d));
+      const exited = new Promise<number | null>((resolve) => child.on("exit", resolve));
+
+      try {
+        // Before the fix the process loaded, never called main(), and exited 0.
+        const outcome = await Promise.race([
+          new Promise<string>((resolve) => {
+            const poll = setInterval(() => {
+              if (stderr.includes("listening")) {
+                clearInterval(poll);
+                resolve("listening");
+              }
+            }, 50);
+            exited.then(() => {
+              clearInterval(poll);
+              resolve("exited");
+            });
+          }),
+          new Promise<string>((resolve) => setTimeout(() => resolve("timeout"), 20_000)),
+        ]);
+        expect(outcome, stderr).toBe("listening");
+
+        // SIGTERM runs the graceful shutdown (M5). Windows has no signals —
+        // kill() there is TerminateProcess — so only POSIX can assert on it.
+        if (process.platform !== "win32") {
+          child.kill("SIGTERM");
+          expect(await exited).toBe(0);
+          expect(stderr).toContain("SIGTERM received");
+        }
+      } finally {
+        child.kill();
+        await exited;
+        fs.rmSync(store, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
 });

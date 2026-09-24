@@ -56,8 +56,30 @@ main().catch((err) => {
   process.exit(1);
 });
 
-process.on("SIGINT", async () => {
-  await destroyCollector();
-  store.close();
-  process.exit(0);
-});
+// SIGTERM as well as SIGINT: a client stopping this stdio server, a service
+// manager, or a container runtime sends SIGTERM, and without a handler the
+// process died without closing SQLite or flushing the collector. A second
+// signal while shutting down forces the exit.
+let shuttingDown = false;
+
+async function shutdown(): Promise<void> {
+  if (shuttingDown) {
+    process.exit(1);
+  }
+  shuttingDown = true;
+  setTimeout(() => process.exit(1), 8_000).unref();
+  let exitCode = 0;
+  try {
+    await destroyCollector();
+  } catch (err) {
+    process.stderr.write(`Memoria: error during shutdown: ${err}\n`);
+    exitCode = 1;
+  } finally {
+    store.close();
+  }
+  process.exit(exitCode);
+}
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => void shutdown());
+}

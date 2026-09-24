@@ -11,7 +11,45 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
-Nothing yet.
+Fixes from a full review of 0.2.0.
+
+### Fixed
+
+- **`memoria-mcp-http` did nothing when installed globally on Linux or
+  macOS.** `npm install -g` links the command to the server file through a
+  symlink, and the check for "am I being run directly?" compared the symlinked
+  path against the real one. They never matched, so the process loaded, never
+  started the server, and exited with status 0 and no error. Windows and Docker
+  were unaffected, which is why it went unnoticed.
+- **The HTTP server now shuts down cleanly on `SIGTERM`**, which is what
+  `docker stop`, Cloud Run and systemd send. Only `SIGINT` (Ctrl-C) was
+  handled, so every stop in production was a hard kill that skipped closing
+  the databases and flushing the collector. The stdio server handles `SIGTERM`
+  too.
+- **Malformed requests got a 500 instead of an error response.** A `/token`
+  request with no body, a credential containing non-ASCII characters, a JSON
+  field of the wrong type, or a repeated query parameter on `/authorize` could
+  all throw. Each now gets the proper 4xx response. A final error handler
+  also makes sure an unexpected error never sends a stack trace, whatever
+  `NODE_ENV` is set to (only the Docker image set it to `production`).
+
+### Security
+
+- **OAuth access tokens and authorization codes are stored hashed** (SHA-256)
+  in `tokens.sqlite`, and the logs show a prefix of the hash rather than of the
+  token. A copied token database no longer contains a usable credential.
+  *Upgrade note:* tokens issued before the upgrade stop working, so connected
+  OAuth clients (such as claude.ai) sign in again once. Tokens lived for 24
+  hours anyway. Clients using the static API key are unaffected.
+- `tokens.sqlite` is created readable by its owner only (`0600`). Before, it
+  was created with the default permissions and there was a window before they
+  were tightened.
+- OAuth redirects to `localhost` / `127.0.0.1` must use `http` or `https`.
+  Other schemes with a local host were accepted.
+- Documented `MEMORIA_TOKEN_DB_DIR`, `MEMORIA_OAUTH_CLIENT_ID` and
+  `MEMORIA_FILE_WATCHER_ROOTS`, which were read but missing from the
+  configuration table. The code comment on the token database now matches what
+  the code does: it defaults to the data directory.
 
 ## [0.2.0] — 2026-09-23
 

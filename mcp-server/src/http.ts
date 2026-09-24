@@ -20,8 +20,9 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { pathToFileURL } from "node:url";
-import express from "express";
+import { fileURLToPath } from "node:url";
+import { STATUS_CODES, type Server } from "node:http";
+import express, { type ErrorRequestHandler } from "express";
 import rateLimit from "express-rate-limit";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -46,6 +47,7 @@ import {
 import { createDashboardRouter } from "./dashboard.js";
 import {
   isAllowedRedirect as isAllowedRedirectFn,
+  safeEqual,
   validateClientCredentials as validateClientCredentialsFn,
 } from "./oauth-helpers.js";
 
@@ -159,12 +161,14 @@ function isAllowedRedirect(uri: string): boolean {
 
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours (was 1 hour)
 
-// Keep the token DB OFF the gcsfuse-mounted DATA_DIR by default. SQLite's
-// WAL/locking is unreliable on GCS FUSE — a stale -wal/-shm produces
-// "disk I/O error" on writes, which breaks token issuance (observed in prod).
-// Tokens are short-lived (24h) and non-critical, so container-local ephemeral
-// storage is the right home. Override with MEMORIA_TOKEN_DB_DIR (e.g. set it to
-// the data dir to restore the previous shared-volume behavior).
+// The token DB defaults to DATA_DIR, which is right for a local run on local
+// disk. On GCS FUSE it is not: SQLite's WAL/locking is unreliable there — a
+// stale -wal/-shm produces "disk I/O error" on writes, which breaks token
+// issuance (observed in prod). The Docker image therefore sets
+// MEMORIA_TOKEN_DB_DIR=/tmp/memoria (container-local, ephemeral). Tokens are
+// short-lived (24h) and non-critical, so losing them on restart only forces a
+// cheap re-auth. Any non-Docker deployment on a FUSE/network mount should set
+// MEMORIA_TOKEN_DB_DIR the same way.
 // Note: with >1 instance, tokens aren't shared across instances; the primary
 // auth path (static API key) is unaffected, and OAuth re-auth is cheap.
 const TOKEN_DB_DIR = process.env.MEMORIA_TOKEN_DB_DIR || DATA_DIR;
@@ -173,6 +177,13 @@ const TOKEN_DB_PATH = path.join(TOKEN_DB_DIR, "tokens.sqlite");
 import DatabaseConstructor from "better-sqlite3";
 
 fs.mkdirSync(TOKEN_DB_DIR, { recursive: true });
+// Create the file owner-only BEFORE SQLite opens it. Opening first and
+// chmod-ing afterwards left a window where it was created with the process
+// umask (typically world-readable). SQLite gives the -wal/-shm files the same
+// mode as the main file, so this covers them too.
+if (!fs.existsSync(TOKEN_DB_PATH)) {
+  fs.closeSync(fs.openSync(TOKEN_DB_PATH, "a", 0o600));
+}
 const tokenDb = new DatabaseConstructor(TOKEN_DB_PATH);
 try {
   fs.chmodSync(TOKEN_DB_PATH, 0o600);
@@ -203,19 +214,30 @@ tokenDb.exec(`
 tokenDb.prepare("DELETE FROM tokens WHERE expires_at < ?").run(Date.now());
 tokenDb.prepare("DELETE FROM auth_codes WHERE expires_at < ?").run(Date.now());
 
+// Access tokens and authorization codes are bearer secrets, so they are stored
+// as SHA-256 hashes: a copied or leaked tokens.sqlite then yields nothing
+// usable. SHA-256 without a salt is right here — the inputs are 122-bit random
+// UUIDs, not passwords, so there is nothing for a dictionary attack to find.
+// Rows written before this change hold plaintext and simply stop matching;
+// affected OAuth clients re-authenticate once (tokens lived 24h anyway).
+export function hashSecret(secret: string): string {
+  return createHash("sha256").update(secret).digest("hex");
+}
+
 const tokenOps = {
   set(token: string, expiresAt: number) {
     tokenDb
       .prepare("INSERT OR REPLACE INTO tokens (token, expires_at) VALUES (?, ?)")
-      .run(token, expiresAt);
+      .run(hashSecret(token), expiresAt);
   },
   get(token: string): number | undefined {
-    const row = tokenDb.prepare("SELECT expires_at FROM tokens WHERE token = ?").get(token) as
-      { expires_at: number } | undefined;
+    const row = tokenDb
+      .prepare("SELECT expires_at FROM tokens WHERE token = ?")
+      .get(hashSecret(token)) as { expires_at: number } | undefined;
     return row?.expires_at;
   },
   delete(token: string) {
-    tokenDb.prepare("DELETE FROM tokens WHERE token = ?").run(token);
+    tokenDb.prepare("DELETE FROM tokens WHERE token = ?").run(hashSecret(token));
   },
   cleanup() {
     tokenDb.prepare("DELETE FROM tokens WHERE expires_at < ?").run(Date.now());
@@ -229,7 +251,7 @@ const codeOps = {
         "INSERT OR REPLACE INTO auth_codes (code, redirect_uri, code_challenge, code_challenge_method, expires_at) VALUES (?, ?, ?, ?, ?)",
       )
       .run(
-        code,
+        hashSecret(code),
         entry.redirectUri,
         entry.codeChallenge ?? null,
         entry.codeChallengeMethod ?? null,
@@ -237,7 +259,9 @@ const codeOps = {
       );
   },
   get(code: string): AuthCodeEntry | undefined {
-    const row = tokenDb.prepare("SELECT * FROM auth_codes WHERE code = ?").get(code) as any;
+    const row = tokenDb
+      .prepare("SELECT * FROM auth_codes WHERE code = ?")
+      .get(hashSecret(code)) as any;
     if (!row) return undefined;
     return {
       redirectUri: row.redirect_uri,
@@ -247,7 +271,10 @@ const codeOps = {
     };
   },
   delete(code: string) {
-    tokenDb.prepare("DELETE FROM auth_codes WHERE code = ?").run(code);
+    tokenDb.prepare("DELETE FROM auth_codes WHERE code = ?").run(hashSecret(code));
+  },
+  cleanup() {
+    tokenDb.prepare("DELETE FROM auth_codes WHERE expires_at < ?").run(Date.now());
   },
 };
 
@@ -355,19 +382,31 @@ const writeLimiter = rateLimit({
 
 // Token endpoint — client credentials grant
 app.post("/token", (req, res) => {
-  const grantType = req.body.grant_type;
+  // No body (or a Content-Type no parser claims) leaves req.body undefined in
+  // Express 5; dereferencing it was a 500 instead of an OAuth error.
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const grantType = body.grant_type;
 
   if (grantType === "authorization_code") {
     // Authorization code exchange. This is a confidential client
     // (token_endpoint_auth_method = client_secret_post), so the client MUST
     // authenticate AND prove PKCE. Without client auth the /authorize endpoint
     // would be an open token dispenser (anyone gets a code → trades for a token).
-    const code = req.body.code as string;
-    const codeVerifier = req.body.code_verifier as string;
-    const redirectUri = req.body.redirect_uri as string;
+    // A JSON body can carry any type here; hashing or comparing a non-string
+    // would throw. Absent parameters are handled below, so only reject the
+    // present-but-wrong-type case up front.
+    const { code, code_verifier: codeVerifier, redirect_uri: redirectUri } = body;
+    if (
+      typeof code !== "string" ||
+      (codeVerifier !== undefined && typeof codeVerifier !== "string") ||
+      (redirectUri !== undefined && typeof redirectUri !== "string")
+    ) {
+      res.status(400).json({ error: "invalid_request" });
+      return;
+    }
 
     // Authenticate the client.
-    if (!validateClientCredentials(req.body.client_id, req.body.client_secret)) {
+    if (!validateClientCredentials(body.client_id, body.client_secret)) {
       res.status(401).json({ error: "invalid_client" });
       return;
     }
@@ -379,7 +418,10 @@ app.post("/token", (req, res) => {
       return;
     }
 
-    // Validate redirect_uri matches
+    // OAuth 2.1 (draft §10.2) dropped redirect_uri from the token request:
+    // PKCE binds the code to the client that started the flow, so a client
+    // need not resend it. A server must still accept it and, if sent, check
+    // it — which is exactly this. Optional here is deliberate, not a gap.
     if (redirectUri && redirectUri !== entry.redirectUri) {
       res.status(400).json({ error: "invalid_grant", error_description: "redirect_uri mismatch" });
       return;
@@ -412,13 +454,17 @@ app.post("/token", (req, res) => {
     const expiresIn = TOKEN_TTL_MS / 1000;
     tokenOps.set(token, Date.now() + TOKEN_TTL_MS);
 
-    process.stderr.write(`Memoria: issued OAuth token (auth_code) ${token.slice(0, 8)}...\n`);
+    // Log a prefix of the stored hash, never of the token itself: it matches
+    // the tokens.sqlite row for debugging and gives a log reader nothing.
+    process.stderr.write(
+      `Memoria: issued OAuth token (auth_code) sha256:${hashSecret(token).slice(0, 8)}\n`,
+    );
     res.json({ access_token: token, token_type: "Bearer", expires_in: expiresIn });
     return;
   }
 
   if (grantType === "client_credentials") {
-    if (!validateClientCredentials(req.body.client_id, req.body.client_secret)) {
+    if (!validateClientCredentials(body.client_id, body.client_secret)) {
       res.status(401).json({ error: "invalid_client" });
       return;
     }
@@ -428,7 +474,9 @@ app.post("/token", (req, res) => {
     const expiresIn = TOKEN_TTL_MS / 1000;
     tokenOps.set(token, Date.now() + TOKEN_TTL_MS);
 
-    process.stderr.write(`Memoria: issued OAuth token (client_creds) ${token.slice(0, 8)}...\n`);
+    process.stderr.write(
+      `Memoria: issued OAuth token (client_creds) sha256:${hashSecret(token).slice(0, 8)}\n`,
+    );
     res.json({ access_token: token, token_type: "Bearer", expires_in: expiresIn });
     return;
   }
@@ -497,10 +545,16 @@ app.post("/register", (_req, res) => {
 // Authorization endpoint — auto-approves and redirects with code
 // (needed for authorization_code flow that claude.ai may use)
 app.get("/authorize", (req, res) => {
-  const redirectUri = req.query.redirect_uri as string;
-  const state = req.query.state as string;
-  const codeChallenge = req.query.code_challenge as string;
-  const codeChallengeMethod = req.query.code_challenge_method as string;
+  // A repeated parameter (?state=a&state=b) arrives as an array; treat it as
+  // absent rather than letting an array reach new URL() or a SQLite bind.
+  const param = (name: string): string | undefined => {
+    const v = req.query[name];
+    return typeof v === "string" ? v : undefined;
+  };
+  const redirectUri = param("redirect_uri");
+  const state = param("state");
+  const codeChallenge = param("code_challenge");
+  const codeChallengeMethod = param("code_challenge_method");
 
   if (!redirectUri) {
     res.status(400).json({ error: "missing redirect_uri" });
@@ -661,11 +715,7 @@ function authenticate(
   }
 
   // Check 2: Is it the static API key? (for direct Bearer auth)
-  const expected = API_KEY!;
-  if (
-    provided.length !== expected.length ||
-    !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))
-  ) {
+  if (!safeEqual(provided, API_KEY!)) {
     res
       .status(401)
       .set(
@@ -708,6 +758,7 @@ const cleanupTimer = setInterval(() => {
   }
   // Clean expired tokens and auth codes
   tokenOps.cleanup();
+  codeOps.cleanup();
 }, CLEANUP_INTERVAL_MS);
 cleanupTimer.unref?.();
 
@@ -941,6 +992,28 @@ app.post("/ingest", writeLimiter, authenticate, async (req, res) => {
   }
 });
 
+// ─── Error handler ──────────────────────────────────────────
+//
+// Last in the chain. Without it, Express's default handler answers a thrown
+// error with the stack trace as HTML unless NODE_ENV=production — which only
+// the Docker image sets, so an npm install of memoria-mcp-http leaked file
+// paths and dependency versions to anyone who could reach it. A client error
+// (malformed JSON 400, oversized body 413) keeps its status; anything else is
+// a generic 500 with the detail logged here instead of sent.
+const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+  const raw = typeof err?.status === "number" ? err.status : err?.statusCode;
+  const status = typeof raw === "number" && raw >= 400 && raw < 500 ? raw : 500;
+  if (status === 500) {
+    process.stderr.write(`Memoria: unhandled error: ${err?.stack ?? String(err)}\n`);
+  }
+  res.status(status).json({ error: STATUS_CODES[status] ?? "Error" });
+};
+app.use(errorHandler);
+
 // ─── Start ──────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -961,27 +1034,72 @@ async function main(): Promise<void> {
 
   // Bind to 0.0.0.0 when BIND_ALL=true (for cloud/Docker), else localhost only
   const host = process.env.BIND_ALL === "true" ? "0.0.0.0" : "127.0.0.1";
-  app.listen(PORT, host, () => {
+  httpServer = app.listen(PORT, host, () => {
     process.stderr.write(`Memoria HTTP server listening on http://${host}:${PORT}/mcp\n`);
   });
 }
 
 // Only start the server when run as the entry point (node dist/http.js).
 // When imported (e.g. by integration tests), do NOT reindex/listen.
-const isEntryPoint = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isEntryPoint) {
+//
+// Compare REAL paths on both sides. Node resolves symlinks when it loads the
+// main module, so import.meta.url is always the real file — but process.argv[1]
+// keeps the path it was invoked by. `npm install -g` on Linux/macOS installs
+// `memoria-mcp-http` as a symlink to this file, so a plain URL comparison was
+// false there: the module loaded, never called main(), and the process exited 0
+// with no server and no error. Windows .cmd shims and Docker (`node
+// dist/http.js`) pass the real path, which is why nothing caught it.
+export function isEntryPoint(invokedPath: string | undefined, moduleUrl: string): boolean {
+  if (!invokedPath) return false;
+  try {
+    return fs.realpathSync(invokedPath) === fs.realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+}
+
+let httpServer: Server | undefined;
+let shuttingDown = false;
+
+// Graceful shutdown on SIGINT (Ctrl-C) AND SIGTERM. Only SIGINT used to be
+// handled, but SIGTERM is what `docker stop`, Cloud Run and systemd send: the
+// process died without closing SQLite or flushing the collector, and every
+// deploy ended in a hard kill. A second signal while shutting down forces the
+// exit, and so does the timer if a close hangs — platforms SIGKILL ~10s after
+// SIGTERM anyway, and exiting ourselves first keeps the exit code honest.
+async function shutdown(signal: NodeJS.Signals): Promise<void> {
+  if (shuttingDown) {
+    process.exit(1);
+  }
+  shuttingDown = true;
+  process.stderr.write(`Memoria: ${signal} received, shutting down\n`);
+  setTimeout(() => process.exit(1), 8_000).unref();
+  httpServer?.close(); // stop accepting; in-flight requests finish or are cut at exit
+  clearInterval(cleanupTimer);
+  let exitCode = 0;
+  try {
+    await destroyCollector();
+    for (const sid in sessions) {
+      await sessions[sid].transport.close?.();
+    }
+  } catch (err) {
+    process.stderr.write(`Memoria: error during shutdown: ${err}\n`);
+    exitCode = 1;
+  } finally {
+    tokenDb.close();
+    store.close();
+  }
+  process.exit(exitCode);
+}
+
+if (isEntryPoint(process.argv[1], import.meta.url)) {
+  // Registered only when running as the server, so importing this module (the
+  // integration tests do) leaves the importer's own signal handling alone.
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => void shutdown(signal));
+  }
   main().catch((err) => {
     process.stderr.write(`Fatal error: ${err}\n`);
     process.exit(1);
   });
 }
-
-process.on("SIGINT", async () => {
-  await destroyCollector();
-  for (const sid in sessions) {
-    await sessions[sid].transport.close?.();
-  }
-  tokenDb.close();
-  store.close();
-  process.exit(0);
-});
