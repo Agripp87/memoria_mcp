@@ -1,19 +1,32 @@
 name: Release
 
-# Publishes mcp-server to npm when a version tag is pushed, using npm trusted
-# publishing: the workflow proves its identity to npm over OIDC, so no npm
-# token is stored anywhere to leak, and npm attaches a provenance attestation
-# tying the published tarball to this repository and commit.
+# STAGES mcp-server on npm when a version tag is pushed. Nothing goes public
+# until the maintainer approves it with 2FA:
+#
+#     npx -y npm@11 stage approve @agrippa87/memoria-mcp@X.Y.Z
+#
+# The workflow authenticates with npm trusted publishing: it proves its
+# identity over OIDC, so no npm token is stored anywhere to leak, and npm
+# attaches a provenance attestation tying the tarball to this commit.
+#
+# Why staged rather than published directly: main is unprotected and has a
+# single admin, so anything able to push a tag here — the maintainer's GitHub
+# session, or a gh token on a development machine — could otherwise publish
+# to npm under the maintainer's name. Staging keeps a human, and a second
+# factor, between a tag and a public release.
 #
 # Release:    bump mcp-server/package.json, cut the CHANGELOG section, merge,
-#             then  git tag -a vX.Y.Z -m "..." && git push public vX.Y.Z
+#             tag:   git tag -a vX.Y.Z -m "..." && git push public vX.Y.Z
+#             then approve with the command above (the run summary prints it).
 # Rehearsal:  run this workflow manually (Actions tab → Release → Run
-#             workflow). It does everything except upload, via --dry-run.
+#             workflow). It runs everything and stages a throwaway pre-release
+#             version with --dry-run, so nothing is written to the registry.
 #
 # The npm side is configured on npmjs.com → the package → Settings → Trusted
-# Publisher: user "Agripp87", repository "memoria_mcp", workflow "release.yml".
-# Those fields are case-sensitive, and package.json's repository.url must
-# match this repository exactly.
+# Publisher: user "Agripp87", repository "memoria_mcp", workflow "release.yml",
+# with "Allow npm publish" deliberately left UNCHECKED, so this workflow can
+# only stage. Those fields are case-sensitive, and package.json's
+# repository.url must match this repository exactly.
 
 on:
   push:
@@ -76,7 +89,7 @@ jobs:
 
       # Fail with a clear message rather than an opaque auth error if the
       # runner image ever ships an npm too old for trusted publishing.
-      - name: npm supports trusted publishing
+      - name: npm supports trusted publishing and staging
         run: |
           set -euo pipefail
           v="$(npm --version)"
@@ -85,6 +98,11 @@ jobs:
             const ok = maj > 11 || (maj === 11 && (min > 5 || (min === 5 && pat >= 1)));
             process.exit(ok ? 0 : 1);
           ' "$v" || { echo "::error::npm $v is older than 11.5.1, which trusted publishing requires."; exit 1; }
+          # Checked by output, not exit code: an npm without `stage` prints
+          # "Unknown command" and still exits 0, so `npm stage --help` alone
+          # would pass on every version.
+          npm stage --help 2>&1 | grep -q "npm stage publish" \
+            || { echo "::error::npm $v has no 'stage' command, which staged publishing requires."; exit 1; }
           echo "npm $v, node $(node --version)"
 
       - run: npm ci
@@ -101,10 +119,33 @@ jobs:
       - name: Embedding vector space unchanged
         run: npm run verify:vectors
 
-      - name: Publish
+      - name: Stage for approval
         if: github.event_name == 'push'
-        run: npm publish
+        run: |
+          set -euo pipefail
+          npm stage publish
+          spec="$(node -p "const p=require('./package.json'); p.name+'@'+p.version")"
+          {
+            echo "## Staged, not yet public: \`$spec\`"
+            echo
+            echo "Inspect it, then approve with your authenticator:"
+            echo
+            echo '```sh'
+            echo "npx -y npm@11 stage download $spec   # optional: inspect the tarball"
+            echo "npx -y npm@11 stage approve $spec"
+            echo '```'
+            echo
+            echo "Or discard it with \`npx -y npm@11 stage reject $spec\`."
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Rehearse publish (manual runs never upload)
+      # Staging the real version would fail here: between releases main
+      # carries a version that is already published, and npm refuses to stage
+      # over it even in a dry run. A throwaway pre-release version exercises
+      # the identical path. The package.json change never leaves the runner.
+      - name: Rehearse staging (manual runs write nothing)
         if: github.event_name == 'workflow_dispatch'
-        run: npm publish --dry-run
+        run: |
+          set -euo pipefail
+          base="$(node -p "require('./package.json').version")"
+          npm version "${base}-rehearsal.${GITHUB_RUN_NUMBER}" --no-git-tag-version
+          npm stage publish --dry-run --tag rehearsal

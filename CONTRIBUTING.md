@@ -130,10 +130,13 @@ radius:
 
 ## Releasing (maintainer)
 
-Releases are published to npm by
+Releases are **staged** on npm by
 [`.github/workflows/release.yml`](.github/workflows/release.yml) using npm
 trusted publishing — no npm token exists anywhere, and every release carries a
-provenance attestation linking it to its commit.
+provenance attestation linking it to its commit — and go public only when the
+maintainer approves them with 2FA. The workflow can stage but never publish on
+its own: nothing that can push a tag to this repository can release to npm
+without the maintainer's second factor as well.
 
 1. On a branch: bump `version` in `mcp-server/package.json` (and the `version`
    strings in `src/index.ts` and `src/http.ts`), and move the `[Unreleased]`
@@ -146,12 +149,26 @@ provenance attestation linking it to its commit.
    git push origin vX.Y.Z
    ```
 
-The tag push runs the release workflow, which refuses to publish if the tag is
-not on `main` or does not match `package.json`, re-runs the full check suite
-plus the embedding vector-space guard, and then publishes.
+4. Approve the staged release. The workflow's run summary prints the exact
+   commands:
 
-To rehearse without publishing, run the **Release** workflow by hand from the
-Actions tab: it performs every step and finishes with `npm publish --dry-run`.
+   ```bash
+   npx -y npm@11 stage download @agrippa87/memoria-mcp@X.Y.Z   # optional: inspect
+   npx -y npm@11 stage approve  @agrippa87/memoria-mcp@X.Y.Z   # prompts for 2FA
+   ```
 
-Local `npm publish` still works for the account owner with 2FA, but should be
-the exception — a release from the workflow is the one that carries provenance.
+   `npx -y npm@11` runs an npm that has the `stage` command without changing
+   your global npm; npm before 11.15 does not have it. `npm stage reject`
+   discards a staged release instead.
+
+The tag push runs the release workflow, which refuses to stage if the tag is
+not on `main` or does not match `package.json`, and re-runs the full check suite
+plus the embedding vector-space guard before staging.
+
+To rehearse without writing anything to the registry, run the **Release**
+workflow by hand from the Actions tab: it performs every step, then stages a
+throwaway pre-release version with `--dry-run`.
+
+A local `npm publish` still works for the account owner with 2FA, but should be
+the exception — a release through the workflow is the one that carries
+provenance.
