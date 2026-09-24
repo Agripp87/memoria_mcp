@@ -152,3 +152,42 @@ describe("adapter-modules resolution stays inside its own node_modules (2026-09 
     );
   });
 });
+
+describe("adapter-modules resolution details (2026-09 re-review, round 4)", () => {
+  it("honours a package's exports map when it has no main", async () => {
+    const pkgDir = path.join(MODULES, "node_modules", "memoria-exports-only");
+    fs.mkdirSync(path.join(pkgDir, "lib"), { recursive: true });
+    fs.writeFileSync(
+      path.join(pkgDir, "package.json"),
+      JSON.stringify({ name: "memoria-exports-only", exports: { require: "./lib/entry.js" } }),
+    );
+    fs.writeFileSync(
+      path.join(pkgDir, "lib", "entry.js"),
+      "module.exports = { viaExports: true };",
+    );
+    expect(isDependencyAvailable("memoria-exports-only")).toBe(true);
+    const mod = await importDependency<{ viaExports: boolean }>("memoria-exports-only");
+    expect(mod.viaExports).toBe(true);
+  });
+
+  it("knows the Homebrew and Debian npm locations", () => {
+    const brewNode = "/opt/homebrew/Cellar/node/26.0.0/bin/node";
+    const brewCli = path.join(
+      "/opt/homebrew/Cellar/node/26.0.0/bin",
+      "..",
+      "libexec",
+      "lib",
+      "node_modules",
+      "npm",
+      "bin",
+      "npm-cli.js",
+    );
+    expect(npmInstallCommand(["x"], "darwin", brewNode, (p) => p === brewCli)?.args[0]).toBe(
+      brewCli,
+    );
+    const debCli = path.join("/usr/bin", "..", "share", "nodejs", "npm", "bin", "npm-cli.js");
+    expect(npmInstallCommand(["x"], "linux", "/usr/bin/node", (p) => p === debCli)?.args[0]).toBe(
+      debCli,
+    );
+  });
+});

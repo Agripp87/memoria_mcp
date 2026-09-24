@@ -378,7 +378,7 @@ All events are classified into privacy tiers before leaving the device:
 
 ### Encryption
 
-- **Master key**: AES-256-GCM. Sourced from `MEMORIA_ENCRYPTION_KEY` (recommended — pin from a secret manager), else auto-generated on first run at `data/collector.key`, created owner-only (0600; a warning is logged when the filesystem ignores the mode). Set `MEMORIA_REQUIRE_ENCRYPTION_KEY=true` to require the env var and refuse the on-disk fallback.
+- **Master key**: AES-256-GCM. Sourced from `MEMORIA_ENCRYPTION_KEY` (recommended — pin from a secret manager), else auto-generated on first run at `data/collector.key`, created owner-only (0600 on Linux and macOS, with a warning when the filesystem ignores the mode; on Windows it inherits the data folder's permissions). Set `MEMORIA_REQUIRE_ENCRYPTION_KEY=true` to require the env var and refuse the on-disk fallback.
 - **Ring buffer**: All event content encrypted before SQLite storage
 - **Config**: Source configurations (including IMAP credentials) encrypted at `data/collector-config.enc`
 - **Access**: Only the Memoria agent and the user have access to decrypted data

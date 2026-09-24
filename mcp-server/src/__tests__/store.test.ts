@@ -280,3 +280,12 @@ describe("headWithoutCutWord (2026-09 re-review)", () => {
     expect(headWithoutCutWord("short", 200)).toBe("short");
   });
 });
+
+describe("headWithoutCutWord outside the BMP (2026-09 re-review, round 4)", () => {
+  it("drops a word whose cut falls inside a surrogate pair", () => {
+    // U+20000 is a CJK Extension B letter: two UTF-16 units.
+    const text = "note 𠀀𠀀𠀀 end";
+    expect(headWithoutCutWord(text, 7)).toBe("note ");
+    expect(headWithoutCutWord(text, 8)).toBe("note ");
+  });
+});

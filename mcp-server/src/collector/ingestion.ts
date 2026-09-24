@@ -504,8 +504,10 @@ export class IngestionPipeline {
  * the file and cannot be touched, and if another process rewrote the header
  * meanwhile, the bump starts over. A bump that changes the length (to 10)
  * replaces the whole file atomically instead, and only if its size is
- * unchanged since it was read; a writer appending in the instant between that
- * size check and the rename is the residual window.
+ * unchanged since it was read. There is no lock, so two narrow windows
+ * remain: another process bumping in place between this check and this
+ * write (the later write wins, so importance can end one step lower than it
+ * should), and an append landing between the size check and the rename.
  *
  * The file is handled as bytes, never decoded and re-encoded. It is searched
  * through a latin1 view, where each character is exactly one byte, so a match

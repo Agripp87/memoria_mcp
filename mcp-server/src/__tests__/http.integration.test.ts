@@ -640,3 +640,15 @@ describe("/ingest timestamps (2026-09 re-review)", () => {
     expect(log.match(/## \d{2}:\d{2} UTC — http-test/g)).toHaveLength(2);
   });
 });
+
+describe("normalizeTimestamp (2026-09 re-review, round 4)", () => {
+  it("keeps a usable timestamp and replaces the rest with now", async () => {
+    const { normalizeTimestamp } = await import("../http.js");
+    const now = new Date("2026-09-24T12:00:00Z");
+    expect(normalizeTimestamp("2026-09-24T14:05:00+02:00", now)).toBe("2026-09-24T12:05:00.000Z");
+    expect(normalizeTimestamp(Date.UTC(2026, 0, 2), now)).toBe("2026-01-02T00:00:00.000Z");
+    for (const bad of ["24/09/2026", 1727186400000000, {}, [], null, undefined, true]) {
+      expect(normalizeTimestamp(bad, now), String(bad)).toBe(now.toISOString());
+    }
+  });
+});

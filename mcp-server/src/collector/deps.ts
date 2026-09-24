@@ -30,23 +30,40 @@ let modulesDir: string | null = null;
 /** Set where on-demand adapter dependencies are installed and looked up. */
 export function setAdapterModulesDir(dir: string): void {
   modulesDir = dir;
+  // The packages installed here resolve THEIR dependencies the normal way,
+  // searching parent folders too: <data>/node_modules, then the Memoria
+  // directory's. Those are user data and can be synced from another device,
+  // so a node_modules there can supply code to an adapter. Say so loudly.
+  for (const up of [path.dirname(dir), path.dirname(path.dirname(dir))]) {
+    const nm = path.join(up, "node_modules");
+    if (fs.existsSync(nm)) {
+      process.stderr.write(
+        `Memoria SECURITY: ${nm} exists. Collector adapters can load packages from it. ` +
+          `Remove it unless you put it there on purpose (earlier versions installed ` +
+          `adapter dependencies into the Memoria directory).\n`,
+      );
+    }
+  }
 }
 
 const requireFromPackage = createRequire(import.meta.url);
 
 function resolveInModulesDir(name: string): string | null {
   if (!modulesDir) return null;
-  // By absolute path, never by bare name. Bare-name resolution walks UP from
-  // here: <data>/node_modules, then the Memoria directory's own node_modules,
-  // then every ancestor. The Memoria directory is user data, often
-  // git-synced, and the old installer left a node_modules at its root, so a
-  // module found up there would run code nobody installed here. Node also
-  // caches a bare-name hit, so after one lookup had landed up there, a real
-  // install here still read as missing until a restart.
+  // Only a package that is really here counts. Bare-name resolution from
+  // this directory walks UP: <data>/node_modules, then the Memoria
+  // directory's own node_modules, then every ancestor. The Memoria directory
+  // is user data, often git-synced, and the old installer left a
+  // node_modules at its root, so a copy found up there would run code nobody
+  // installed here. Node also caches a bare-name hit, so once a lookup had
+  // landed up there, it kept returning that copy even after a real install.
   const pkgDir = path.join(modulesDir, "node_modules", name);
   if (!fs.existsSync(path.join(pkgDir, "package.json"))) return null;
   try {
-    return requireFromPackage.resolve(pkgDir);
+    // Resolving the name from inside the package itself honours its
+    // "exports" map (a directory path would read only "main"), and the first
+    // node_modules searched from there is this one, which holds it.
+    return createRequire(path.join(pkgDir, "package.json")).resolve(name);
   } catch {
     return null;
   }

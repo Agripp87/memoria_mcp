@@ -899,6 +899,21 @@ app.get("/health", (_req, res) => {
 // Direct HTTP endpoint for external sub-memory collectors to push events
 // (e.g., a mobile companion app or remote collector)
 
+/**
+ * An event timestamp as ISO 8601, or `now` when it cannot be used. An
+ * unparsable value becomes "now", as custom sources already do, rather than an
+ * event that fails every ingest attempt and is dead-lettered while the caller
+ * is told it was accepted. Years outside 1970–9999 are treated the same way:
+ * epoch microseconds sent as milliseconds land around year 56,000, which is
+ * no one's intent.
+ */
+export function normalizeTimestamp(v: unknown, now: Date = new Date()): string {
+  const d = new Date(typeof v === "string" || typeof v === "number" ? v : NaN);
+  const year = d.getUTCFullYear();
+  const plausible = !Number.isNaN(d.getTime()) && year >= 1970 && year <= 9999;
+  return (plausible ? d : now).toISOString();
+}
+
 app.post("/ingest", writeLimiter, authenticate, async (req, res) => {
   const events = req.body?.events;
   if (!Array.isArray(events) || events.length === 0) {
@@ -934,17 +949,6 @@ app.post("/ingest", writeLimiter, authenticate, async (req, res) => {
     const clampImportance = (v: unknown): number => {
       const n = typeof v === "number" && Number.isFinite(v) ? v : 5;
       return Math.max(1, Math.min(10, Math.round(n)));
-    };
-    // An unparsable timestamp becomes "now", as custom sources already do,
-    // rather than an event that fails every ingest attempt and is
-    // dead-lettered while the caller is told it was accepted.
-    // Years outside 1970–9999 are treated the same way: epoch microseconds
-    // sent as milliseconds land around year 56,000, which is no one's intent.
-    const normalizeTimestamp = (v: unknown): string => {
-      const d = new Date(typeof v === "string" || typeof v === "number" ? v : NaN);
-      const year = d.getUTCFullYear();
-      const plausible = !Number.isNaN(d.getTime()) && year >= 1970 && year <= 9999;
-      return (plausible ? d : new Date()).toISOString();
     };
     const normalized = events.map((e: any) => ({
       id: String(e.id),

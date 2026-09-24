@@ -52,8 +52,8 @@ Fixes from a full review of 0.2.0.
   longer rewrites the whole file from a copy read a moment earlier, which could
   drop an entry appended in between. It now overwrites just the digits in
   place, after checking they are still there, whenever the value keeps its
-  width. Only a bump to 10 rewrites the file, atomically and only if nothing
-  was appended since it was read. It no longer re-encodes a log that contains
+  width. Only a bump to 10 rewrites the file, atomically, and only if the
+  file has not grown since it was read. It no longer re-encodes a log that contains
   text that is not valid UTF-8, and it leaves alone an `importance:` line in
   the body of a log whose frontmatter has none. Cross-source fusion no longer
   creates a daily log without frontmatter when it is the first writer of the
@@ -83,7 +83,10 @@ Fixes from a full review of 0.2.0.
   itself failed. Dependencies now install into `<data dir>/adapter-modules`
   with install scripts disabled, and both the check and the adapters look
   there, and only there: a `node_modules` in a folder above it, such as one
-  an earlier install left in the Memoria directory, is never used. npm runs
+  an earlier install left in the Memoria directory, is not used to find them.
+  Their own dependencies still resolve the usual way, so the server now warns
+  at startup if such a folder exists, and the store template's `.gitignore`
+  excludes `node_modules/`, `package.json` and `package-lock.json`. npm runs
   as its own script under the server's Node binary, with no shell and no
   command lookup, so no file in that directory can stand in for npm. The install also no longer freezes the server while it runs. If an
   earlier attempt left `package.json`, `package-lock.json` or `node_modules`
@@ -146,7 +149,8 @@ Fixes from a full review of 0.2.0.
   was created with the default permissions and there was a window before they
   were tightened.
 - The auto-generated encryption key file, `collector.key`, is likewise created
-  owner-only from the first byte, and never over an existing key. Two
+  owner-only from the first byte on Linux and macOS (on Windows it inherits
+  the data folder's permissions), and never over an existing key. Two
   processes starting together could each write a key of their own, leaving
   whatever the first had encrypted unreadable. A corrupt or truncated key file
   is now reported by name when the collector starts, not as a confusing
