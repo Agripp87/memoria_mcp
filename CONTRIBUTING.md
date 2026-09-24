@@ -139,8 +139,9 @@ its own: nothing that can push a tag to this repository can release to npm
 without the maintainer's second factor as well.
 
 1. On a branch: bump `version` in `mcp-server/package.json` (and the `version`
-   strings in `src/index.ts` and `src/http.ts`), and move the `[Unreleased]`
-   section of [CHANGELOG.md](CHANGELOG.md) under a dated version heading.
+   strings in `src/index.ts`, `src/http.ts`, `.claude-plugin/plugin.json` and
+   `.claude-plugin/marketplace.json`), and move the `[Unreleased]` section of
+   [CHANGELOG.md](CHANGELOG.md) under a dated version heading.
 2. Merge it to `main` once CI is green.
 3. Tag the merge commit and push the tag:
 
