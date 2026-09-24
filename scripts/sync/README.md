@@ -150,9 +150,12 @@ contains bucket names and account details.
 
 ## The non-git case
 
-`scripts/lib-union-merge.sh` implements the same append-union merge by hand,
-for setups where git is not the transport and there is therefore no merge base
-to work from — it synthesizes the three-way merge from a tag marking the last
-synced state. If you are syncing with git, you do not need it; the built-in
-driver is better. It is kept because a bucket-only or Syncthing-style setup has
-no other way to get the same guarantee.
+Without git there is no merge driver, so nothing can combine two devices'
+entries in the same daily log. A bucket-only or Syncthing-style setup does
+whatever its transport does with a file changed on both sides: typically the
+last writer wins, or the other copy is set aside as a conflict file. If more
+than one device writes to the store, sync it with git.
+
+(Earlier versions shipped `scripts/lib-union-merge.sh` and described it as the
+answer for this case. It was not: it needed git itself, plus a hook that tagged
+the last synced state, which never shipped. It was removed in 2026-09.)

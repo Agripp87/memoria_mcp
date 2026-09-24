@@ -149,8 +149,10 @@ export function getAllMemoryFiles(): string[] {
     if (!fs.existsSync(dir)) return;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
+      // Dirents describe the entry itself: a symlink is neither a directory
+      // nor a file here, so linked folders and files are both skipped.
       if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith(".md")) files.push(full);
+      else if (entry.isFile() && entry.name.endsWith(".md")) files.push(full);
     }
   }
   walk(MEMORIES_DIR);
@@ -158,6 +160,20 @@ export function getAllMemoryFiles(): string[] {
 }
 
 export async function reindexFile(store: MemoryStore, filePath: string): Promise<number> {
+  // Index regular files only. A symlink under memories/ can point anywhere
+  // (a config file, another user's notes) and would put its content into
+  // search results — the reason resolveMemoryPath already refuses to read or
+  // write through one. The watcher and the sweeps reach files by name, so the
+  // check belongs here, not only in the directory walk. A file that became a
+  // symlink after it was indexed is dropped from the index.
+  try {
+    if (!fs.lstatSync(filePath).isFile()) {
+      store.removeFile(getRelativePath(filePath));
+      return 0;
+    }
+  } catch {
+    return 0; // gone; the caller handles removal
+  }
   const { content, exists } = readMemoryFile(filePath);
   if (!exists) return 0;
 

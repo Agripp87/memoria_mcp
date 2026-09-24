@@ -4,12 +4,12 @@
 
 Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Code, claude.ai (Chat / CoWork) and any other MCP client a shared long-term memory. Memories are Markdown files with YAML frontmatter in a directory you control; a derived SQLite + FTS5 index provides hybrid semantic + keyword search; a set of agentic tools (reflect, lint, compact, compile) keeps the store healthy; and an optional collector daemon feeds in events from your own tools. It runs as a stdio server for Claude Code and as an OAuth 2.1 HTTP server for remote clients.
 
-> **Status: early public release.** The server has run as the maintainer's daily driver since spring 2026 (hosted on Cloud Run, 248 tests, two adversarial security reviews). It installs as a Claude Code plugin today; the npm and PyPI packages are still to come — see [Roadmap](#roadmap). The sub-memory **collector** (iMessage / IMAP / Google ingestion) ships but should be treated as **experimental**; read [SECURITY.md](SECURITY.md) before enabling sources.
+> **Status: early public release.** The server has run as the maintainer's daily driver since spring 2026 (hosted on Cloud Run, two adversarial security reviews and a full code review, a test suite CI runs on Ubuntu and Windows). It installs as a Claude Code plugin or from npm as [`@agrippa87/memoria-mcp`](https://www.npmjs.com/package/@agrippa87/memoria-mcp) — see [Roadmap](#roadmap). The sub-memory **collector** (iMessage / IMAP / Google ingestion) ships but should be treated as **experimental**; read [SECURITY.md](SECURITY.md) before enabling sources.
 
 **Why Memoria instead of another memory layer?**
 
 - **You own the data.** Plain Markdown in a folder — grep it, edit it, commit it, diff it. The SQLite index is derived and fully rebuildable. No hosted database, no proprietary format, no lock-in.
-- **Multi-device without a service.** Keep the store in a private git repo (or any object store); daily logs are append-only and merge with an append-union strategy, so two machines writing the same day never clobber each other ([Multi-device sync](#multi-device-sync)).
+- **Multi-device without a service.** Keep the store in a private git repo; daily logs are append-only and merge with git's union driver, so two machines writing the same day never clobber each other ([Multi-device sync](#multi-device-sync)).
 - **Agentic self-maintenance.** Write-time dedup, reflection, contradiction lint, decay/promotion, and a deterministic "compile, don't retrieve" loop that rolls the daily firehose into linked entity pages.
 - **Spec-complete remote transport.** OAuth 2.1 with PKCE, client credentials, dynamic client registration and metadata discovery — works as a claude.ai custom connector out of the box.
 - **Honest about search.** Three embedding providers (OpenAI → local MiniLM → n-gram fallback), three-signal scoring, and every result reports its scan coverage.
@@ -55,7 +55,7 @@ Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Co
 - **Hybrid search**: Vector cosine similarity (0.7) + FTS5 BM25 keyword scoring (0.3). Three embedding providers, auto-selected: OpenAI `text-embedding-3-small` (if `OPENAI_API_KEY` set) → local `all-MiniLM-L6-v2` via `@huggingface/transformers` (true semantic, fully offline after a one-time ~23MB download) → n-gram hashing (lexical fallback). Control with `MEMORIA_EMBEDDINGS`.
 - **Cross-source temporal fusion**: Detects correlated activities across sources within configurable time windows
 - **Write-time dedup**: Checks top-3 similar memories before every write, returns duplicates for agent review
-- **Encrypted at rest**: All collector data encrypted with AES-256-GCM; master key auto-generated (chmod 600)
+- **Encrypted at rest**: All collector data encrypted with AES-256-GCM; master key auto-generated, owner-only (0600)
 - **User agreement flow**: Sources cannot be enabled without explicit user consent
 - **Auto-dependency installation**: Missing npm packages installed automatically when a source is enabled
 - **Content hashing**: Skips re-embedding unchanged files during reindex (SHA-256)
@@ -71,7 +71,7 @@ Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Co
 - **Spec-compliant YAML parser**: Uses `js-yaml` for frontmatter (handles quoted colons, multi-line strings, special chars in tags) — gracefully degrades on malformed YAML
 - **Bounded lint operations**: Contradiction scan capped at top 30 memories by importance, batched 5-in-parallel to control embedding API cost
 - **Buffer capacity reporting**: `/ingest` returns `bufferDropped` count and `bufferUsage` so callers know when events are dropped at capacity
-- **Test suite**: 248 tests covering chunker, embeddings, store, optimizer, ingestion, path resolution (incl. symlink-leaf containment), file_watcher allowlisting, privacy-tier classification + sink-side redaction, AES-256-GCM crypto (round-trip/tamper/strict-key), YAML edge cases, access tracking, plus an **HTTP integration suite** (supertest over the real Express app: the `/dashboard/api` Bearer auth-gate, the full OAuth `authorization_code`+PKCE flow end-to-end, client-credential + API-key-decoupling checks, redirect allowlisting) and **wiki rendering** (code-safe `[[wikilink]]` resolution, stored-XSS escaping, link-label safety). CI fails on coverage regression via per-file floors.
+- **Test suite**: covers chunker, embeddings, store, optimizer, ingestion, path resolution (incl. symlink-leaf containment), file_watcher allowlisting, privacy-tier classification + sink-side redaction, AES-256-GCM crypto (round-trip/tamper/strict-key), YAML edge cases, access tracking, plus an **HTTP integration suite** (supertest over the real Express app: the `/dashboard/api` Bearer auth-gate, the full OAuth `authorization_code`+PKCE flow end-to-end, client-credential + API-key-decoupling checks, redirect allowlisting) and **wiki rendering** (code-safe `[[wikilink]]` resolution, stored-XSS escaping, link-label safety). CI fails on coverage regression via per-file floors.
 - **File watcher**: Auto-reindex on change with 1.5s debounce, plus a periodic reindex sweep (default 5 min) as a fallback for mounts where `fs.watch` is inert (e.g. GCS FUSE on Cloud Run)
 
 ## Quick Start
@@ -155,7 +155,7 @@ The store defaults to `~/.memoria` (`MEMORIA_DIR` overrides it). The first `memo
 
 ### Tell Claude how to use it
 
-Memoria works best with a short standing instruction in your `CLAUDE.md` — e.g. *"At session start, `memory_search` for context relevant to the task. Record decisions, solved bugs and preferences with `memory_daily` during the session, `memory_write` for durable facts. Do not capture transactional work."* The server's own MCP instructions already ask for at least one daily-log entry per session.
+Memoria works best with a short standing instruction in your `CLAUDE.md` — e.g. *"At session start, `memory_search` for context relevant to the task. Record decisions, solved bugs and preferences with `memory_daily` during the session, `memory_write` for durable facts. Do not capture transactional work."* The server's own MCP instructions suggest logging what is worth keeping; they no longer require an entry every session.
 
 ### Remote access (claude.ai, other devices) with Docker
 
@@ -184,7 +184,7 @@ For a durable cloud deployment see [`deploy/gcp/README.md`](deploy/gcp/README.md
 | `MEMORIA_API_KEY` | *(required for HTTP)* | Bearer token for HTTP transport authentication (`/mcp`, `/ingest`, `/dashboard/api`). Distinct from the OAuth client secret below. |
 | `OPENAI_API_KEY` | *(none)* | Enables OpenAI text-embedding-3-small (1536-dim). When unset, falls back to the local MiniLM model (see `MEMORIA_EMBEDDINGS`). |
 | `MEMORIA_EMBEDDINGS` | `auto` | Embedding provider: `auto` (OpenAI if key, else local MiniLM if installed, else hash), `openai`, `minilm` (local all-MiniLM-L6-v2, 384-dim, true semantic), or `hash` (n-gram lexical fallback, 384-dim). |
-| `MEMORIA_MODEL_CACHE` | *(package default)* | Directory for the cached MiniLM model. The Docker image pre-bakes it at `/app/mcp-server/.models`. |
+| `MEMORIA_MODEL_CACHE` | *(package default)* | Directory for the cached MiniLM model. The Docker image pre-bakes it at `/app/mcp-server/.models`; the build fails if the download does, unless you pass `--build-arg PREFETCH_MODEL=false` (for OpenAI or hash embeddings, or offline builds). |
 | `MEMORIA_MODEL_OFFLINE` | `false` | Set to `true` to forbid model downloads (use only the cached/pre-baked model). |
 | `MEMORIA_OAUTH_CLIENT_SECRET` | *(required when `BIND_ALL=true`)* | OAuth client secret. Keep it distinct from the API key so rotating one doesn't rotate the other. Locally (loopback) it falls back to the API key with a warning. |
 | `MEMORIA_ENCRYPTION_KEY` | *(required when `BIND_ALL=true`)* | AES-256-GCM master key (64 hex chars) for the collector's encrypted buffer and credential store. Locally, an on-disk key is auto-generated at `data/collector.key` unless `MEMORIA_REQUIRE_ENCRYPTION_KEY=true`. Rotating it makes existing ciphertext unreadable. |
@@ -378,7 +378,7 @@ All events are classified into privacy tiers before leaving the device:
 
 ### Encryption
 
-- **Master key**: AES-256-GCM. Sourced from `MEMORIA_ENCRYPTION_KEY` (recommended — pin from a secret manager), else auto-generated on first run at `data/collector.key` (chmod 600, best-effort). Set `MEMORIA_REQUIRE_ENCRYPTION_KEY=true` to require the env var and refuse the on-disk fallback.
+- **Master key**: AES-256-GCM. Sourced from `MEMORIA_ENCRYPTION_KEY` (recommended — pin from a secret manager), else auto-generated on first run at `data/collector.key`, created owner-only (0600; a warning is logged when the filesystem ignores the mode). Set `MEMORIA_REQUIRE_ENCRYPTION_KEY=true` to require the env var and refuse the on-disk fallback.
 - **Ring buffer**: All event content encrypted before SQLite storage
 - **Config**: Source configurations (including IMAP credentials) encrypted at `data/collector-config.enc`
 - **Access**: Only the Memoria agent and the user have access to decrypted data
@@ -537,7 +537,7 @@ memoria/
 ├── README.md
 ├── LICENSE                    # Apache-2.0
 ├── SECURITY.md                # Trust model + disclosure
-├── Dockerfile                 # Multi-stage build (Node 22 Alpine, non-root)
+├── Dockerfile                 # Multi-stage build (Node 26, Debian slim, non-root)
 ├── docker-compose.yml         # Local/VPS deployment with a persistent volume
 ├── .env.example
 ├── deploy/gcp/                # Reference Cloud Run deployment (template, CI/CD example, demo)
@@ -545,7 +545,6 @@ memoria/
 ├── integrations/
 │   └── orchestrator_hook.py   # Python /ingest client (buffered, best-effort)
 ├── scripts/
-│   ├── lib-union-merge.sh     # Append-union merge for daily logs (multi-device sync)
 │   └── sync-from-claude-memory.sh  # One-way pull from Claude Code's built-in memory
 └── mcp-server/
     ├── package.json
@@ -561,7 +560,7 @@ memoria/
         ├── optimize.ts        # Decay, promotion, staleness, dedup
         ├── entities.ts        # Entity-page compilation (compile-don't-retrieve loop)
         ├── lint.ts            # Contradictions, orphans, gaps, stale refs, index drift, alias/low-confidence
-        ├── __tests__/         # Vitest test suite (248 tests, incl. HTTP integration)
+        ├── __tests__/         # Vitest test suite (incl. HTTP integration)
         └── collector/
             ├── crypto.ts      # AES-256-GCM encryption + master key
             ├── provenance.ts  # Durable append-only raw/provenance archive (data/raw/)
@@ -667,9 +666,9 @@ memories/daily/*.md merge=union
 
 With that in place, same-day entries from two devices merge silently and none are lost. Core memories (`user/`, `project/`, `decisions/`, …) deliberately keep the normal three-way merge: those files are edited rather than appended, so a both-sides change is a real disagreement that deserves a human. (Union merge keeps every entry but does not reorder them chronologically — see the [sync guide](scripts/sync/README.md#why-daily-logs-never-conflict).)
 
-**Object storage is optional.** If you also run a hosted instance backed by a bucket, drop an executable at `$MEMORIA_DIR/.memoria-mirror.sh` and both scripts will call it with `pull` / `push` around the git sync. [`scripts/lib-union-merge.sh`](scripts/lib-union-merge.sh) implements the same append-union merge by hand for setups where git is not the transport and there is no merge base to work from.
+**Object storage is optional.** If you also run a hosted instance backed by a bucket, drop an executable at `$MEMORIA_DIR/.memoria-mirror.sh` and both scripts will call it with `pull` / `push` around the git sync.
 
-**From Claude Code's built-in memory.** [`scripts/sync-from-claude-memory.sh`](scripts/sync-from-claude-memory.sh) one-way-pulls `~/.claude/projects/*/memory/*.md` into the store so existing auto-memory is not lost.
+**From Claude Code's built-in memory.** [`scripts/sync-from-claude-memory.sh`](scripts/sync-from-claude-memory.sh) one-way-pulls a project's `~/.claude/projects/<project>/memory/*.md` into the store (`MEMORIA_DIR`, default `~/.memoria`) so existing auto-memory is not lost. Pass the memory directory as an argument when more than one project has one.
 
 ## Security
 
@@ -718,7 +717,7 @@ See [SECURITY.md](SECURITY.md) for the trust model (single-tenant, one static ke
 
 ```bash
 cd mcp-server
-npm test            # Run all 248 tests (CI runs them on ubuntu AND windows)
+npm test            # Run the whole suite (CI runs it on ubuntu AND windows)
 npm run test:coverage  # Run with coverage (CI gate; per-file floors fail on regression)
 npm run test:watch  # Watch mode for development
 ```
