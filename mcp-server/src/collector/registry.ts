@@ -12,7 +12,7 @@
 import * as fs from "node:fs";
 import { writeFileAtomic } from "../atomic-fs.js";
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
+import { installDependencies, isDependencyAvailable, setAdapterModulesDir } from "./deps.js";
 import type { SourceAdapter, AdapterConfig } from "./adapters/base.js";
 import { IMessageAdapter } from "./adapters/imessage.js";
 import { CalendarAdapter } from "./adapters/calendar.js";
@@ -64,15 +64,18 @@ export class SourceRegistry {
   private activeAdapters = new Map<string, SourceAdapter>();
   private state: RegistryState;
   private configPath: string;
-  private projectDir: string;
   private dataDir: string;
   private errors = new Map<string, string>();
   private lastPolled = new Map<string, string>();
 
-  constructor(dataDir: string, projectDir: string) {
+  /**
+   * @param adapterModulesDir where optional adapter dependencies (imapflow,
+   *   googleapis) are installed on demand; see deps.ts.
+   */
+  constructor(dataDir: string, adapterModulesDir = path.join(dataDir, "adapter-modules")) {
     this.configPath = path.join(dataDir, "collector-config.enc");
-    this.projectDir = projectDir;
     this.dataDir = dataDir;
+    setAdapterModulesDir(adapterModulesDir);
 
     // Init encryption
     initMasterKey(dataDir);
@@ -453,72 +456,13 @@ export class SourceRegistry {
   // ── Dependency auto-installer ────────────────────────────
 
   private checkDependencies(deps: string[]): boolean {
-    if (deps.length === 0) return true;
-
-    for (const dep of deps) {
-      try {
-        require.resolve(dep);
-      } catch {
-        // Also check if it's in the project's node_modules
-        const modPath = path.join(this.projectDir, "node_modules", dep);
-        if (!fs.existsSync(modPath)) return false;
-      }
-    }
-    return true;
+    return deps.every(isDependencyAvailable);
   }
 
   private async installDependencies(
     deps: string[],
   ): Promise<{ success: boolean; message: string }> {
-    const missing = deps.filter((d) => {
-      try {
-        require.resolve(d);
-        return false;
-      } catch {
-        const modPath = path.join(this.projectDir, "node_modules", d);
-        return !fs.existsSync(modPath);
-      }
-    });
-
-    if (missing.length === 0) {
-      return { success: true, message: "All dependencies already installed." };
-    }
-
-    // Validate each name against a strict npm package-name (+ optional version)
-    // pattern before shelling out. Built-in adapter deps are hardcoded today,
-    // but this prevents a future/custom source from injecting an npm flag (e.g.
-    // a leading "-") or junk via a crafted name. execFileSync (no shell) also
-    // removes the metacharacter-injection risk of the old execSync string.
-    const NPM_DEP =
-      /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*(@[a-zA-Z0-9-._^~><=. |*x]+)?$/;
-    const invalid = missing.filter((d) => !NPM_DEP.test(d));
-    if (invalid.length > 0) {
-      return {
-        success: false,
-        message: `Refusing to install invalid dependency name(s): ${invalid.join(", ")}`,
-      };
-    }
-
-    process.stderr.write(`Memoria: auto-installing dependencies: ${missing.join(", ")}\n`);
-
-    try {
-      execFileSync("npm", ["install", "--save", ...missing], {
-        cwd: this.projectDir,
-        encoding: "utf-8",
-        timeout: 60000,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-
-      return {
-        success: true,
-        message: `Installed: ${missing.join(", ")}`,
-      };
-    } catch (err: any) {
-      return {
-        success: false,
-        message: `npm install failed: ${err.stderr?.slice(0, 200) ?? err.message}`,
-      };
-    }
+    return installDependencies(deps);
   }
 
   // ── State persistence (encrypted) ────────────────────────

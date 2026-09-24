@@ -13,6 +13,7 @@
 import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
 import { estimateImportance, classifyPrivacy } from "./base.js";
 import { getGoogleAuth, extractGoogleAuthConfig } from "./google-auth.js";
+import { importDependency } from "../deps.js";
 
 export class GoogleGmailAdapter implements SourceAdapter {
   readonly info: AdapterInfo = {
@@ -52,7 +53,7 @@ export class GoogleGmailAdapter implements SourceAdapter {
     const authConfig = extractGoogleAuthConfig(config.settings as Record<string, any>);
     const auth = await getGoogleAuth(authConfig);
 
-    const { google } = await import("googleapis");
+    const { google } = await importDependency<typeof import("googleapis")>("googleapis");
     this.gmail = google.gmail({ version: "v1", auth });
 
     // Get initial historyId if no checkpoint
