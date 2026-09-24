@@ -537,7 +537,7 @@ memoria/
 ├── README.md
 ├── LICENSE                    # Apache-2.0
 ├── SECURITY.md                # Trust model + disclosure
-├── Dockerfile                 # Multi-stage build (Node 22 Alpine, non-root)
+├── Dockerfile                 # Multi-stage build (Node 26, Debian slim, non-root)
 ├── docker-compose.yml         # Local/VPS deployment with a persistent volume
 ├── .env.example
 ├── deploy/gcp/                # Reference Cloud Run deployment (template, CI/CD example, demo)

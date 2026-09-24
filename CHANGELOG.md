@@ -72,6 +72,16 @@ Fixes from a full review of 0.2.0.
   there. The install also no longer freezes the server while it runs. If an
   earlier attempt left `package.json`, `package-lock.json` or `node_modules`
   in your Memoria directory, you can delete them.
+- **The Docker image could not run its default embedding model.** The image
+  was built on Alpine Linux, but the runtime behind the local MiniLM model
+  ships only for glibc-based Linux, so it could not load there. With the
+  default settings (or the reference Cloud Run template, which asks for MiniLM
+  explicitly) every embedding failed, and a container started on a store that
+  already held memories exited during its first index. The image is now built
+  on Debian (`node:26-slim`), and CI checks that the model loads, offline, in
+  the image it ships. This had gone unnoticed because the build-time model
+  download swallowed the same error (see Security below) and the CI smoke test
+  used the lexical fallback.
 - Symlinked `.md` files under `memories/` are no longer indexed. The memory
   tools already refused to read or write through a symlink, but indexing
   followed one, so a link pointing outside the store put that file's content

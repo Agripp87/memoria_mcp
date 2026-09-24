@@ -1,7 +1,14 @@
-FROM node:26-alpine AS builder
+# Debian (glibc), not Alpine (musl). onnxruntime-node, which runs the local
+# embedding model, ships glibc binaries only: on Alpine it cannot load
+# (ld-linux-x86-64.so.2 missing), so MiniLM, the default provider, failed on
+# every embedding, and a container started on a non-empty store exited at its
+# first reindex. The swallowed model prefetch hid this until 2026-09.
+FROM node:26-slim AS builder
 
 # Install build dependencies for better-sqlite3
-RUN apk add --no-cache python3 make g++
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3 make g++ && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -32,12 +39,15 @@ RUN mkdir -p /app/mcp-server/.models && \
 RUN npm prune --omit=dev
 
 # --- Production stage ---
-FROM node:26-alpine
+FROM node:26-slim
 
-RUN apk add --no-cache tini curl
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends tini curl && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create non-root user (use GID/UID 1001 since 1000 is taken by 'node')
-RUN addgroup -g 1001 memoria && adduser -D -u 1001 -G memoria memoria
+RUN groupadd -g 1001 memoria && \
+    useradd -u 1001 -g memoria -M -s /usr/sbin/nologin memoria
 
 WORKDIR /app/mcp-server
 
@@ -71,8 +81,9 @@ ENV DOCKER=true
 ENV BIND_ALL=true
 ENV PORT=3100
 ENV MEMORIA_DIR=/data/memoria
-# Local semantic embeddings (all-MiniLM-L6-v2). Uses the pre-baked model cache;
-# falls back to a one-time download if the cache is empty. Set
+# Local semantic embeddings (all-MiniLM-L6-v2) from the pre-baked model cache
+# (a one-time download instead if the image was built with
+# PREFETCH_MODEL=false). Set
 # MEMORIA_EMBEDDINGS=hash to force the lexical fallback, or provide OPENAI_API_KEY.
 ENV MEMORIA_MODEL_CACHE=/app/mcp-server/.models
 # Token DB on container-local disk (NOT the gcsfuse MEMORIA_DIR) — SQLite WAL is
