@@ -50,14 +50,17 @@ Fixes from a full review of 0.2.0.
   second one's create overwrote the first one's entry. Creation is now
   exclusive and the second writer appends. Raising a daily log's importance no
   longer rewrites the whole file from a copy read a moment earlier, which could
-  drop an entry appended in between. It now changes only the digits in the
-  frontmatter, byte for byte, so a log containing text that is not valid UTF-8
-  is no longer re-encoded, and an `importance:` line in the body of a log
-  whose frontmatter has none is left alone. Cross-source fusion no longer
+  drop an entry appended in between. It now overwrites just the digits in
+  place, after checking they are still there, whenever the value keeps its
+  width. Only a bump to 10 rewrites the file, atomically and only if nothing
+  was appended since it was read. It no longer re-encodes a log that contains
+  text that is not valid UTF-8, and it leaves alone an `importance:` line in
+  the body of a log whose frontmatter has none. Cross-source fusion no longer
   creates a daily log without frontmatter when it is the first writer of the
   day.
-- `/ingest` accepts an event whose `timestamp` cannot be parsed and records
-  it at the time it arrived. Before, such an event failed on every attempt
+- `/ingest` accepts an event whose `timestamp` cannot be parsed, or lies
+  outside the years 1970–9999 (epoch microseconds sent as milliseconds, say),
+  and records it at the time it arrived. Before, such an event failed on every attempt
   and was eventually dropped, while the response still counted it as
   accepted. The response now also includes `failed`, the number of events
   that could not be written this time (they stay buffered for retry).
@@ -79,9 +82,10 @@ Fixes from a full review of 0.2.0.
   them. The "is it installed?" check always said no, and on Windows the install
   itself failed. Dependencies now install into `<data dir>/adapter-modules`
   with install scripts disabled, and both the check and the adapters look
-  there. npm runs as its own script under the server's Node binary, with no
-  shell and no command lookup, so no file in that directory can stand in for
-  npm. The install also no longer freezes the server while it runs. If an
+  there, and only there: a `node_modules` in a folder above it, such as one
+  an earlier install left in the Memoria directory, is never used. npm runs
+  as its own script under the server's Node binary, with no shell and no
+  command lookup, so no file in that directory can stand in for npm. The install also no longer freezes the server while it runs. If an
   earlier attempt left `package.json`, `package-lock.json` or `node_modules`
   in your Memoria directory, you can delete them.
 - **The Docker image could not run its default embedding model.** The image
@@ -106,10 +110,12 @@ Fixes from a full review of 0.2.0.
 
 ### Changed
 
-- **Entry times in daily logs are now UTC**, written as `14:05 UTC`. The file
-  for each day was already chosen by the UTC date, but times were labelled in
-  the server's local time zone, so on a server west of UTC an evening entry
-  showed an evening time inside the next day's log. Entries already in your
+- **Entry times in daily logs are now UTC**, written as `14:05 UTC`. Each
+  entry goes into the log for the UTC date on which it is written, but times
+  were labelled in the server's local time zone, so on a server west of UTC an
+  evening entry showed an evening time inside the next day's log. (A
+  collected event keeps its own time in the label, so one that arrives after
+  midnight UTC shows its earlier time in the new day's log.) Entries already in your
   logs are unchanged, and the entity compiler, `memory_compact` and
   `memory_stats` read both forms.
 
@@ -143,8 +149,8 @@ Fixes from a full review of 0.2.0.
   owner-only from the first byte, and never over an existing key. Two
   processes starting together could each write a key of their own, leaving
   whatever the first had encrypted unreadable. A corrupt or truncated key file
-  is now reported by name at startup, not as a confusing "Invalid key length"
-  at the first decryption.
+  is now reported by name when the collector starts, not as a confusing
+  "Invalid key length" at the first decryption.
 - **Docker image:** the runtime image no longer ships the development
   toolchain (TypeScript, Vitest, ESLint and their dependencies). The service
   user no longer owns the application code, so a compromised process cannot

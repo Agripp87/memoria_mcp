@@ -100,9 +100,12 @@ describe("installing optional dependencies", () => {
     expect(npmInstallCommand(["x"], "win32", "C:\\node\\node.exe", () => false)).toBeNull();
   });
 
-  it("the real Node on this machine has an npm CLI beside it", () => {
+  it("finds a usable npm for the Node running this test", () => {
+    // Every supported layout resolves to npm's CLI script; one this code does
+    // not know falls back to plain `npm` on POSIX, which is still usable.
     const cmd = npmInstallCommand(["x"]);
-    expect(cmd?.file).toBe(process.execPath);
+    expect(cmd).not.toBeNull();
+    if (process.platform === "win32") expect(cmd!.file).toBe(process.execPath);
   });
 
   it("refuses an invalid name without running npm", async () => {
@@ -130,5 +133,22 @@ describe("SourceRegistry sees on-demand installs", () => {
     fs.writeFileSync(path.join(modules, "package.json"), "{}");
     fakeInstall(modules, "googleapis", "module.exports = { google: {} };");
     expect(gmail()?.installed).toBe(true);
+  });
+});
+
+describe("adapter-modules resolution stays inside its own node_modules (2026-09 re-review)", () => {
+  it("ignores a package in an ancestor node_modules, such as the Memoria directory's root", async () => {
+    // Node resolution walks up from adapter-modules into the Memoria
+    // directory, which is user data and often git-synced; the old installer
+    // also left a node_modules at its root. Nothing up there may load.
+    fakeInstall(ROOT, "memoria-planted-dep", "module.exports = { planted: true };");
+    expect(isDependencyAvailable("memoria-planted-dep")).toBe(false);
+    await expect(importDependency("memoria-planted-dep")).rejects.toThrow(/not installed/);
+
+    fakeInstall(MODULES, "memoria-planted-dep", "module.exports = { planted: false };");
+    expect(isDependencyAvailable("memoria-planted-dep")).toBe(true);
+    expect((await importDependency<{ planted: boolean }>("memoria-planted-dep")).planted).toBe(
+      false,
+    );
   });
 });

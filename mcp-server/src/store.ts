@@ -102,6 +102,8 @@ export function selectEvenSample(
 // A word, in any script: letters, combining marks, digits, underscore.
 const FTS_TERM_RE = /[\p{L}\p{M}\p{N}_]+/gu;
 const FTS_MAX_TERMS = 32;
+const FTS_WORD_CHAR_RE = /[\p{L}\p{M}\p{N}_]/u;
+const FTS_TRAILING_WORD_RE = /[\p{L}\p{M}\p{N}_]+$/u;
 
 /**
  * Turn free text into a safe FTS5 MATCH expression: each word becomes a
@@ -118,6 +120,18 @@ const FTS_MAX_TERMS = 32;
  * also folds diacritics) splits each quoted term exactly as it split the
  * indexed text.
  */
+/**
+ * The first `max` characters of `text`, minus a word the cut went through. A
+ * truncated last term ("Müll" of "Müller") matches nothing, and because the
+ * terms are ANDed, one such term emptied the whole keyword pre-filter behind
+ * memory_write's duplicate check for any text longer than the cut.
+ */
+export function headWithoutCutWord(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const head = text.slice(0, max);
+  return FTS_WORD_CHAR_RE.test(text.charAt(max)) ? head.replace(FTS_TRAILING_WORD_RE, "") : head;
+}
+
 export function toFtsQuery(text: string, maxTerms = FTS_MAX_TERMS): string {
   const terms = text.match(FTS_TERM_RE) ?? [];
   return terms
@@ -965,7 +979,7 @@ export class MemoryStore {
     const candidateIds = new Set<number>();
     if (this.hasFts5()) {
       try {
-        const ftsQuery = toFtsQuery(text.slice(0, 200));
+        const ftsQuery = toFtsQuery(headWithoutCutWord(text, 200));
         if (ftsQuery) {
           const ftsRows = this.db
             .prepare(`SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? LIMIT ?`)

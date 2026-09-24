@@ -36,8 +36,17 @@ const requireFromPackage = createRequire(import.meta.url);
 
 function resolveInModulesDir(name: string): string | null {
   if (!modulesDir) return null;
+  // By absolute path, never by bare name. Bare-name resolution walks UP from
+  // here: <data>/node_modules, then the Memoria directory's own node_modules,
+  // then every ancestor. The Memoria directory is user data, often
+  // git-synced, and the old installer left a node_modules at its root, so a
+  // module found up there would run code nobody installed here. Node also
+  // caches a bare-name hit, so after one lookup had landed up there, a real
+  // install here still read as missing until a restart.
+  const pkgDir = path.join(modulesDir, "node_modules", name);
+  if (!fs.existsSync(path.join(pkgDir, "package.json"))) return null;
   try {
-    return createRequire(path.join(modulesDir, "package.json")).resolve(name);
+    return requireFromPackage.resolve(pkgDir);
   } catch {
     return null;
   }
@@ -91,6 +100,10 @@ export function npmCliCandidates(nodePath: string): string[] {
   return [
     path.join(dir, "node_modules", "npm", "bin", "npm-cli.js"),
     path.join(dir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    // Homebrew keeps npm inside the formula's libexec.
+    path.join(dir, "..", "libexec", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    // Debian and Ubuntu's packaged npm.
+    path.join(dir, "..", "share", "nodejs", "npm", "bin", "npm-cli.js"),
   ];
 }
 

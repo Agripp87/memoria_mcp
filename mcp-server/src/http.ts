@@ -938,9 +938,13 @@ app.post("/ingest", writeLimiter, authenticate, async (req, res) => {
     // An unparsable timestamp becomes "now", as custom sources already do,
     // rather than an event that fails every ingest attempt and is
     // dead-lettered while the caller is told it was accepted.
+    // Years outside 1970–9999 are treated the same way: epoch microseconds
+    // sent as milliseconds land around year 56,000, which is no one's intent.
     const normalizeTimestamp = (v: unknown): string => {
       const d = new Date(typeof v === "string" || typeof v === "number" ? v : NaN);
-      return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+      const year = d.getUTCFullYear();
+      const plausible = !Number.isNaN(d.getTime()) && year >= 1970 && year <= 9999;
+      return (plausible ? d : new Date()).toISOString();
     };
     const normalized = events.map((e: any) => ({
       id: String(e.id),

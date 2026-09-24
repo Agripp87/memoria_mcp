@@ -15,7 +15,11 @@ export function utcTimeLabel(d: Date = new Date()): string {
   // failing the whole entry, and a placeholder like "??:??" would hide the
   // entry from every heading parser.
   const t = Number.isNaN(d.getTime()) ? new Date() : d;
-  return `${t.toISOString().slice(11, 16)} UTC`;
+  // From the UTC fields, not toISOString(): past year 9999 that becomes
+  // "+056702-05-12T08:…", and a fixed slice of it read "12T08".
+  const hh = String(t.getUTCHours()).padStart(2, "0");
+  const mm = String(t.getUTCMinutes()).padStart(2, "0");
+  return `${hh}:${mm} UTC`;
 }
 
 /**

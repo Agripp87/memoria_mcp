@@ -224,3 +224,13 @@ describe("writeFileAtomic onto a directory (2026-09 re-review)", () => {
     expect(leftovers()).toEqual([]);
   });
 });
+
+describe("bumpFileImportance with empty frontmatter (2026-09 re-review, round 3)", () => {
+  it("leaves a body `importance:` line alone", () => {
+    const f = path.join(DIR, "empty-fm.md");
+    const text = "---\n---\n\nimportance: 5\n\n---\n";
+    fs.writeFileSync(f, text);
+    bumpFileImportance(f, 8);
+    expect(fs.readFileSync(f, "utf-8")).toBe(text);
+  });
+});

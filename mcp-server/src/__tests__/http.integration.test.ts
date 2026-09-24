@@ -610,3 +610,33 @@ describe("entry-point detection (2026-09 review, H1)", () => {
     30_000,
   );
 });
+
+describe("/ingest timestamps (2026-09 re-review)", () => {
+  it("writes events with unparsable or absurd timestamps, labelled at ingest time", async () => {
+    const r = await request(app)
+      .post("/ingest")
+      .set(auth)
+      .send({
+        events: [
+          {
+            id: "bad-ts-1",
+            source: "http-test",
+            content: "An ingested event whose timestamp is day-first and unparsable by JS.",
+            timestamp: "24/09/2026",
+          },
+          {
+            id: "far-ts-1",
+            source: "http-test",
+            content: "A second event, sent with epoch microseconds where milliseconds belong.",
+            timestamp: 1727186400000000,
+          },
+        ],
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.failed).toBe(0);
+    expect(r.body.written).toBe(2);
+    const today = new Date().toISOString().slice(0, 10);
+    const log = fs.readFileSync(path.join(ROOT, "memories", "daily", `${today}.md`), "utf-8");
+    expect(log.match(/## \d{2}:\d{2} UTC — http-test/g)).toHaveLength(2);
+  });
+});

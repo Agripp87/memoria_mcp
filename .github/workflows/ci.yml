@@ -128,18 +128,20 @@ jobs:
               if (v.length !== 384) throw new Error("unexpected dimension " + v.length);
               console.log("MiniLM loads offline in the runtime image");
             '
-      # Enabling an email or Google source installs its dependency at runtime,
-      # as the runtime user. Run that exact path with a tiny package: it caught
-      # a home-less user whose npm could not create its cache.
+      # Enabling the email source installs imapflow at runtime, as the runtime
+      # user. Run that exact path with the real package: it caught a home-less
+      # user whose npm could not create its cache, and it checks the named
+      # export the adapter destructures survives the import.
       - name: On-demand adapter install works in the image
         run: |
           docker run --rm --entrypoint node memoria:ci --input-type=module -e '
             const deps = await import("./dist/collector/deps.js");
             deps.setAdapterModulesDir("/data/memoria/data/adapter-modules");
-            const r = await deps.installDependencies(["is-number"]);
-            if (!r.success) throw new Error(r.message);
-            const m = await deps.importDependency("is-number");
-            if ((m.default ?? m)(5) !== true) throw new Error("installed module did not load");
+            const r = await deps.installDependencies(["imapflow"]);
+            // "Installed", not "already installed": the step must run npm.
+            if (!r.success || !r.message.startsWith("Installed")) throw new Error(r.message);
+            const { ImapFlow } = await deps.importDependency("imapflow");
+            if (typeof ImapFlow !== "function") throw new Error("ImapFlow export missing");
             console.log("adapter install + import OK:", r.message);
           '
       # Building proves it compiles; running proves the runtime stage is not

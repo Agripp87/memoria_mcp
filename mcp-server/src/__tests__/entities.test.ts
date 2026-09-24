@@ -138,3 +138,10 @@ describe("utcTimeLabel (2026-09 re-review)", () => {
     expect(utcTimeLabel(new Date("2026-09-24T14:05:59Z"))).toBe("14:05 UTC");
   });
 });
+
+describe("utcTimeLabel beyond year 9999 (2026-09 re-review, round 3)", () => {
+  it("still yields HH:MM, not a slice of an expanded ISO year", async () => {
+    const { utcTimeLabel } = await import("../daily-format.js");
+    expect(utcTimeLabel(new Date(1727186400000000))).toMatch(/^\d{2}:\d{2} UTC$/);
+  });
+});

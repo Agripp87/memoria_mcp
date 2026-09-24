@@ -499,11 +499,13 @@ export class IngestionPipeline {
  * Other writers append to this file concurrently, so it must never be
  * rewritten from a stale read — that dropped any entry appended in between.
  * When the new value has as many digits as the old (every bump except one to
- * 10), the digits are overwritten in place: appends land at the end of the
- * file and cannot be touched. A bump that changes the length replaces the
- * file atomically instead, and only if its size is unchanged since it was
- * read; otherwise it re-reads and tries again. (A writer appending in the
- * instant between that size check and the rename is the one residual window.)
+ * 10), the digits are overwritten in place, after re-reading them through the
+ * same open file to confirm they are still there: appends land at the end of
+ * the file and cannot be touched, and if another process rewrote the header
+ * meanwhile, the bump starts over. A bump that changes the length (to 10)
+ * replaces the whole file atomically instead, and only if its size is
+ * unchanged since it was read; a writer appending in the instant between that
+ * size check and the rename is the residual window.
  *
  * The file is handled as bytes, never decoded and re-encoded. It is searched
  * through a latin1 view, where each character is exactly one byte, so a match
@@ -516,8 +518,10 @@ export function bumpFileImportance(filePath: string, eventImportance: number): v
     for (let attempt = 0; attempt < 3; attempt++) {
       const bytes = fs.readFileSync(filePath);
       const text = bytes.toString("latin1");
-      // Only inside the frontmatter block: a lazy match across the whole file
-      // found an `importance:` line in the body when the frontmatter had none.
+      // Only inside the frontmatter block (which may be empty): matching
+      // across the whole file found an `importance:` line in the body when the
+      // frontmatter had none.
+      if (/^---\n---(?:\n|$)/.test(text)) return; // empty frontmatter
       const fm = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text);
       if (!fm) return;
       const imp = /(?:^|\n)importance:[ \t]*(\d+)/.exec(fm[1]);
@@ -531,6 +535,14 @@ export function bumpFileImportance(filePath: string, eventImportance: number): v
       if (next.length === imp[1].length) {
         const fd = fs.openSync(filePath, "r+");
         try {
+          // Compare, then write, on the one open file: the old digits, and no
+          // further digit after them, must still be at this offset.
+          const seen = Buffer.alloc(imp[1].length + 1);
+          const n = fs.readSync(fd, seen, 0, seen.length, start);
+          const same =
+            seen.subarray(0, imp[1].length).toString("latin1") === imp[1] &&
+            (n === imp[1].length || !/\d/.test(String.fromCharCode(seen[imp[1].length])));
+          if (!same) continue;
           fs.writeSync(fd, next, start, "latin1");
         } finally {
           fs.closeSync(fd);
