@@ -19,6 +19,7 @@ import { execFileSync } from "node:child_process";
 import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
 import { estimateImportance, classifyPrivacy } from "./base.js";
 import { contentHash } from "../crypto.js";
+import { normalizeTimestamp } from "../../daily-format.js";
 
 export interface CustomSourceDefinition {
   /** Unique ID for this custom source */
@@ -358,9 +359,7 @@ export class CustomAdapter implements SourceAdapter {
 
     let timestamp: string;
     if (fm.timestamp) {
-      const raw = this.getNestedValue(item, fm.timestamp);
-      const parsed = new Date(raw);
-      timestamp = isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+      timestamp = normalizeTimestamp(this.getNestedValue(item, fm.timestamp));
     } else {
       timestamp = new Date().toISOString();
     }

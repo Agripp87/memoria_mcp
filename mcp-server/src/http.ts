@@ -27,6 +27,7 @@ import rateLimit from "express-rate-limit";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
+import { normalizeTimestamp } from "./daily-format.js";
 import { MemoryStore } from "./store.js";
 import {
   DB_PATH,
@@ -899,20 +900,7 @@ app.get("/health", (_req, res) => {
 // Direct HTTP endpoint for external sub-memory collectors to push events
 // (e.g., a mobile companion app or remote collector)
 
-/**
- * An event timestamp as ISO 8601, or `now` when it cannot be used. An
- * unparsable value becomes "now", as custom sources already do, rather than an
- * event that fails every ingest attempt and is dead-lettered while the caller
- * is told it was accepted. Years outside 1970–9999 are treated the same way:
- * epoch microseconds sent as milliseconds land around year 56,000, which is
- * no one's intent.
- */
-export function normalizeTimestamp(v: unknown, now: Date = new Date()): string {
-  const d = new Date(typeof v === "string" || typeof v === "number" ? v : NaN);
-  const year = d.getUTCFullYear();
-  const plausible = !Number.isNaN(d.getTime()) && year >= 1970 && year <= 9999;
-  return (plausible ? d : now).toISOString();
-}
+export { normalizeTimestamp };
 
 app.post("/ingest", writeLimiter, authenticate, async (req, res) => {
   const events = req.body?.events;
