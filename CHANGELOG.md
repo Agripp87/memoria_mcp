@@ -11,7 +11,7 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
-Nothing yet.
+- Custom collector sources now normalize implausible timestamps consistently with HTTP ingest.
 
 ## [0.2.1] — 2026-09-24
 
