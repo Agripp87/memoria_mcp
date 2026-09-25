@@ -30,6 +30,21 @@ afterEach(() => {
   } catch {}
 });
 
+describe("buildEntityPages — journal mood headings", () => {
+  it("parses journal entries with a mood suffix on the heading", () => {
+    writeDaily(
+      "2026-06-01",
+      `## 14:05 UTC — Journal (good)\n\nFelt productive today.\n\n*importance: 5 | privacy: send*\n` +
+        entry("14:10 UTC", "calendar", "standup"),
+    );
+    const res = buildEntityPages(MEM, { minEvents: 1 });
+    expect(res.written).toContain("entities/journal.md");
+    const page = fs.readFileSync(path.join(MEM, "entities/journal.md"), "utf-8");
+    // Mood headings must count toward the Journal source (previously skipped entirely).
+    expect(page).toContain("**1** events");
+  });
+});
+
 describe("buildEntityPages — entry time labels (2026-09 review, L9)", () => {
   it("parses UTC labels and legacy AM/PM labels alike", () => {
     // New writers label in UTC; older logs hold server-local "10:00 AM".
