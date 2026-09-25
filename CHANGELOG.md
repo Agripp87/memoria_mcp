@@ -11,7 +11,13 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `server.json`, so Memoria can be published to the
+  [official MCP registry](https://registry.modelcontextprotocol.io) under the
+  `io.github.Agripp87/memoria-mcp` name, and `mcpName` in
+  `mcp-server/package.json`, which is what the registry checks to prove the npm
+  package owns that name.
 
 ## [0.2.1] — 2026-09-24
 
