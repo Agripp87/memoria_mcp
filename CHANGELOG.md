@@ -21,6 +21,9 @@ existing store gets a migration note here.
   only system labels such as `INBOX` did.
 - Custom collector sources now normalize implausible timestamps (unparsable,
   or epoch microseconds sent as milliseconds) as HTTP ingest does.
+- Journal entries saved with a mood (`## … — Journal (good)`) were skipped
+  by `memory_stats`, `memory_compact` and the entity pages; they are
+  parsed now.
 
 ## [0.3.1] — 2026-10-31
 
