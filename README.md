@@ -4,6 +4,10 @@
 
 Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Code, claude.ai (Chat / CoWork) and any other MCP client a shared long-term memory. Memories are Markdown files with YAML frontmatter in a directory you control; a derived SQLite + FTS5 index provides hybrid semantic + keyword search; a set of agentic tools (reflect, lint, compact, compile) keeps the store healthy; and an optional collector daemon feeds in events from your own tools. It runs as a stdio server for Claude Code and as an OAuth 2.1 HTTP server for remote clients.
 
+![The Memoria dashboard's wiki view: a memory rendered from Markdown, with its details, related memories and backlinks](docs/images/dashboard-wiki.png)
+
+<sub>The dashboard's wiki view, showing the built-in demo data (`npm run demo`).</sub>
+
 > **Status: early public release.** The server has run as the maintainer's daily driver since spring 2026 (hosted on Cloud Run, two adversarial security reviews and a full code review, a test suite CI runs on Ubuntu and Windows). It installs as a Claude Code plugin or from npm as [`@agrippa87/memoria-mcp`](https://www.npmjs.com/package/@agrippa87/memoria-mcp) — see [Roadmap](#roadmap). The sub-memory **collector** (iMessage / IMAP / Google ingestion) ships but should be treated as **experimental**; read [SECURITY.md](SECURITY.md) before enabling sources.
 
 **Why Memoria instead of another memory layer?**
