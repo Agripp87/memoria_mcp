@@ -19,6 +19,8 @@ existing store gets a migration note here.
   labels. Label names (`Work`) are resolved to Gmail's label ids
   (`Label_12`) once per server start, so user labels match too; before,
   only system labels such as `INBOX` did.
+- Custom collector sources now normalize implausible timestamps (unparsable,
+  or epoch microseconds sent as milliseconds) as HTTP ingest does.
 
 ## [0.3.1] — 2026-10-31
 
