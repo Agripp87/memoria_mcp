@@ -163,6 +163,8 @@ npm run demo
 
 ### Register with Claude Code (manual install)
 
+Other MCP clients (e.g. **Cursor**) use the same stdio command and `MEMORIA_DIR` env var; see [docs/clients.md](docs/clients.md) for tested snippets.
+
 ```bash
 claude mcp add memoria -s user -- node /absolute/path/to/memoria_mcp/mcp-server/scripts/mcp-start.mjs
 ```
@@ -181,7 +183,7 @@ or add to `~/.claude.json` / your project's `.claude/settings.local.json`:
 }
 ```
 
-The store defaults to `~/.memoria` (`MEMORIA_DIR` overrides it). The first `memory_write` creates the directory layout. `OPENAI_API_KEY` in `env` switches to OpenAI embeddings.
+The store defaults to `~/.memoria` (`MEMORIA_DIR` overrides it). The first `memory_write` creates the directory layout. Set `MEMORIA_EMBEDDINGS=openai` (and `OPENAI_API_KEY` in `env`) to use OpenAI embeddings; `OPENAI_API_KEY` alone does not enable remote embeddings.
 
 > **Why `scripts/mcp-start.mjs` and not `dist/index.js`:** the wrapper runs
 > `tsc` before serving (compiler output redirected to stderr — stdout is the
