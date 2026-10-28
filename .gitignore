@@ -38,3 +38,7 @@ memories/
 # Python build artifacts (pypi/)
 pypi/dist/
 pypi/*.egg-info/
+
+# DevRel / marketing agent working drafts (see devrel/README.md) — unpublished,
+# may hold campaign plans; never committed.
+devrel/drafts/
