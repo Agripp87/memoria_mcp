@@ -54,3 +54,23 @@ export function collectorDailyHeader(date: string, importance = 5): string {
  * that parsed then still parses.
  */
 export const TIME_LABEL_SRC = String.raw`[\d:APM ]+(?:UTC)?`;
+
+/** Journal mood values in entry headings: `## … — Journal (good)`. */
+export const JOURNAL_MOOD_SRC = String.raw`(?:great|good|neutral|tired|stressed)`;
+
+/** Optional mood suffix immediately after the source name on a heading line. */
+export const ENTRY_MOOD_SUFFIX_SRC = String.raw`(?:\s+\(${JOURNAL_MOOD_SRC}\))?`;
+
+/** Optional italic note after the source, e.g. `*(summarized)*`. */
+export const ENTRY_NOTE_SUFFIX_SRC = String.raw`(?:\s*\*\([^)]+\)\*)?`;
+
+/**
+ * Regex source for a full daily-log entry block. Captures: time label, source
+ * name, body (through the next heading or EOF). Shared by entities and tools.
+ */
+export const DAILY_ENTRY_BLOCK_SRC = String.raw`## (${TIME_LABEL_SRC}) — ([\w-]+)${ENTRY_MOOD_SUFFIX_SRC}${ENTRY_NOTE_SUFFIX_SRC}\s*\n([\s\S]*?)(?=\n## |$)`;
+
+/**
+ * Regex source for an entry heading line (multiline). Captures the source name.
+ */
+export const DAILY_ENTRY_HEADING_SRC = String.raw`^## ${TIME_LABEL_SRC} — ([\w-]+)${ENTRY_MOOD_SUFFIX_SRC}`;
