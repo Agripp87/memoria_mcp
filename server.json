@@ -3,7 +3,7 @@
   "name": "io.github.Agripp87/memoria-mcp",
   "title": "Memoria",
   "description": "Persistent, plain-text memory for agents: markdown you own, hybrid search, self-maintenance.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "repository": {
     "url": "https://github.com/Agripp87/memoria_mcp",
     "source": "github",
@@ -15,7 +15,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@agrippa87/memoria-mcp",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
@@ -29,7 +29,7 @@
         },
         {
           "name": "MEMORIA_EMBEDDINGS",
-          "description": "Embedding provider: auto (OpenAI when keyed, else local MiniLM, else hash), openai, minilm or hash.",
+          "description": "Embedding provider: auto (local MiniLM if installed, else hash; never remote), openai (explicit opt-in: sends content to OpenAI), minilm or hash.",
           "default": "auto",
           "choices": ["auto", "openai", "minilm", "hash"]
         }
@@ -39,7 +39,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@agrippa87/memoria-mcp",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "runtimeHint": "npx",
       "runtimeArguments": [
         {
@@ -75,8 +75,7 @@
         },
         {
           "name": "MEMORIA_PUBLIC_URL",
-          "description": "External URL of this server. Pins the OAuth discovery metadata so it is never derived from the Host header. Required when exposed.",
-          "default": "http://localhost:3100"
+          "description": "External URL of this server. Pins the OAuth discovery metadata so it is never derived from the Host header. Required when exposed."
         },
         {
           "name": "MEMORIA_DIR",
