@@ -9,4 +9,3 @@ data
 # baked into the image. Keep them out of the build context entirely.
 memories
 reports
-devrel
