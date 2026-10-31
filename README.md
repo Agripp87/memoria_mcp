@@ -18,11 +18,14 @@ Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Co
 - **Spec-complete remote transport.** OAuth 2.1 with PKCE, client credentials, dynamic client registration and metadata discovery — works as a claude.ai custom connector out of the box.
 - **Honest about search.** Three embedding providers (local MiniLM → n-gram fallback, plus OpenAI as an explicit opt-in), three-signal scoring, and every result reports its scan coverage.
 
-## Recent updates — 0.3.0: security hardening and relevance-led search
+## Recent updates — 0.3.0 and 0.3.1: security hardening and relevance-led search
 
 A whole-repo review, and a critical re-review after it, hardened the
-server, the collector, and the sync scripts. Full details are in
-[CHANGELOG.md](CHANGELOG.md) (0.3.0) and [SECURITY.md](SECURITY.md). The
+server, the collector, and the sync scripts; 0.3.1 fixes what a second
+review of 0.3.0 found. Full details are in [CHANGELOG.md](CHANGELOG.md)
+and [SECURITY.md](SECURITY.md). In 0.3.1, custom sources need their
+consent given once more in the dashboard, and the dashboard's Sources
+tab works only in the server that opened the store first. The 0.3.0
 changes most likely to affect you:
 
 - **Search ranks by relevance first.** Default weights are now

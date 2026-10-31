@@ -3,7 +3,7 @@
   "name": "io.github.Agripp87/memoria-mcp",
   "title": "Memoria",
   "description": "Persistent, plain-text memory for agents: markdown you own, hybrid search, self-maintenance.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "repository": {
     "url": "https://github.com/Agripp87/memoria_mcp",
     "source": "github",
@@ -15,7 +15,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@agrippa87/memoria-mcp",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
@@ -39,7 +39,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@agrippa87/memoria-mcp",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "runtimeHint": "npx",
       "runtimeArguments": [
         {

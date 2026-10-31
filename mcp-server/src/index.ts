@@ -24,7 +24,7 @@ const store = new MemoryStore(DB_PATH, { shared: true });
 
 const server = new McpServer({
   name: "memoria",
-  version: "0.3.0",
+  version: "0.3.1",
   description: SERVER_DESCRIPTION,
 });
 
