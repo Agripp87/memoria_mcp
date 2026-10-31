@@ -15,6 +15,14 @@
 #                            (there may be none: the session may be over): one
 #                            background push is scheduled for when the
 #                            interval ends.
+#   MEMORIA_SYNC_MIRROR_PUSH set to `true` to also run the mirror's `push` after
+#                            the git push. Off by default: a mirror push copies
+#                            this device's files over the bucket, which drops
+#                            whatever the hosted server wrote there since the
+#                            last pull (see scripts/sync/README.md).
+#   MEMORIA_SYNC_LOCK_WAIT_S seconds to wait for the store's sync lock while a
+#                            pull or another push holds it (default 20). If it
+#                            stays held, the push is retried in the background.
 
 set -uo pipefail
 
@@ -27,7 +35,7 @@ STAMP="$STORE/.last-sync"
 PENDING="$STORE/.sync-push-pending"
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
-trap 'echo "{\"continue\": true}"' EXIT
+trap 'release_sync_lock; echo "{\"continue\": true}"' EXIT
 
 log() {
   mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null
@@ -66,12 +74,68 @@ schedule_deferred_push() {
   echo "$! $(( $(date +%s) + $1 + 120 ))" > "$PENDING" 2>/dev/null
 }
 
+# One lock per store, shared with memoria-sync-pull.sh, so this script can
+# never commit in the middle of the pull's merge (and the reverse). A directory,
+# because mkdir is atomic everywhere and macOS has no flock binary. It holds
+# the holder's pid: a lock whose process is gone, or that is over ten
+# minutes old (a reused pid), is stale and is taken over.
+SYNC_LOCK=""
+acquire_sync_lock() { # <seconds to wait>
+  local lock holder waited=0
+  lock="$(git rev-parse --git-path memoria-sync.lock 2>/dev/null)" || return 1
+  [ -n "$lock" ] || return 1
+  while ! mkdir "$lock" 2>/dev/null; do
+    holder=""
+    read -r holder < "$lock/pid" 2>/dev/null || true
+    if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } \
+      || [ -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ] \
+      || { [ -z "$holder" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
+      log "removing a stale sync lock (holder ${holder:-unknown} is gone)"
+      rm -rf "$lock" 2>/dev/null
+      continue
+    fi
+    [ "$waited" -ge "$1" ] && return 1
+    sleep 1
+    waited=$((waited + 1))
+  done
+  echo "$$" > "$lock/pid"
+  SYNC_LOCK="$lock"
+}
+release_sync_lock() {
+  [ -n "$SYNC_LOCK" ] || return 0
+  [ "$(cat "$SYNC_LOCK/pid" 2>/dev/null)" = "$$" ] && rm -rf "$SYNC_LOCK" 2>/dev/null
+  SYNC_LOCK=""
+}
+
+# A merge, cherry-pick, revert or rebase is in progress, or the index still
+# has unmerged paths. Nothing may be committed then: `git add` would mark the
+# conflicted files resolved with their markers in place.
+git_busy() {
+  local r
+  for r in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD REBASE_HEAD; do
+    git rev-parse -q --verify "$r" >/dev/null 2>&1 && return 0
+  done
+  [ -d "$(git rev-parse --git-path rebase-merge 2>/dev/null)" ] && return 0
+  [ -d "$(git rev-parse --git-path rebase-apply 2>/dev/null)" ] && return 0
+  [ -n "$(git ls-files -u 2>/dev/null)" ]
+}
+
 if [ ! -d "$STORE/.git" ]; then
   log "no git repo at $STORE — nothing to sync (see scripts/sync/README.md)"
   exit 0
 fi
 
 cd "$STORE" || { log "cannot cd to $STORE"; exit 0; }
+
+if ! acquire_sync_lock "${MEMORIA_SYNC_LOCK_WAIT_S:-20}"; then
+  schedule_deferred_push 60
+  log "another sync holds the lock in $STORE — push retried in 60s"
+  exit 0
+fi
+if git_busy; then
+  log "merge/rebase in progress in $STORE — not committing or pushing; finish it (git commit, or git merge --abort), then re-run"
+  exit 0
+fi
 
 BRANCH="${MEMORIA_SYNC_BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null)}"
 if [ -z "$BRANCH" ] || [ "$BRANCH" = "HEAD" ]; then
@@ -121,10 +185,16 @@ fi
 #    hook (review M2/H-01): the default path is inside the synced store, so
 #    executing it by default would let anyone who can land a file in the
 #    store run code in your shell.
+#    And a second opt-in for the push itself. The mirror copies this
+#    device's files over the bucket's; it does not merge them, so every
+#    entry the hosted server wrote since the last pull was overwritten and
+#    lost, on every turn. Without the push, the bucket keeps its own writes
+#    and the pull takes them when they only extend the local copy.
 if [ "${MEMORIA_SYNC_ALLOW_STORE_MIRROR:-}" != "true" ] && [ -x "$MIRROR" ]; then
   log "mirror at $MIRROR not run: set MEMORIA_SYNC_ALLOW_STORE_MIRROR=true to allow executing a script from the synced store"
 fi
-if [ "${MEMORIA_SYNC_ALLOW_STORE_MIRROR:-}" = "true" ] && [ -x "$MIRROR" ]; then
+if [ "${MEMORIA_SYNC_ALLOW_STORE_MIRROR:-}" = "true" ] && [ -x "$MIRROR" ] \
+  && [ "${MEMORIA_SYNC_MIRROR_PUSH:-}" = "true" ]; then
   if "$MIRROR" push "$STORE" >>"$LOG_FILE" 2>&1; then
     log "mirror push OK"
   else
