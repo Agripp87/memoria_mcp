@@ -20,7 +20,8 @@ import { runOptimize } from "./optimize.js";
 import { runLint, formatLintReport } from "./lint.js";
 import { buildEntityPages } from "./entities.js";
 import {
-  TIME_LABEL_SRC,
+  DAILY_ENTRY_BLOCK_SRC,
+  DAILY_ENTRY_HEADING_SRC,
   collectorDailyHeader,
   entryImportance,
   stripImportanceTrailer,
@@ -1216,9 +1217,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         dailyLogCount = recent.length;
         for (const f of recent) {
           const content = fs.readFileSync(path.join(dailyDir, f), "utf-8");
-          const matches = content.matchAll(
-            new RegExp(String.raw`^## ${TIME_LABEL_SRC} — ([\w-]+)`, "gm"),
-          );
+          const matches = content.matchAll(new RegExp(DAILY_ENTRY_HEADING_SRC, "gm"));
           for (const m of matches) {
             sourceCounts.set(m[1], (sourceCounts.get(m[1]) || 0) + 1);
             totalRecentEvents++;
@@ -1577,10 +1576,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         const date = path.basename(file, ".md");
 
         // Parse `## TIME — SOURCE\n\nCONTENT\n*importance: N*` blocks
-        const entryRegex = new RegExp(
-          String.raw`## (${TIME_LABEL_SRC}) — ([\w-]+)(?:\s*\*\([^)]+\)\*)?\s*\n([\s\S]*?)(?=\n## |$)`,
-          "g",
-        );
+        const entryRegex = new RegExp(DAILY_ENTRY_BLOCK_SRC, "g");
         let m: RegExpExecArray | null;
         while ((m = entryRegex.exec(content)) !== null) {
           const [, time, source, body] = m;

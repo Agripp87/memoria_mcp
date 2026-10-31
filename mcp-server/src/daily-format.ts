@@ -23,6 +23,20 @@ export function utcTimeLabel(d: Date = new Date()): string {
 }
 
 /**
+ * Return an ISO timestamp suitable for a daily log, or `now` when the input
+ * cannot be used. Years outside 1970–9999 are implausible event timestamps;
+ * epoch microseconds passed as milliseconds otherwise land around year 56,000.
+ */
+export function normalizeTimestamp(value: unknown, now: Date = new Date()): string {
+  const date = new Date(
+    typeof value === "string" || typeof value === "number" ? value : Number.NaN,
+  );
+  const year = date.getUTCFullYear();
+  const plausible = !Number.isNaN(date.getTime()) && year >= 1970 && year <= 9999;
+  return (plausible ? date : now).toISOString();
+}
+
+/**
  * Frontmatter and title for a daily log first created by the collector
  * (ingestion or fusion). High-signal first events start the file at their
  * own importance; everything else starts at 5.
@@ -89,3 +103,23 @@ export function stripImportanceTrailer(body: string): string {
   const last = all[all.length - 1];
   return body.slice(0, last.index) + body.slice(last.index! + last[0].length);
 }
+
+/** Journal mood values in entry headings: `## … — Journal (good)`. */
+export const JOURNAL_MOOD_SRC = String.raw`(?:great|good|neutral|tired|stressed)`;
+
+/** Optional mood suffix immediately after the source name on a heading line. */
+export const ENTRY_MOOD_SUFFIX_SRC = String.raw`(?:\s+\(${JOURNAL_MOOD_SRC}\))?`;
+
+/** Optional italic note after the source, e.g. `*(summarized)*`. */
+export const ENTRY_NOTE_SUFFIX_SRC = String.raw`(?:\s*\*\([^)]+\)\*)?`;
+
+/**
+ * Regex source for a full daily-log entry block. Captures: time label, source
+ * name, body (through the next heading or EOF). Shared by entities and tools.
+ */
+export const DAILY_ENTRY_BLOCK_SRC = String.raw`## (${TIME_LABEL_SRC}) — ([\w-]+)${ENTRY_MOOD_SUFFIX_SRC}${ENTRY_NOTE_SUFFIX_SRC}\s*\n([\s\S]*?)(?=\n## |$)`;
+
+/**
+ * Regex source for an entry heading line (multiline). Captures the source name.
+ */
+export const DAILY_ENTRY_HEADING_SRC = String.raw`^## ${TIME_LABEL_SRC} — ([\w-]+)${ENTRY_MOOD_SUFFIX_SRC}`;

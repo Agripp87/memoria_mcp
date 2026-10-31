@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import fs from "fs";
 import path from "path";
 import { parseFrontmatter } from "./chunker.js";
-import { TIME_LABEL_SRC, entryImportance, stripImportanceTrailer } from "./daily-format.js";
+import { DAILY_ENTRY_BLOCK_SRC, entryImportance, stripImportanceTrailer } from "./daily-format.js";
 import { writeFileAtomic } from "./atomic-fs.js";
 import { listDailyLogNames, storeSubdir } from "./daily-paths.js";
 
@@ -69,10 +69,7 @@ interface EntityAgg {
 //   ## TIME — SOURCE *(optional note)*
 //   <body...>
 //   *importance: N | privacy: ...*
-const ENTRY_RE = new RegExp(
-  String.raw`## (${TIME_LABEL_SRC}) — ([\w-]+)(?:\s*\*\([^)]+\)\*)?\s*\n([\s\S]*?)(?=\n## |$)`,
-  "g",
-);
+const ENTRY_RE = new RegExp(DAILY_ENTRY_BLOCK_SRC, "g");
 
 function slugify(s: string): string {
   return (
