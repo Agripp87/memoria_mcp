@@ -32,19 +32,16 @@ import {
   DB_PATH,
   DATA_DIR,
   MEMORIES_DIR,
-  reindexAll,
   reindexFile,
-  setupPeriodicReindex,
-  setupPeriodicOptimize,
-  setupPeriodicCompile,
+  startBackgroundIndexing,
   enqueueCompileSources,
   registerTools,
   registerCollectorTools,
   destroyCollector,
+  haltCollector,
   getCollectorPipeline,
   resumeCollectorIfConfigured,
-  setupPrimaryTakeover,
-  COLLECTOR_IN_PRIMARY,
+  collectorInPrimaryMessage,
   SERVER_DESCRIPTION,
 } from "./tools.js";
 import { createDashboardRouter } from "./dashboard.js";
@@ -295,12 +292,12 @@ interface AuthCodeEntry {
 // Shared, like the stdio server: a second server on the same store (a local
 // stdio session, a rollout without MEMORIA_LOCK_TAKEOVER) runs as a
 // secondary rather than failing; see MemoryStore.
-const store = new MemoryStore(DB_PATH, { shared: true });
+export const store = new MemoryStore(DB_PATH, { shared: true });
 
 function createServer(): McpServer {
   const server = new McpServer({
     name: "memoria",
-    version: "0.3.0",
+    version: "0.3.1",
     description: SERVER_DESCRIPTION,
   });
   registerTools(server, store);
@@ -362,15 +359,43 @@ app.use(
 // AFTER authenticate(): /mcp (memory_write content up to 100KB, JSON-escaped)
 // and /dashboard/api at 1MB, /ingest at 5MB. Everything else is small.
 const AUTHED_BODY_ROUTES = ["/mcp", "/dashboard/api", "/ingest"];
+// Case-insensitive, as Express routes are: "/MCP" reaches the /mcp handlers.
+function onAuthedRoute(req: express.Request): boolean {
+  const p = req.path.toLowerCase();
+  return AUTHED_BODY_ROUTES.some((r) => p === r || p.startsWith(`${r}/`));
+}
+
+// A server whose store lock was taken over by a newer instance (a Cloud Run
+// rollout with MEMORIA_LOCK_TAKEOVER) must not touch the store again; until
+// the platform stops it, it says so instead of serving.
+app.use((req, res, next) => {
+  if (store.fenced && onAuthedRoute(req)) {
+    res
+      .status(503)
+      .set("Retry-After", "5")
+      .json({ error: "This instance handed the store to a newer one; retry." });
+    return;
+  }
+  next();
+});
 const smallJson = express.json({ limit: "64kb" });
 app.use((req, res, next) => {
-  if (AUTHED_BODY_ROUTES.some((r) => req.path === r || req.path.startsWith(`${r}/`))) {
+  if (onAuthedRoute(req)) {
     next();
     return;
   }
   smallJson(req, res, next);
 });
-app.use(express.urlencoded({ extended: false, limit: "64kb" }));
+// Form bodies only where a form posts (login, consent, token); never on the
+// authenticated subtrees, which take JSON only.
+const formBody = express.urlencoded({ extended: false, limit: "64kb" });
+app.use((req, res, next) => {
+  if (onAuthedRoute(req)) {
+    next();
+    return;
+  }
+  formBody(req, res, next);
+});
 
 // Rate limiting: 30 requests per minute per IP
 app.use(
@@ -550,6 +575,27 @@ function getBaseUrl(req: express.Request): string {
   const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
   const host = req.headers["x-forwarded-host"] || req.headers.host || `127.0.0.1:${PORT}`;
   return `${proto}://${host}`;
+}
+
+/**
+ * Whether a browser request comes from this server's own pages. The origins
+ * accepted are the configured public URL and the host the browser actually
+ * used (an operator may reach the server under a second name). Requests
+ * without Origin or Sec-Fetch-Site (curl, scripts, older browsers on
+ * same-origin GETs) pass; callers that need more add a non-simple header
+ * requirement on top.
+ */
+function isSameOriginRequest(req: express.Request): boolean {
+  const site = req.headers["sec-fetch-site"];
+  if (site !== undefined && site !== "same-origin" && site !== "none") return false;
+  const origin = req.headers.origin;
+  if (origin === undefined) return true;
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  const sameOrigins = new Set([
+    new URL(getBaseUrl(req)).origin,
+    req.headers.host ? `${proto}://${req.headers.host}` : "",
+  ]);
+  return sameOrigins.has(origin);
 }
 
 // ─── OAuth / MCP metadata endpoints ────────────────────────
@@ -781,15 +827,7 @@ app.post("/authorize", (req, res) => {
     res.status(405).json({ error: "invalid_request" });
     return;
   }
-  // The origin the browser is on: the configured public URL, or the host it
-  // actually used (an operator may reach the server under a second name).
-  const origin = req.headers.origin;
-  const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
-  const sameOrigins = new Set([
-    new URL(getBaseUrl(req)).origin,
-    req.headers.host ? `${proto}://${req.headers.host}` : "",
-  ]);
-  if (origin !== undefined && !sameOrigins.has(origin)) {
+  if (!isSameOriginRequest(req)) {
     res.status(403).json({ error: "access_denied", error_description: "cross-origin approval" });
     return;
   }
@@ -1172,8 +1210,42 @@ app.post("/dashboard/login", authLimiter, express.json(), (req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * CSRF guard for the dashboard API. A browser session is a cookie, and
+ * SameSite does not separate origins on one site: a page on another
+ * localhost port (or a sibling subdomain) is same-site, so the Strict
+ * cookie rides along on its form or no-cors POST. A state-changing request
+ * on a session must therefore come from this origin AND carry
+ * X-Memoria-Request, a header no cross-origin page can add without a CORS
+ * preflight this server never grants. Bearer callers (API key, OAuth) send
+ * no ambient credential and are unaffected.
+ */
+const DASHBOARD_REQUEST_HEADER = "x-memoria-request";
+function dashboardCsrfGuard(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+): void {
+  const safeMethod = req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS";
+  if (
+    res.locals.authKind === "session" &&
+    !safeMethod &&
+    (req.headers[DASHBOARD_REQUEST_HEADER] !== "1" || !isSameOriginRequest(req))
+  ) {
+    res.status(403).json({ error: "Cross-origin dashboard request refused" });
+    return;
+  }
+  next();
+}
+
 // gate API subtree only; its bodies are parsed after authentication
-app.use("/dashboard/api", writeLimiter, authenticate, express.json({ limit: "1mb" }));
+app.use(
+  "/dashboard/api",
+  writeLimiter,
+  authenticate,
+  dashboardCsrfGuard,
+  express.json({ limit: "1mb" }),
+);
 app.use("/dashboard", dashboardRouter); // page "/" + API "/api/*"
 
 // Root convenience redirect → the human-facing dashboard. (MCP clients use
@@ -1243,7 +1315,7 @@ app.post(
   async (req, res) => {
     if (!store.isPrimary) {
       // Ingestion goes through the collector, which only the primary runs.
-      res.status(503).json({ error: COLLECTOR_IN_PRIMARY });
+      res.status(503).json({ error: collectorInPrimaryMessage(store) });
       return;
     }
     const events = req.body?.events;
@@ -1254,6 +1326,17 @@ app.post(
 
     // Validate event shape — all three must be non-empty strings
     for (const event of events) {
+      if (!event || typeof event !== "object" || Array.isArray(event)) {
+        res.status(400).json({ error: "Each event must be an object" });
+        return;
+      }
+      if (
+        event.eventType != null &&
+        (typeof event.eventType !== "string" || !event.eventType.trim())
+      ) {
+        res.status(400).json({ error: "eventType, when given, must be a non-empty string" });
+        return;
+      }
       const id = typeof event.id === "string" ? event.id.trim() : "";
       const source = typeof event.source === "string" ? event.source.trim() : "";
       const content = typeof event.content === "string" ? event.content.trim() : "";
@@ -1284,7 +1367,7 @@ app.post(
       const normalized = events.map((e: any) => ({
         id: String(e.id),
         source: String(e.source),
-        eventType: String(e.eventType || "external"),
+        eventType: typeof e.eventType === "string" ? e.eventType.trim() : "external",
         content: String(e.content),
         timestamp: normalizeTimestamp(e.timestamp),
         meta: sanitizeIngestMeta(e.meta),
@@ -1371,29 +1454,15 @@ app.use(errorHandler);
 // ─── Start ──────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  if (store.needsReindex) {
-    process.stderr.write("Memoria: full reindex (embedding provider or index format changed)...\n");
-  }
-  // Per file: one failure is logged and skipped instead of exiting. A stop
-  // signal during a long first index stops before shutdown() closes the
-  // store under the next reindexFile. Files deleted while the server was
-  // down are dropped.
-  const indexed = await reindexAll(store, { shouldStop: () => shuttingDown });
-  if (shuttingDown) return;
-  process.stderr.write(
-    `Indexed ${indexed.files} memory files` +
-      (indexed.failed.length ? ` (${indexed.failed.length} failed, see above).\n` : ".\n"),
-  );
-
-  // fs.watch is inert on the GCS FUSE / Cloud Run mount, so sweep periodically
-  // to pick up memory files changed by `git pull` from other devices.
-  setupPeriodicReindex(store);
-  setupPeriodicOptimize(store); // no-op unless MEMORIA_AUTO_OPTIMIZE=true
-  setupPeriodicCompile(store); // no-op unless MEMORIA_AUTO_COMPILE=true
-  setupPrimaryTakeover(store); // no-op in the primary
+  // Another instance took the store over (MEMORIA_LOCK_TAKEOVER): stop
+  // collecting; the routes answer 503 from here on (see fencedGuard).
+  store.onFenced(haltCollector);
 
   // Bind to 0.0.0.0 when BIND_ALL=true (for cloud/Docker), else localhost only
   const host = process.env.BIND_ALL === "true" ? "0.0.0.0" : "127.0.0.1";
+  // Listen first: the startup sweep can re-embed the whole store (a provider
+  // change, an index upgrade), and clients and Cloud Run's startup probe
+  // should not wait for it. Search says so while it runs.
   httpServer = app.listen(PORT, host, (err?: Error) => {
     // Express 5 hands a listen failure (port in use, no permission) to this
     // callback instead of throwing. Ignoring it printed "listening" and then
@@ -1410,6 +1479,9 @@ async function main(): Promise<void> {
     process.stderr.write(`Memoria HTTP server listening on http://${host}:${PORT}/mcp\n`);
     // Resume enabled collector sources; errors are logged inside.
     void resumeCollectorIfConfigured(store);
+    void startBackgroundIndexing(store, { watch: false, shouldStop: () => shuttingDown }).catch(
+      (e) => process.stderr.write(`Memoria: startup indexing failed: ${(e as Error).message}\n`),
+    );
   });
 }
 
@@ -1445,6 +1517,9 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shuttingDown) {
     process.exit(1);
   }
+  // Taken over: no flush, no close (both write the store the new holder
+  // is using), and no normal exit, which closes SQLite handles too.
+  if (store.fenced) MemoryStore.exitWithoutCheckpoint();
   shuttingDown = true;
   process.stderr.write(`Memoria: ${signal} received, shutting down\n`);
   setTimeout(() => process.exit(1), 8_000).unref();

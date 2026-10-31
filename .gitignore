@@ -30,6 +30,8 @@ demo-store/
 
 # Build mutex for the mcp-server watch/build scripts (per-device, transient)
 mcp-server/.build.lock
+# Install mutex for the plugin's first-run dependency install (plugin-start.mjs)
+mcp-server/.install.lock
 
 # Personal memory store — never belongs in the code repo. Point MEMORIA_DIR at
 # a separate directory (or its own private git repo); see README.

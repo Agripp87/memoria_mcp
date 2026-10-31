@@ -11,6 +11,139 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-10-31
+
+Fixes from a second whole-repo review of 0.3.0 (50 verified findings). The
+memory file format is unchanged and the index is not rebuilt.
+
+**Changes you will notice:**
+
+- **Custom-source consent must be given once more.** Consent is now bound
+  to what the source runs or reads; a consent recorded by 0.3.0 does not
+  name it, so custom sources stay off until you click Enable again.
+- **Scripts that POST to `/dashboard/api` with the browser session cookie
+  must send `X-Memoria-Request: 1`** from the dashboard's own origin. The
+  page does; Bearer callers (API key, OAuth) are unaffected.
+- **Gmail skips the Promotions tab by default**, as the setting always
+  claimed (`PROMOTIONS` never matched a label id).
+- **`memory_reflect` returns at most `max_chars`** (default 50,000), newest
+  logs first.
+- **Calendar event ids changed format** (no title text); already-collected
+  events are not collected again.
+- **A source whose first enable fails is left disabled** with its settings,
+  instead of retrying the same credentials every 10 minutes.
+- **Two servers on one store must use the same embedding provider.** A
+  second one with another `MEMORIA_EMBEDDINGS` now refuses to start
+  instead of wiping the shared index.
+- **Outside Docker the default store is `~/.memoria`** (since 0.3.0). If a
+  0.2.x install kept its store in `/data/memoria`, set
+  `MEMORIA_DIR=/data/memoria`; the server now warns when it finds one.
+- **The object-storage mirror no longer pushes from the Stop hook** unless
+  `MEMORIA_SYNC_MIRROR_PUSH=true`; it overwrote hosted entries. The pull
+  takes a bucket file only when it extends the local one. Turn on bucket
+  versioning if you use the mirror.
+- The plugin reinstalls its dependencies once (it now records a completed
+  install).
+
+### Security
+
+- **Dashboard CSRF.** SameSite=Strict does not separate origins on one
+  site, so a page on another localhost port could post forms with the
+  dashboard cookie: point IMAP (and its stored password) at its own host,
+  grant consent, or append to memories. State-changing session requests
+  must now come from the dashboard's origin and carry its header; form
+  bodies are no longer parsed on `/mcp`, `/dashboard/api` or `/ingest`.
+- **Calendar titles leaked into synced logs.** The macOS Calendar event id
+  held the first 20 characters of the title, and the id is written into
+  the daily log's `ref`, also for local-only events (meeting passcodes).
+  Ids carry no text now, and a local-only event's ref is a keyed hash.
+- **Custom-source consent could land on another definition** swapped in
+  while the dialog was open, and a command could hide its tail behind a
+  line break or bidi character. Consent names the definition shown;
+  such commands are refused.
+- **A symlinked `MEMORIA_DIR` let a file watcher read `collector.key`**,
+  and a symlinked `memories/entities` let the entity compiler write
+  outside the store. Both are refused.
+- **Collected text could forge daily-log entries** for another source or
+  override an entry's importance (read by `memory_compact` and entity
+  pages). Heading and trailer lines in content are escaped, and sender,
+  location and other metadata are kept to one line.
+- **`disable` on `__proto__`** wrote `Object.prototype`, and on an unknown
+  id it reported success while the intended source kept collecting.
+- **Example deploy workflow** deployed a fork's PR when its branch was
+  named `main`, with the repository's GCP credentials. It now deploys only
+  pushes to this repository's main tip; `.gcloudignore` keeps the auth
+  action's credential file out of the build upload.
+- **docker-compose dropped `MEMORIA_AUTHORIZE_REQUIRE_APPROVAL`** (and
+  `MEMORIA_EMBEDDINGS`) from `.env`, so the approval gate was silently off.
+
+### Fixed
+
+- **Collection stalled for good on one bad email.** An unparseable `Date`
+  header threw, and since 0.3.0 that failed every poll on the same message
+  (IMAP and Gmail). The receive time is used instead, and a malformed
+  message is skipped. IMAP also downloaded every message whole
+  (`maxBytes` is not an imapflow option); it fetches 16 KB.
+- **Google Calendar never synced incrementally**: `orderBy` is refused with
+  a sync token, and the error was swallowed, so the source looked healthy
+  while collecting nothing.
+- **Store lock:** the holder is identified by its pid space and the
+  kernel's record of its start, so a clock step no longer hands a live
+  primary's lock to a second server, a hostname change no longer makes new
+  sessions wait 75 s and crash, a lock from before a reboot is reclaimed
+  at once, and a restarted container reclaims its previous run's lock
+  after one missed heartbeat. A failed read of the lock file is not
+  taken as a takeover. Under `MEMORIA_LOCK_TAKEOVER` the displaced instance
+  now stops writing (503) instead of writing the same SQLite file from two
+  hosts, and the new one waits a heartbeat before opening it.
+- **The startup re-embed ran before the MCP handshake**; after an index
+  upgrade it took longer than Claude Code waits, and the session had no
+  memory tools. Servers answer first and index in the background; search
+  says while a rebuild is unfinished.
+- **Dashboard in a secondary:** the Sources tab said "No sources
+  registered" (a bare 500). It now says which server holds the store and
+  how to proceed. Configuring a source no longer blanks its stored
+  password or Google tokens.
+- **Writes reported failure after succeeding** when indexing failed
+  (embeddings unreachable), so retries duplicated daily entries or
+  compiled `-2` copies. `memory_compile` also overwrote a file another
+  server created at the same moment; files are created exclusively.
+- **Daily jobs practically never ran**: auto-optimize and auto-compile
+  counted 24 h from each process start. The last run is kept in the store.
+  Interval settings like `5m` or `0` ran jobs every millisecond; they are
+  refused.
+- **Concurrent indexers re-dated memories** by their mtime, undoing the
+  0.3.0 recency fix.
+- Poll intervals: a change reaches a running source at once, and a stored
+  interval over a day (accepted by 0.2.x) is capped instead of becoming
+  60 s. A file watcher re-reads its file after a failed poll.
+- Buffer: undecryptable rows are no longer evicted before delivered ones,
+  and their loss is counted.
+- Search: rows with no query word got keyword credit for words found
+  inside other words; a case-only rename left the old text searchable;
+  CRLF/BOM files reported wrong line numbers.
+- `memory_lint` failed outright on a `%` in a file name; `memory_list`'s
+  tag filter threw on a scalar `tags:`; entity pages' daily-log backlinks
+  never resolved.
+- `/ingest` answered 500 for a null event or an object `eventType`.
+- Sync hooks committed conflict markers when a merge was open in the
+  store; pull and push now share a lock and leave an open merge alone.
+  The SYNC CONFLICT note goes into the UTC day's log.
+- The Python hook lost a batch of up to 200 events to one NaN, and a
+  Decimal stalled its queue.
+- The plugin's first-run install could be broken for good by two launches
+  at once.
+- Example deploy: an auto-rollback pinned traffic, so every later deploy
+  served 0%; out-of-order CI runs could deploy an older commit.
+
+### Docs
+
+- The Google setup and SECURITY.md told users to pass credentials through
+  `memory_sources`, which 0.3.0 refuses; it is done in the dashboard.
+- Removed the claims that results are "position-optimized".
+- Known Limitations: consent needs the dashboard in the primary; a stuck
+  store lock on Windows and how to clear it.
+
 ## [0.3.0] — 2026-10-28
 
 Security fixes from the 2026-10 whole-repo review and the critical
@@ -577,7 +710,8 @@ so the public history starts here.
   from the SQLite index living on a FUSE mount — are listed in the
   [README](README.md#known-limitations) rather than glossed over.
 
-[Unreleased]: https://github.com/Agripp87/memoria_mcp/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Agripp87/memoria_mcp/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Agripp87/memoria_mcp/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Agripp87/memoria_mcp/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Agripp87/memoria_mcp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Agripp87/memoria_mcp/compare/v0.1.0...v0.2.0

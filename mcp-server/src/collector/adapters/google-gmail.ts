@@ -11,7 +11,7 @@
  */
 
 import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
-import { estimateImportance, classifyPrivacy } from "./base.js";
+import { estimateImportance, classifyPrivacy, firstValidIso } from "./base.js";
 import { getGoogleAuth, extractGoogleAuthConfig } from "./google-auth.js";
 import { importDependency } from "../deps.js";
 
@@ -37,7 +37,7 @@ export class GoogleGmailAdapter implements SourceAdapter {
         google_client_secret: "",
         google_refresh_token: "",
         labels: ["INBOX"], // Gmail labels to poll
-        excludeLabels: ["SPAM", "TRASH", "PROMOTIONS"],
+        excludeLabels: ["SPAM", "TRASH", "CATEGORY_PROMOTIONS"],
         maxResults: 50,
         includeSpamTrash: false,
       },
@@ -75,11 +75,9 @@ export class GoogleGmailAdapter implements SourceAdapter {
     if (!this.gmail) return [];
 
     const labels = (this.config.settings?.labels as string[]) ?? ["INBOX"];
-    const excludeLabels = (this.config.settings?.excludeLabels as string[]) ?? [
-      "SPAM",
-      "TRASH",
-      "PROMOTIONS",
-    ];
+    const excludeLabels = normalizeExcludeLabels(
+      (this.config.settings?.excludeLabels as string[]) ?? ["SPAM", "TRASH", "CATEGORY_PROMOTIONS"],
+    );
     const maxResults = (this.config.settings?.maxResults as number) ?? 50;
     const events: RawEvent[] = [];
 
@@ -150,7 +148,9 @@ export class GoogleGmailAdapter implements SourceAdapter {
           if (!msg.message?.id) continue;
           // Skip excluded labels
           const msgLabels = msg.message.labelIds || [];
-          if (!msgLabels.some((l: string) => excludeLabels.includes(l))) ids.push(msg.message.id);
+          if (!msgLabels.some((l: string) => excludeLabels.includes(String(l).toUpperCase()))) {
+            ids.push(msg.message.id);
+          }
         }
         // Never split a record: take all of it, or stop before it so the
         // next poll starts here. A single record larger than the batch is
@@ -196,7 +196,13 @@ export class GoogleGmailAdapter implements SourceAdapter {
     const historyIdBeforeList = profile.data.historyId ? String(profile.data.historyId) : "";
 
     // Build query to exclude unwanted labels
-    const excludeQuery = excludeLabels.map((l) => `-label:${l.toLowerCase()}`).join(" ");
+    const excludeQuery = excludeLabels
+      .map((l) =>
+        l.startsWith("CATEGORY_")
+          ? `-category:${l.slice("CATEGORY_".length).toLowerCase()}`
+          : `-label:${l.toLowerCase()}`,
+      )
+      .join(" ");
     const labelQuery = labels.map((l) => `label:${l.toLowerCase()}`).join(" OR ");
     const query = `(${labelQuery}) ${excludeQuery} newer_than:1d`;
 
@@ -221,69 +227,14 @@ export class GoogleGmailAdapter implements SourceAdapter {
   // ── Fetch individual message ───────────────────────────────
 
   private async fetchMessage(messageId: string): Promise<RawEvent | null> {
+    let msg: any;
     try {
-      const msg = await this.gmail.users.messages.get({
+      msg = await this.gmail.users.messages.get({
         userId: "me",
         id: messageId,
         format: "metadata",
         metadataHeaders: ["From", "To", "Subject", "Date"],
       });
-
-      const headers = msg.data.payload?.headers || [];
-      const getHeader = (name: string): string =>
-        headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
-
-      const from = getHeader("From");
-      const to = getHeader("To");
-      const subject = getHeader("Subject") || "(no subject)";
-      const date = getHeader("Date");
-      const snippet = msg.data.snippet || "";
-      const labelIds = msg.data.labelIds || [];
-
-      const timestamp = date
-        ? new Date(date).toISOString()
-        : new Date(parseInt(msg.data.internalDate || "0")).toISOString();
-
-      // Extract sender name/address
-      const fromMatch = from.match(/^(?:"?(.+?)"?\s)?<?([^>]+)>?$/);
-      const fromName = fromMatch?.[1] || fromMatch?.[2] || from;
-      const fromAddress = fromMatch?.[2] || from;
-
-      const content = snippet ? `${subject} — ${snippet.slice(0, 300)}` : subject;
-
-      const meta: Record<string, unknown> = {
-        from: fromName,
-        fromAddress,
-        to,
-        subject,
-        labels: labelIds,
-        isAutomated: /no-?reply|automated|noreply|mailer-daemon/i.test(fromAddress),
-        isImportant: labelIds.includes("IMPORTANT"),
-        isStarred: labelIds.includes("STARRED"),
-        category: labelIds.find((l: string) => l.startsWith("CATEGORY_")) ?? null,
-      };
-
-      const importance = estimateImportance(content, meta);
-      if (importance < this.config.importanceThreshold) return null;
-
-      // Boost for Gmail importance markers
-      let adjustedImportance = importance;
-      if (meta.isImportant) adjustedImportance = Math.min(10, adjustedImportance + 1);
-      if (meta.isStarred) adjustedImportance = Math.min(10, adjustedImportance + 2);
-
-      const privacy = classifyPrivacy(content, meta);
-      if (privacy === "local-only") return null;
-
-      return {
-        id: `gmail-${messageId}`,
-        source: "google-gmail",
-        eventType: "email_received",
-        content: privacy === "summarize" ? `${subject} (from ${fromName})` : content,
-        timestamp,
-        meta,
-        importanceEstimate: adjustedImportance,
-        privacyTier: privacy,
-      };
     } catch (err: any) {
       // A message deleted since its history record was written is gone for
       // good; skip it. Anything else fails the poll so the cursor is
@@ -291,6 +242,71 @@ export class GoogleGmailAdapter implements SourceAdapter {
       if (err.code === 404) return null;
       throw new Error(`Gmail fetch failed for ${messageId}: ${err.message}`, { cause: err });
     }
+    // What the message itself holds is sender-controlled (a Date header
+    // like "... CEST" does not parse). A problem there skips this message;
+    // it used to fail every poll on it, stalling the source for good.
+    try {
+      return this.toEvent(messageId, msg);
+    } catch (err: any) {
+      process.stderr.write(`Memoria Gmail: skipped message ${messageId}: ${err.message}\n`);
+      return null;
+    }
+  }
+
+  private toEvent(messageId: string, msg: any): RawEvent | null {
+    const headers = msg.data.payload?.headers || [];
+    const getHeader = (name: string): string =>
+      headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || "";
+
+    const from = getHeader("From");
+    const to = getHeader("To");
+    const subject = getHeader("Subject") || "(no subject)";
+    const date = getHeader("Date");
+    const snippet = msg.data.snippet || "";
+    const labelIds = msg.data.labelIds || [];
+
+    const timestamp = firstValidIso(date, msg.data.internalDate);
+
+    // Extract sender name/address
+    const fromMatch = from.match(/^(?:"?(.+?)"?\s)?<?([^>]+)>?$/);
+    const fromName = fromMatch?.[1] || fromMatch?.[2] || from;
+    const fromAddress = fromMatch?.[2] || from;
+
+    const content = snippet ? `${subject} — ${snippet.slice(0, 300)}` : subject;
+
+    const meta: Record<string, unknown> = {
+      from: fromName,
+      fromAddress,
+      to,
+      subject,
+      labels: labelIds,
+      isAutomated: /no-?reply|automated|noreply|mailer-daemon/i.test(fromAddress),
+      isImportant: labelIds.includes("IMPORTANT"),
+      isStarred: labelIds.includes("STARRED"),
+      category: labelIds.find((l: string) => l.startsWith("CATEGORY_")) ?? null,
+    };
+
+    const importance = estimateImportance(content, meta);
+    if (importance < this.config.importanceThreshold) return null;
+
+    // Boost for Gmail importance markers
+    let adjustedImportance = importance;
+    if (meta.isImportant) adjustedImportance = Math.min(10, adjustedImportance + 1);
+    if (meta.isStarred) adjustedImportance = Math.min(10, adjustedImportance + 2);
+
+    const privacy = classifyPrivacy(content, meta);
+    if (privacy === "local-only") return null;
+
+    return {
+      id: `gmail-${messageId}`,
+      source: "google-gmail",
+      eventType: "email_received",
+      content: privacy === "summarize" ? `${subject} (from ${fromName})` : content,
+      timestamp,
+      meta,
+      importanceEstimate: adjustedImportance,
+      privacyTier: privacy,
+    };
   }
 
   getCheckpoint(): string {
@@ -305,4 +321,18 @@ export class GoogleGmailAdapter implements SourceAdapter {
     this.gmail = null;
     // Don't clear shared auth — other Google adapters may be using it
   }
+}
+
+/**
+ * Exclude labels as Gmail label ids, upper-cased. The inbox tabs are the
+ * system labels CATEGORY_PROMOTIONS etc.; the default was "PROMOTIONS",
+ * which no message carries, so promotional mail was collected. Configs
+ * saved with the tab names keep working.
+ */
+const CATEGORY_TABS = new Set(["PROMOTIONS", "SOCIAL", "UPDATES", "FORUMS", "PERSONAL"]);
+export function normalizeExcludeLabels(labels: unknown[]): string[] {
+  return labels
+    .map((l) => String(l).trim().toUpperCase())
+    .filter(Boolean)
+    .map((l) => (CATEGORY_TABS.has(l) ? `CATEGORY_${l}` : l));
 }

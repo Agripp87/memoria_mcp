@@ -29,6 +29,12 @@ services:
       # TLS proxy this setup expects; set 0 if clients reach the port directly,
       # or they can pick their own rate-limit bucket via X-Forwarded-For.
       - MEMORIA_TRUST_PROXY=${MEMORIA_TRUST_PROXY:-1}
+      # Compose passes a .env setting into the container only when it is
+      # listed here, so these two (documented in .env.example) were silently
+      # dropped: the /authorize approval gate stayed off and the embedding
+      # provider stayed on auto.
+      - MEMORIA_AUTHORIZE_REQUIRE_APPROVAL=${MEMORIA_AUTHORIZE_REQUIRE_APPROVAL:-false}
+      - MEMORIA_EMBEDDINGS=${MEMORIA_EMBEDDINGS:-auto}
       - BIND_ALL=true
       - DOCKER=true
       - PORT=3100

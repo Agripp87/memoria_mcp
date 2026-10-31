@@ -15,6 +15,7 @@ import Database from "better-sqlite3";
 import { acquireStoreLock, StoreInUseError } from "./store-lock.js";
 import { Chunk } from "./chunker.js";
 import { embed, embedBatch, cosineSimilarity, getDimension, getProvider } from "./embeddings.js";
+import path from "node:path";
 import crypto from "crypto";
 
 export interface StoredChunk {
@@ -175,6 +176,10 @@ export function indexVersionOutdated(stored: string | undefined, provider: strin
   return true;
 }
 
+function contentHashOf(content: string): string {
+  return crypto.createHash("sha256").update(content).digest("hex");
+}
+
 /** When a memory was indexed: the inputs for its recency date. */
 export interface IndexDates {
   /**
@@ -215,6 +220,8 @@ export class MemoryStore {
    * registry file is last-writer-wins) and scheduled maintenance.
    */
   isPrimary = true;
+  /** In a secondary: the pid of the server holding the store, when known. */
+  holderPid: number | undefined;
 
   /**
    * @param opts.shared When the store is held by another live server, open
@@ -226,23 +233,25 @@ export class MemoryStore {
    *   primary. A secondary takes over the lock when the primary exits
    *   (tryBecomePrimary).
    */
-  constructor(dbPath: string, opts: { shared?: boolean } = {}) {
+  constructor(dbPath: string, opts: { shared?: boolean; foreignWaitMs?: number } = {}) {
     this.dbPath = dbPath;
     // One process per store directory (review H3) unless shared: without
     // `shared`, fail loudly rather than race another server.
     try {
-      this.releaseLock = acquireStoreLock(dbPath);
+      this.releaseLock = acquireStoreLock(dbPath, this.lockOptions(opts.foreignWaitMs));
     } catch (err) {
       // Secondary mode is for processes on ONE host, where SQLite's locking
       // is sound. A holder on another host (two replicas on a network
       // mount) is still refused: SQLite's WAL is not safe across hosts.
       if (!opts.shared || !(err instanceof StoreInUseError) || err.foreign) throw err;
       this.isPrimary = false;
+      this.holderPid = Number.isFinite(err.holderPid) ? err.holderPid : undefined;
       this.releaseLock = () => {};
       process.stderr.write(
         `Memoria: another Memoria server` +
           (Number.isFinite(err.holderPid) ? ` (pid ${err.holderPid})` : "") +
-          ` holds this store; running as a secondary. Search, reading and writing work; ` +
+          ` holds this store (lock ${path.join(err.dir, `.${path.basename(dbPath)}.lock`)}); ` +
+          `running as a secondary. Search, reading and writing work; ` +
           `the collector and scheduled maintenance run in that server.\n`,
       );
     }
@@ -277,16 +286,62 @@ export class MemoryStore {
   needsReindex: boolean = false;
 
   /**
+   * Set when another instance took the store lock over (MEMORIA_LOCK_TAKEOVER,
+   * a Cloud Run rollout). Two hosts writing one SQLite WAL corrupt it, so a
+   * fenced store refuses every write and is never closed normally (closing
+   * checkpoints the WAL into the database file); see exitWithoutCheckpoint.
+   */
+  fenced = false;
+  private warnedProviderMismatch = false;
+  private fenceListeners: Array<() => void> = [];
+
+  /** Run `fn` once if this store is fenced (stop the collector, timers...). */
+  onFenced(fn: () => void): void {
+    this.fenceListeners.push(fn);
+  }
+
+  private lockOptions(foreignWaitMs?: number) {
+    return {
+      foreignWaitMs,
+      onLost: () => {
+        this.fenced = true;
+        this.isPrimary = false;
+        for (const fn of this.fenceListeners) {
+          try {
+            fn();
+          } catch (e) {
+            process.stderr.write(`Memoria: fence listener failed: ${(e as Error).message}\n`);
+          }
+        }
+      },
+    };
+  }
+
+  private assertWritable(): void {
+    if (this.fenced) {
+      throw new Error(
+        "This Memoria server lost the store lock to another instance and no longer writes the store.",
+      );
+    }
+  }
+
+  /**
    * A secondary tries to take the store lock (the primary may have exited).
    * Returns whether this process is now the primary.
    */
   tryBecomePrimary(): boolean {
     if (this.isPrimary) return true;
+    // A fenced server never takes the lock back: with MEMORIA_LOCK_TAKEOVER
+    // the two instances would trade it back and forth.
+    if (this.fenced) return false;
     try {
       // No waiting on another host's lock: this runs on a timer.
-      this.releaseLock = acquireStoreLock(this.dbPath, { foreignWaitMs: 0 });
+      this.releaseLock = acquireStoreLock(this.dbPath, this.lockOptions(0));
       this.isPrimary = true;
+      this.holderPid = undefined;
       process.stderr.write("Memoria: took over the store lock; this server is now the primary.\n");
+      // The previous primary may have run another embedding provider.
+      this.reconcileIndexFormat();
       return true;
     } catch (err) {
       if (err instanceof StoreInUseError) return false;
@@ -386,31 +441,75 @@ export class MemoryStore {
       // Non-fatal — keys just stay as they are
     }
 
-    // Detect embedding provider change → force reindex
+    this.reconcileIndexFormat();
+  }
+
+  /** The provider, dimension and format version the index was built with. */
+  private storedIndexFormat(): {
+    provider?: string;
+    dim?: string;
+    version?: string;
+  } {
+    const meta = (key: string) =>
+      (
+        this.db.prepare("SELECT value FROM store_meta WHERE key = ?").get(key) as
+          { value: string } | undefined
+      )?.value;
+    return {
+      provider: meta("embedding_provider"),
+      dim: meta("embedding_dimension"),
+      version: meta("index_version"),
+    };
+  }
+
+  /**
+   * Whether this process's embeddings belong in this index: it was built
+   * with the same provider and dimension. Read fresh each time, since
+   * another server on the store may have rebuilt it with its own.
+   */
+  private indexMatchesProvider(): boolean {
+    const stored = this.storedIndexFormat();
+    return (
+      stored.provider === undefined ||
+      (stored.provider === getProvider() && stored.dim === String(this.dimension))
+    );
+  }
+
+  /**
+   * Detect an embedding provider change or an outdated index format, and as
+   * the primary, clear the index for a rebuild. A secondary must not: it
+   * shares the index with a live primary, and wiping it under that server
+   * (then writing its own provider's vectors next to the primary's) left the
+   * index empty and mixed. It refuses to open instead.
+   */
+  private reconcileIndexFormat(): void {
     const currentProvider = getProvider();
     const currentDim = String(this.dimension);
-    const storedProvider = this.db
-      .prepare("SELECT value FROM store_meta WHERE key = 'embedding_provider'")
-      .get() as { value: string } | undefined;
-    const storedDim = this.db
-      .prepare("SELECT value FROM store_meta WHERE key = 'embedding_dimension'")
-      .get() as { value: string } | undefined;
-
-    const storedIndexVersion = this.db
-      .prepare("SELECT value FROM store_meta WHERE key = 'index_version'")
-      .get() as { value: string } | undefined;
-    const providerChanged =
-      storedProvider?.value !== currentProvider || storedDim?.value !== currentDim;
+    const stored = this.storedIndexFormat();
+    const providerChanged = stored.provider !== currentProvider || stored.dim !== currentDim;
     // A store that already has an index from an older version is rebuilt;
     // a brand-new one (no provider recorded yet) is not announced twice.
     const indexOutdated =
-      !!storedProvider && indexVersionOutdated(storedIndexVersion?.value, currentProvider);
+      !!stored.provider && indexVersionOutdated(stored.version, currentProvider);
+
+    if (!this.isPrimary) {
+      if (stored.provider && (providerChanged || indexOutdated)) {
+        throw new Error(
+          `This store is indexed with the ${stored.provider} embedding provider ` +
+            `(${stored.dim ?? "?"} dimensions, index v${stored.version ?? "1"}), and the Memoria ` +
+            `server holding it uses that; this one would use ${currentProvider} ` +
+            `(${currentDim}) v${INDEX_VERSION}. Set MEMORIA_EMBEDDINGS to match the running ` +
+            `server, or stop it first.`,
+        );
+      }
+      if (stored.provider) return;
+    }
 
     if (providerChanged || indexOutdated) {
       process.stderr.write(
         providerChanged
-          ? `Memoria: embedding provider changed (${storedProvider?.value ?? "none"}→${currentProvider}, dim ${storedDim?.value ?? "?"}→${currentDim}). Will reindex.\n`
-          : `Memoria: index format updated (v${storedIndexVersion?.value ?? "1"}→v${INDEX_VERSION}). Will reindex.\n`,
+          ? `Memoria: embedding provider changed (${stored.provider ?? "none"}→${currentProvider}, dim ${stored.dim ?? "?"}→${currentDim}). Will reindex.\n`
+          : `Memoria: index format updated (v${stored.version ?? "1"}→v${INDEX_VERSION}). Will reindex.\n`,
       );
       this.db.prepare("DELETE FROM chunks").run();
       // Rebuild FTS after clearing chunks
@@ -443,7 +542,7 @@ export class MemoryStore {
    * Check if a file's content has changed since last index.
    */
   hasContentChanged(file: string, content: string): boolean {
-    const hash = crypto.createHash("sha256").update(content).digest("hex");
+    const hash = contentHashOf(content);
     const stored = this.db
       .prepare("SELECT content_hash FROM file_meta WHERE file = ?")
       .get(file) as { content_hash: string | null } | undefined;
@@ -461,7 +560,7 @@ export class MemoryStore {
     updatedAt: string,
     lastAccessed: string,
   ): void {
-    const hash = crypto.createHash("sha256").update(content).digest("hex");
+    const hash = contentHashOf(content);
     // last_accessed is computed by indexDatesFor (never "now" for merely
     // being indexed); access_count is left as it is.
     this.db
@@ -526,6 +625,7 @@ export class MemoryStore {
    * deleted (e.g. to redact it) searchable indefinitely.
    */
   clearFile(file: string, content: string, importance: number = 5): void {
+    this.assertWritable();
     const { updatedAt, lastAccessed } = this.indexDatesFor(file, undefined);
     this.db
       .transaction(() => {
@@ -546,6 +646,7 @@ export class MemoryStore {
     dates?: IndexDates,
   ): Promise<void> {
     if (chunks.length === 0) return;
+    this.assertWritable();
 
     const file = chunks[0].file;
 
@@ -553,8 +654,10 @@ export class MemoryStore {
     if (content && !this.hasContentChanged(file, content)) {
       return;
     }
+    const hash = content ? contentHashOf(content) : undefined;
 
     const embeddings = await embedBatch(chunks.map((c) => c.text));
+    this.assertWritable(); // fenced while embedding
 
     const deleteStmt = this.db.prepare("DELETE FROM chunks WHERE file = ?");
     const insertStmt = this.db.prepare(
@@ -564,6 +667,24 @@ export class MemoryStore {
     );
 
     const transaction = this.db.transaction(() => {
+      // Another server on the store rebuilt the index with its own provider
+      // while this one embedded: these vectors do not belong in it.
+      if (!this.indexMatchesProvider()) {
+        throw new Error(
+          "The store's index now uses another embedding provider (another Memoria server " +
+            "rebuilt it); restart this server with the same MEMORIA_EMBEDDINGS.",
+        );
+      }
+      // Another indexer (the watcher and the sweep in this process, or
+      // another server on the store) committed this exact content while this
+      // one embedded. Writing again would date the memory by its mtime,
+      // as an edit, instead of its own frontmatter date.
+      if (hash !== undefined) {
+        const now = this.db
+          .prepare("SELECT content_hash FROM file_meta WHERE file = ?")
+          .get(file) as { content_hash: string | null } | undefined;
+        if (now?.content_hash === hash) return;
+      }
       // Read inside the transaction, after the embedding await, so the
       // dates match the file_meta row this write replaces.
       const { updatedAt, lastAccessed, accessCount } = this.indexDatesFor(file, dates);
@@ -665,17 +786,25 @@ export class MemoryStore {
     // ── Stage 1: Collect candidate IDs ──────────────────────
     const candidateIds = new Set<number>();
     const ftsScores = new Map<number, number>();
+    // Whether the keyword query ran, and whether its LIMIT cut it short. A
+    // candidate it ran over and did not return has no query term at all
+    // (terms are OR-ed), so its keyword score is 0.
+    let ftsQuery = "";
+    let ftsRan = false;
+    let ftsTruncated = false;
 
     // FTS5 candidates (keyword relevance)
     if (useFts) {
       try {
-        const ftsQuery = toFtsQuery(query);
+        ftsQuery = toFtsQuery(query);
         if (ftsQuery) {
           const ftsRows = this.db
             .prepare(
               `SELECT rowid, rank FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?`,
             )
             .all(ftsQuery, maxResults * 10) as Array<{ rowid: number; rank: number }>;
+          ftsRan = true;
+          ftsTruncated = ftsRows.length >= maxResults * 10;
 
           if (ftsRows.length > 0) {
             for (const row of ftsRows) {
@@ -722,7 +851,17 @@ export class MemoryStore {
       this.db.prepare(`SELECT COUNT(*) as cnt FROM chunks`).get() as { cnt: number }
     ).cnt;
     let scannedChunks = 0;
-    {
+    // Another server rebuilt the index with its own provider: this process's
+    // query vector is not comparable with it, so rank by keywords only.
+    const vectorsUsable = this.indexMatchesProvider();
+    if (!vectorsUsable && !this.warnedProviderMismatch) {
+      this.warnedProviderMismatch = true;
+      process.stderr.write(
+        "Memoria: the index was rebuilt with another embedding provider by another server; " +
+          "searching by keywords only until this server restarts with the same MEMORIA_EMBEDDINGS.\n",
+      );
+    }
+    if (vectorsUsable) {
       // Recall-fair coverage: when the store fits under the cap (the normal
       // personal-store case) scan EVERYTHING, in stable id order. When it
       // exceeds the cap, scan an even sample of EXACTLY cap rows spread
@@ -803,10 +942,30 @@ export class MemoryStore {
         .all() as typeof rows;
     }
 
+    // Past the LIMIT, score the remaining candidates with the same BM25, so
+    // a strong match the cut-off missed is not scored as no match.
+    if (ftsRan && ftsTruncated) {
+      const missing = rows.map((r) => r.id).filter((id) => !ftsScores.has(id));
+      for (let i = 0; i < missing.length; i += 500) {
+        const batch = missing.slice(i, i + 500);
+        const more = this.db
+          .prepare(
+            `SELECT rowid, rank FROM chunks_fts WHERE chunks_fts MATCH ?
+             AND rowid IN (${batch.map(() => "?").join(",")})`,
+          )
+          .all(ftsQuery, ...batch) as Array<{ rowid: number; rank: number }>;
+        for (const row of more) {
+          const bm25 = Math.max(0, -row.rank);
+          ftsScores.set(row.rowid, bm25 / (bm25 + 10));
+        }
+      }
+    }
+    const fallbackTerms = (query.toLowerCase().match(FTS_TERM_RE) ?? []).filter(Boolean);
+
     const scored: SearchResult[] = rows.map((row) => {
       // Reuse the similarity computed during the vector candidate scan; only
       // recompute for candidates that came in beyond the scan cap.
-      let vectorSim = vectorSims.get(row.id);
+      let vectorSim = vectorsUsable ? vectorSims.get(row.id) : 0;
       if (vectorSim === undefined) {
         const storedEmb = new Float32Array(
           row.embedding.buffer,
@@ -820,19 +979,18 @@ export class MemoryStore {
       // query matched use the fixed BM25 transform; every other candidate
       // (recency/vector-sourced) gets the substring fallback instead of a flat
       // 0, so scoring is consistent no matter which path surfaced the row.
-      let keywordScore: number | undefined = useFts ? ftsScores.get(row.id) : undefined;
-      if (keywordScore === undefined) {
-        const textLower = row.text.toLowerCase();
-        const queryTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
-        let keywordHits = 0;
-        for (const term of queryTerms) {
-          if (textLower.includes(term)) keywordHits++;
-        }
-        keywordScore = queryTerms.length > 0 ? keywordHits / queryTerms.length : 0;
-        // The substring fallback is coarser than BM25 — cap it below the BM25
-        // transform's typical range so a fallback-scored row can't outrank a
-        // genuine FTS match on keyword signal alone.
-        keywordScore = Math.min(keywordScore, 0.6);
+      let keywordScore: number | undefined = ftsScores.get(row.id);
+      if (keywordScore === undefined && ftsRan) {
+        // FTS ran over this row and found none of the query's words. The
+        // substring fallback used to give such rows up to 0.6 for words
+        // found INSIDE other words, more than many genuine BM25 matches.
+        keywordScore = 0;
+      } else if (keywordScore === undefined) {
+        // No FTS5, or it failed: whole-word matches, capped below BM25's
+        // usual range since this is the coarser signal.
+        const words = new Set(row.text.toLowerCase().match(FTS_TERM_RE) ?? []);
+        const hits = fallbackTerms.filter((t) => words.has(t)).length;
+        keywordScore = fallbackTerms.length > 0 ? Math.min(hits / fallbackTerms.length, 0.6) : 0;
       }
 
       const relevanceScore = vectorMix * vectorSim + (1 - vectorMix) * keywordScore;
@@ -964,6 +1122,7 @@ export class MemoryStore {
   }
 
   trackAccess(file: string): void {
+    if (this.fenced) return; // best effort, like the rest of access tracking
     const now = new Date().toISOString().split("T")[0];
     this.db
       .prepare(
@@ -988,6 +1147,7 @@ export class MemoryStore {
    * not just explicit memory_read calls.
    */
   trackAccessBatch(files: string[]): void {
+    if (this.fenced) return;
     if (files.length === 0) return;
     const now = new Date().toISOString().split("T")[0];
     const updChunks = this.db.prepare(
@@ -1013,12 +1173,14 @@ export class MemoryStore {
    * Remove all chunks for a file.
    */
   removeFile(file: string): void {
+    this.assertWritable();
     this.db.prepare("DELETE FROM chunks WHERE file = ?").run(file);
     this.db.prepare("DELETE FROM file_meta WHERE file = ?").run(file);
   }
 
   /** Make every file count as changed, so the next pass re-embeds it all. */
   forgetContentHashes(): void {
+    this.assertWritable();
     this.db.prepare("UPDATE file_meta SET content_hash = NULL").run();
   }
 
@@ -1029,6 +1191,7 @@ export class MemoryStore {
    * created at that path inherited its access count.
    */
   retainFiles(existing: string[], stillExists: (file: string) => boolean = () => false): number {
+    this.assertWritable();
     const keep = new Set(existing);
     const rows = this.db.prepare("SELECT file FROM file_meta").all() as Array<{ file: string }>;
     // `existing` is a listing taken before a pass that may run for minutes;
@@ -1046,6 +1209,19 @@ export class MemoryStore {
       })
       .immediate();
     return gone.length;
+  }
+
+  /** A value this server keeps in the store (schedules and the like). */
+  getMeta(key: string): string | undefined {
+    return (
+      this.db.prepare("SELECT value FROM store_meta WHERE key = ?").get(key) as
+        { value: string } | undefined
+    )?.value;
+  }
+
+  setMeta(key: string, value: string): void {
+    this.assertWritable();
+    this.db.prepare("INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)").run(key, value);
   }
 
   /**
@@ -1172,6 +1348,7 @@ export class MemoryStore {
    * Tracks the last run date — won't double-decay if called multiple times.
    */
   decayImportance(daysSinceAccess: number = 60): number {
+    this.assertWritable();
     const today = new Date().toISOString().split("T")[0];
     const lastRun = this.db
       .prepare("SELECT value FROM store_meta WHERE key = 'last_decay_run'")
@@ -1203,6 +1380,7 @@ export class MemoryStore {
    * Tracks the last run date — won't double-boost if called multiple times.
    */
   boostImportance(accessThreshold: number = 10): number {
+    this.assertWritable();
     const today = new Date().toISOString().split("T")[0];
     const lastRun = this.db
       .prepare("SELECT value FROM store_meta WHERE key = 'last_boost_run'")
@@ -1246,6 +1424,7 @@ export class MemoryStore {
       similarity: number;
     }>
   > {
+    if (!this.indexMatchesProvider()) return [];
     const queryEmbedding = await embed(text);
 
     // Pre-filter candidates using FTS5 if available
@@ -1317,10 +1496,25 @@ export class MemoryStore {
   }
 
   close(): void {
+    // A fenced store is not closed: closing checkpoints the WAL into the
+    // database file the new lock holder is using (see exitWithoutCheckpoint).
+    if (this.fenced) return;
     try {
       this.db.close();
     } finally {
       this.releaseLock();
     }
+  }
+
+  /**
+   * End a process whose store was fenced. A normal exit closes every open
+   * SQLite connection (better-sqlite3's cleanup hook), and closing the last
+   * connection this host knows of checkpoints the WAL into a database the
+   * new holder on another host is writing. SIGKILL skips that.
+   */
+  static exitWithoutCheckpoint(): never {
+    process.kill(process.pid, "SIGKILL");
+    // Unreachable; SIGKILL cannot be handled.
+    throw new Error("unreachable");
   }
 }

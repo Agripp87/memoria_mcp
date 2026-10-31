@@ -503,3 +503,16 @@ describe("promotion is bounded by the memory's own importance (review 2026-10)",
     expect(row.importance).toBe(6);
   });
 });
+
+describe("keyword score of rows without a query word (2026-10 re-review F41)", () => {
+  it("a row matching only inside other words gets no keyword credit", async () => {
+    const decoy = "---\nname: d\n---\npreinvoicing subbilling misstatements";
+    const real = "---\nname: r\n---\nthe billing invoice was late";
+    await store.indexChunks(chunkMarkdown(decoy, "decoy.md"), 5, decoy);
+    await store.indexChunks(chunkMarkdown(real, "real.md"), 5, real);
+    const pure = await store.search("billing invoice", 10, undefined, 0);
+    const byFile = new Map(pure.map((r) => [r.file, r.relevanceScore]));
+    expect(byFile.get("real.md")!).toBeGreaterThan(0);
+    expect(byFile.get("decoy.md") ?? 0).toBe(0);
+  });
+});

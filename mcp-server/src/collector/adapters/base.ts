@@ -100,6 +100,24 @@ export interface SourceAdapter {
 export const CORE_DATA_EPOCH = 978307200;
 
 /**
+ * The first of `candidates` that is a valid date, as ISO; now if none is.
+ * Mail Date headers are sender-controlled ("CEST", localized month names,
+ * day 32) and `new Date(bad).toISOString()` throws, which used to fail the
+ * whole poll on one message and stall the source for good.
+ */
+export function firstValidIso(...candidates: unknown[]): string {
+  for (const c of candidates) {
+    if (c === null || c === undefined || c === "") continue;
+    const d =
+      c instanceof Date
+        ? c
+        : new Date(typeof c === "string" && /^\d+$/.test(c) ? Number(c) : (c as any));
+    if (!Number.isNaN(d.getTime())) return d.toISOString();
+  }
+  return new Date().toISOString();
+}
+
+/**
  * Helper: estimate importance for a text-based event.
  * Rule-based heuristic for MVP — can be replaced with a model later.
  */

@@ -99,41 +99,37 @@ export class GoogleCalendarAdapter implements SourceAdapter {
     const includeDeclined = this.config.settings?.includeDeclined === true;
 
     const events: RawEvent[] = [];
+    const failures: string[] = [];
 
     for (const calId of calendarIds) {
+      const pollOnce = () =>
+        this.pollCalendar(calId, lookAhead, lookBehind, includeAllDay, includeDeclined);
       try {
-        const calEvents = await this.pollCalendar(
-          calId,
-          lookAhead,
-          lookBehind,
-          includeAllDay,
-          includeDeclined,
-        );
-        events.push(...calEvents);
+        events.push(...(await pollOnce()));
       } catch (err: any) {
-        // If sync token is invalid, reset and do a full sync
-        if (err.code === 410 || err.message?.includes("Sync token")) {
-          delete this.syncTokens[calId];
-          try {
-            const calEvents = await this.pollCalendar(
-              calId,
-              lookAhead,
-              lookBehind,
-              includeAllDay,
-              includeDeclined,
-            );
-            events.push(...calEvents);
-          } catch (retryErr: any) {
-            process.stderr.write(
-              `Memoria: Google Calendar poll error (${calId}): ${retryErr.message}\n`,
-            );
+        try {
+          // An expired sync token: start over with a full sync.
+          if (err.code === 410 || err.message?.includes("Sync token")) {
+            delete this.syncTokens[calId];
+            events.push(...(await pollOnce()));
+            continue;
           }
-        } else {
-          process.stderr.write(`Memoria: Google Calendar poll error (${calId}): ${err.message}\n`);
+          throw err;
+        } catch (finalErr: any) {
+          process.stderr.write(
+            `Memoria: Google Calendar poll error (${calId}): ${finalErr.message}\n`,
+          );
+          failures.push(`${calId}: ${finalErr.message}`);
         }
       }
     }
 
+    // Every calendar failed: an error, so the daemon backs off and shows it.
+    // This used to resolve with nothing, and the source looked healthy while
+    // it collected nothing. One bad calendar id must not block the others.
+    if (failures.length > 0 && failures.length === calendarIds.length) {
+      throw new Error(`Google Calendar poll failed: ${failures.join("; ")}`);
+    }
     return events;
   }
 
@@ -147,22 +143,33 @@ export class GoogleCalendarAdapter implements SourceAdapter {
     const events: RawEvent[] = [];
     const syncToken = this.syncTokens[calendarId];
 
+    // No orderBy: the API refuses it (and timeMin/timeMax) together with a
+    // syncToken, so every incremental request failed and the adapter fell
+    // back to nothing. singleEvents must match between the full sync and
+    // the incremental ones.
     const params: any = {
       calendarId,
       maxResults: 200,
       singleEvents: true,
-      orderBy: "startTime",
     };
+    const now = Date.now();
+    const windowStart = now - lookBehind * 86400_000;
+    const windowEnd = now + lookAhead * 86400_000;
 
     if (syncToken) {
-      // Incremental sync
+      // Incremental sync: every change since the token, at any date.
       params.syncToken = syncToken;
     } else {
       // Full sync with time window
-      const now = new Date();
-      params.timeMin = new Date(now.getTime() - lookBehind * 86400_000).toISOString();
-      params.timeMax = new Date(now.getTime() + lookAhead * 86400_000).toISOString();
+      params.timeMin = new Date(windowStart).toISOString();
+      params.timeMax = new Date(windowEnd).toISOString();
     }
+    // Changes outside the collection window are not collected; the full
+    // sync never returned them either.
+    const inWindow = (item: any): boolean => {
+      const start = Date.parse(item.start?.dateTime || item.start?.date || "");
+      return Number.isNaN(start) || (start >= windowStart - 86400_000 && start <= windowEnd);
+    };
 
     let pageToken: string | undefined;
     do {
@@ -172,6 +179,7 @@ export class GoogleCalendarAdapter implements SourceAdapter {
       const items = response.data.items || [];
 
       for (const item of items) {
+        if (syncToken && !inWindow(item)) continue;
         const event = this.convertEvent(item, calendarId, includeAllDay, includeDeclined);
         if (event) events.push(event);
       }

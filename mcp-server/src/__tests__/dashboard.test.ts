@@ -177,3 +177,69 @@ describe("POST /api/journal input validation (2026-09 review, L8/L9)", () => {
     expect(text).toMatch(/## \d{2}:\d{2} UTC — Journal \(good\)\n\nvalid entry\n\*Tags: a, b\*/);
   });
 });
+
+describe("dashboard client requests (2026-10 re-review F1, F7)", () => {
+  function pageFunction(name: string, deps: string[], args: unknown[]) {
+    const script = clientScript(renderDashboard().html);
+    const src = script.match(new RegExp(`async function ${name}\\([\\s\\S]*?\\n\\}\\n`));
+    expect(src, name).toBeTruthy();
+    return new Function(...deps, `${(src as RegExpMatchArray)[0]}; return ${name};`)(...args);
+  }
+
+  it("saveConfig sends no blank credentials and no untouched fields", async () => {
+    const inputs: Record<string, { value: string; defaultValue: string }> = {
+      "cfg-host": { value: "", defaultValue: "" },
+      "cfg-user": { value: "", defaultValue: "" },
+      "cfg-pass": { value: "", defaultValue: "" },
+      "cfg-port": { value: "143", defaultValue: "993" },
+    };
+    const document = { getElementById: (id: string) => inputs[id] ?? null };
+    const posted: any[] = [];
+    const api = async (endpoint: string, options: any) => {
+      posted.push({ endpoint, body: JSON.parse(options.body) });
+      return { success: true, message: "ok" };
+    };
+    const noop = () => {};
+    const saveConfig = pageFunction(
+      "saveConfig",
+      ["document", "api", "closeModal", "toast", "loadSources"],
+      [document, api, noop, noop, noop],
+    );
+    await saveConfig("email", false);
+    expect(posted).toEqual([{ endpoint: "/sources/email/configure", body: { port: 143 } }]);
+
+    // Gmail: untouched list fields keep the stored values.
+    const gmailInputs: Record<string, { value: string; defaultValue: string }> = {
+      "cfg-client-id": { value: "", defaultValue: "" },
+      "cfg-client-secret": { value: "", defaultValue: "" },
+      "cfg-refresh-token": { value: "new-token", defaultValue: "" },
+      "cfg-labels": { value: "INBOX", defaultValue: "INBOX" },
+      "cfg-exclude": { value: "SPAM", defaultValue: "SPAM,TRASH" },
+    };
+    const saveGmail = pageFunction(
+      "saveConfig",
+      ["document", "api", "closeModal", "toast", "loadSources"],
+      [{ getElementById: (id: string) => gmailInputs[id] ?? null }, api, noop, noop, noop],
+    );
+    await saveGmail("google-gmail", false);
+    expect(posted[1].body).toEqual({ google_refresh_token: "new-token", excludeLabels: ["SPAM"] });
+  });
+
+  it("api() always marks its requests and turns a server error into a thrown error", async () => {
+    const seen: any[] = [];
+    const fetch = async (_url: string, init: any) => {
+      seen.push(init);
+      return { status: 503, json: async () => ({ error: "held by pid 42" }) };
+    };
+    const api = pageFunction("api", ["fetch", "API", "ensureSession"], [fetch, "/x", noopAsync]);
+    await expect(
+      api("/sources", { method: "POST", headers: { "Content-Type": "text/plain" } }),
+    ).rejects.toThrow("held by pid 42");
+    expect(seen[0].headers["X-Memoria-Request"]).toBe("1");
+    expect(seen[0].method).toBe("POST");
+  });
+});
+
+async function noopAsync() {
+  return false;
+}

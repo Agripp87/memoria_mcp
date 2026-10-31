@@ -131,3 +131,11 @@ describe("renderMemoryHtml — [[wikilinks]]", () => {
     expect(html).not.toContain("data-wikilink-file"); // not turned into a wikilink
   });
 });
+
+describe("resolveLink by path without extension (2026-10 re-review F44)", () => {
+  it("resolves an entity page's [[daily/DATE]] backlink", () => {
+    const entries = [{ file: "daily/2026-10-28.md", name: "Daily log 2026-10-28" } as any];
+    expect(resolveLink("daily/2026-10-28", entries)).toBe("daily/2026-10-28.md");
+    expect(resolveLink("daily/2026-10-28.md", entries)).toBe("daily/2026-10-28.md");
+  });
+});

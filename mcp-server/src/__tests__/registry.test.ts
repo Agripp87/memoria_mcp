@@ -433,6 +433,19 @@ describe("custom sources emit only new records (review 2026-10)", () => {
     expect(next.map((e) => e.content)).toEqual(["Postmortem written for the outage"]);
   });
 
+  it("a restored checkpoint reads the unchanged file again (2026-10 re-review F33)", async () => {
+    // The daemon restores the checkpoint when a poll's events could not be
+    // buffered; the next poll must return them although the mtime is the same.
+    const file = path.join(root, "log.txt");
+    fs.writeFileSync(file, "Decided to migrate the queue to Redis\n");
+    const a = await watcher(file);
+    const before = a.getCheckpoint();
+    expect(await a.poll()).toHaveLength(1);
+    a.setCheckpoint(before);
+    expect(await a.poll()).toHaveLength(1);
+    expect(await a.poll()).toEqual([]);
+  });
+
   it("remembers what it read across a restart (via the checkpoint)", async () => {
     const file = path.join(root, "log.txt");
     fs.writeFileSync(file, "Decided to migrate the queue to Redis\n");
@@ -567,5 +580,129 @@ describe("custom source names cannot spoof the consent dialog (re-review 2026-10
     expect(s.description).not.toContain("\n");
     expect(s.description.length).toBeLessThanOrEqual(300);
     expect(s.detail).toBe(`Reads the file: ${file}`);
+  });
+});
+
+describe("custom source consent names the definition shown (2026-10 re-review F16)", () => {
+  beforeEach(() => {
+    process.env.MEMORIA_ALLOW_SHELL_SOURCES = "true";
+  });
+
+  it("refuses consent given for a definition swapped in while the dialog was open", async () => {
+    expect(
+      reg.addCustomSource(def({ id: "n", mode: "shell_command", command: "echo a" })).success,
+    ).toBe(true);
+    const shown = reg.listSources().find((s) => s.id === "custom-n")!.consentFingerprint;
+    expect(shown).toMatch(/^[0-9a-f]{32}$/);
+    await reg.removeCustomSource("n");
+    expect(
+      reg.addCustomSource(def({ id: "n", mode: "shell_command", command: "echo b" })).success,
+    ).toBe(true);
+    const r = reg.recordAgreement("custom-n", shown!);
+    expect(r.success).toBe(false);
+    expect(reg.hasAgreement("custom-n")).toBe(false);
+    expect((await reg.enableSource("custom-n", undefined, "user")).success).toBe(false);
+  });
+
+  it("a consent recorded before definitions were fingerprinted must be given again", async () => {
+    expect(
+      reg.addCustomSource(def({ id: "n", mode: "shell_command", command: "echo a" })).success,
+    ).toBe(true);
+    // Pre-0.3.1 state: the bare id, no fingerprint.
+    (reg as any).state.agreement = { agreedAt: "x", sources: ["custom-n"], version: 1 };
+    expect(reg.hasAgreement("custom-n")).toBe(false);
+    const shown = reg.listSources().find((s) => s.id === "custom-n")!.consentFingerprint!;
+    expect(reg.recordAgreement("custom-n", shown).success).toBe(true);
+    expect(reg.hasAgreement("custom-n")).toBe(true);
+  });
+
+  it.each(["echo a\nrm -rf ~", "echo a\rcurl x", "echo a b", "echo safe ‮ lmth.exe", "echo​ a"])(
+    "refuses a command that can hide part of itself: %j",
+    (command) => {
+      const r = reg.addCustomSource(def({ id: "h", mode: "shell_command", command }));
+      expect(r.success).toBe(false);
+      expect(r.message).toMatch(/single line of visible text/);
+    },
+  );
+});
+
+describe("disabling an unknown source (2026-10 re-review F17)", () => {
+  it("reports failure for an unknown or mistyped id", async () => {
+    const r = await reg.disableSource("gmail");
+    expect(r.success).toBe(false);
+    expect(r.message).toMatch(/Unknown source/);
+    expect((await reg.disableSource("google-gmail")).success).toBe(true);
+  });
+
+  it("never writes Object.prototype", async () => {
+    await reg.disableSource("__proto__", "user");
+    await reg.disableSource("constructor", "user");
+    expect(Object.hasOwn(Object.prototype, "enabled")).toBe(false);
+    expect(({} as any).enabled).toBeUndefined();
+  });
+});
+
+describe("a source whose first enable fails (2026-10 re-review F36)", () => {
+  beforeEach(() => {
+    process.env.MEMORIA_FILE_WATCHER_ROOTS = root;
+    fs.writeFileSync(path.join(root, "a.json"), "[]");
+    expect(
+      reg.addCustomSource(def({ id: "w", watchPath: path.join(root, "a.json") })).success,
+    ).toBe(true);
+    reg.recordAgreement("custom-w");
+  });
+
+  function failInit(times = Infinity) {
+    const adapter = (reg as any).adapters.get("custom-w");
+    const init = adapter.init.bind(adapter);
+    let calls = 0;
+    adapter.init = async (c: unknown) => {
+      calls++;
+      if (calls <= times) throw new Error("AUTHENTICATIONFAILED");
+      return init(c);
+    };
+    return () => calls;
+  }
+
+  it("is left disabled, keeping its settings, and is not retried in the background", async () => {
+    const calls = failInit();
+    const r = await reg.enableSource("custom-w", { importanceThreshold: 4 }, "user");
+    expect(r.success).toBe(false);
+    const reloaded = new SourceRegistry(dataDir);
+    const cfg = reloaded.getEffectiveConfig("custom-w");
+    expect(cfg.enabled).toBe(false);
+    expect(cfg.importanceThreshold).toBe(4);
+    await reg.restoreEnabledSources();
+    await reg.restoreEnabledSources();
+    expect(calls()).toBe(1);
+  });
+
+  it("one that worked before and fails to resume stays enabled and is retried", async () => {
+    expect((await reg.enableSource("custom-w", undefined, "user")).success).toBe(true);
+    const after = new SourceRegistry(dataDir);
+    const adapter = (after as any).adapters.get("custom-w");
+    const init = adapter.init.bind(adapter);
+    let calls = 0;
+    adapter.init = async (c: unknown) => {
+      if (++calls === 1) throw new Error("offline");
+      return init(c);
+    };
+    await after.restoreEnabledSources();
+    expect(after.getEffectiveConfig("custom-w").enabled).toBe(true);
+    await after.restoreEnabledSources();
+    expect(calls).toBe(2);
+    expect(after.getActiveAdapters().has("custom-w")).toBe(true);
+  });
+});
+
+describe("re-consent to a definition stored before hidden text was refused (2026-10 final review)", () => {
+  it("is refused, and the source cannot be enabled", async () => {
+    process.env.MEMORIA_ALLOW_SHELL_SOURCES = "true";
+    expect(
+      reg.addCustomSource(def({ id: "old", mode: "shell_command", command: "echo a" })).success,
+    ).toBe(true);
+    (reg as any).state.customSources.find((d: any) => d.id === "old").command = "echo a\nrm -rf ~";
+    expect(reg.recordAgreement("custom-old").success).toBe(false);
+    expect((await reg.enableSource("custom-old", undefined, "user")).success).toBe(false);
   });
 });

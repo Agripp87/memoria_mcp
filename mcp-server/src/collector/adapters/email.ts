@@ -5,7 +5,7 @@
  */
 
 import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
-import { estimateImportance, classifyPrivacy } from "./base.js";
+import { estimateImportance, classifyPrivacy, firstValidIso } from "./base.js";
 import { importDependency } from "../deps.js";
 
 export class EmailAdapter implements SourceAdapter {
@@ -144,64 +144,30 @@ export class EmailAdapter implements SourceAdapter {
           {
             uid: true,
             envelope: true,
+            internalDate: true,
             bodyStructure: true,
-            source: { maxBytes: 1024 }, // first 1KB of body only
+            // The first 16KB of the raw message: the headers (which can be
+            // long) and the start of the body, for the preview. `maxBytes`
+            // is not an imapflow option; it fetched every message whole,
+            // attachments included.
+            source: { start: 0, maxLength: 16_384 },
           },
           { uid: true },
         )) {
           if (message.uid <= this.checkpoint && this.checkpoint > 0) continue;
           this.checkpoint = Math.max(this.checkpoint, message.uid);
 
-          const env = message.envelope;
-          if (!env) continue;
-
-          const from = env.from?.[0]?.name ?? env.from?.[0]?.address ?? "unknown";
-          const to = (env.to ?? []).map((t: any) => t.name ?? t.address).join(", ");
-
-          const subject = env.subject ?? "(no subject)";
-          const date = env.date ? new Date(env.date).toISOString() : new Date().toISOString();
-
-          // Extract preview text from source (first 500 chars)
-          let preview = "";
-          if (message.source) {
-            const bodyText = message.source.toString("utf-8");
-            // Very basic: grab text after the headers
-            const bodyStart = bodyText.indexOf("\r\n\r\n");
-            if (bodyStart > -1) {
-              preview = bodyText
-                .slice(bodyStart + 4, bodyStart + 504)
-                .replace(/[<>]/g, "")
-                .replace(/\s+/g, " ")
-                .trim();
-            }
+          // One malformed message is skipped, not the source stalled: the
+          // checkpoint is already past it, and a server or connection error
+          // still ends the iteration and fails the poll.
+          try {
+            const event = this.toEvent(message);
+            if (event) events.push(event);
+          } catch (err) {
+            process.stderr.write(
+              `Memoria email: skipped message UID ${message.uid}: ${(err as Error).message}\n`,
+            );
           }
-
-          const content = preview ? `${subject} — ${preview.slice(0, 200)}` : subject;
-
-          const meta: Record<string, unknown> = {
-            from,
-            to,
-            subject,
-            isAutomated: /no-?reply|automated|noreply|mailer-daemon/i.test(from),
-          };
-
-          const importance = estimateImportance(content, meta);
-          if (importance < this.config.importanceThreshold) continue;
-
-          const privacy = classifyPrivacy(content, meta);
-          if (privacy === "local-only") continue; // never send sensitive email content
-
-          events.push({
-            id: `email-${message.uid}`,
-            source: "email",
-            eventType: "email_received",
-            content: privacy === "summarize" ? `${subject} (from ${from})` : content,
-            timestamp: date,
-            meta,
-            importanceEstimate: importance,
-            privacyTier: privacy,
-          });
-
           if (events.length >= maxFetch) break;
         }
       } finally {
@@ -214,6 +180,58 @@ export class EmailAdapter implements SourceAdapter {
     }
 
     return events;
+  }
+
+  private toEvent(message: any): RawEvent | null {
+    const env = message.envelope;
+    if (!env) return null;
+
+    const from = env.from?.[0]?.name ?? env.from?.[0]?.address ?? "unknown";
+    const to = (env.to ?? []).map((t: any) => t.name ?? t.address).join(", ");
+
+    const subject = env.subject ?? "(no subject)";
+    const date = firstValidIso(env.date, message.internalDate);
+
+    // Extract preview text from source (first 500 chars)
+    let preview = "";
+    if (message.source) {
+      const bodyText = message.source.toString("utf-8");
+      // Very basic: grab text after the headers
+      const bodyStart = bodyText.indexOf("\r\n\r\n");
+      if (bodyStart > -1) {
+        preview = bodyText
+          .slice(bodyStart + 4, bodyStart + 504)
+          .replace(/[<>]/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+    }
+
+    const content = preview ? `${subject} — ${preview.slice(0, 200)}` : subject;
+
+    const meta: Record<string, unknown> = {
+      from,
+      to,
+      subject,
+      isAutomated: /no-?reply|automated|noreply|mailer-daemon/i.test(from),
+    };
+
+    const importance = estimateImportance(content, meta);
+    if (importance < this.config.importanceThreshold) return null;
+
+    const privacy = classifyPrivacy(content, meta);
+    if (privacy === "local-only") return null; // never send sensitive email content
+
+    return {
+      id: `email-${message.uid}`,
+      source: "email",
+      eventType: "email_received",
+      content: privacy === "summarize" ? `${subject} (from ${from})` : content,
+      timestamp: date,
+      meta,
+      importanceEstimate: importance,
+      privacyTier: privacy,
+    };
   }
 
   getCheckpoint(): string {

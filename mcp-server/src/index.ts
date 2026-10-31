@@ -9,16 +9,12 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { MemoryStore } from "./store.js";
 import {
   DB_PATH,
-  reindexAll,
-  setupWatcher,
-  setupPeriodicReindex,
-  setupPeriodicOptimize,
-  setupPeriodicCompile,
+  startBackgroundIndexing,
   registerTools,
   registerCollectorTools,
   destroyCollector,
+  haltCollector,
   resumeCollectorIfConfigured,
-  setupPrimaryTakeover,
   SERVER_DESCRIPTION,
 } from "./tools.js";
 
@@ -29,7 +25,7 @@ const store = new MemoryStore(DB_PATH, { shared: true });
 
 const server = new McpServer({
   name: "memoria",
-  version: "0.3.0",
+  version: "0.3.1",
   description: SERVER_DESCRIPTION,
 });
 
@@ -41,25 +37,8 @@ registerCollectorTools(server, store);
 let shuttingDown = false;
 
 async function main(): Promise<void> {
-  if (store.needsReindex) {
-    process.stderr.write("Memoria: full reindex (embedding provider or index format changed)...\n");
-  }
-  // Per file: one failure is logged and skipped instead of exiting. A stop
-  // signal during a long first index stops before shutdown() closes the
-  // store under the next reindexFile. Files deleted while the server was
-  // down are dropped.
-  const indexed = await reindexAll(store, { shouldStop: () => shuttingDown });
-  if (shuttingDown) return;
-  process.stderr.write(
-    `Memoria MCP server started. Indexed ${indexed.files} files` +
-      (indexed.failed.length ? ` (${indexed.failed.length} failed, see above).\n` : ".\n"),
-  );
-
-  setupWatcher(store);
-  setupPeriodicReindex(store);
-  setupPeriodicOptimize(store); // no-op unless MEMORIA_AUTO_OPTIMIZE=true
-  setupPeriodicCompile(store); // no-op unless MEMORIA_AUTO_COMPILE=true
-  setupPrimaryTakeover(store); // no-op in the primary
+  // Another instance took the store over: stop collecting (see fenced).
+  store.onFenced(haltCollector);
 
   const transport = new StdioServerTransport();
   // Exit when the client goes away. Without this a server whose client died
@@ -73,11 +52,17 @@ async function main(): Promise<void> {
   transport.onclose = clientGone;
   process.stdin.on("end", clientGone);
   process.stdin.on("close", clientGone);
+  // Answer the client first. The startup sweep re-embeds the whole store
+  // after a provider change or an index upgrade, which on a few thousand
+  // chunks took longer than the client waits for the handshake (30 s in
+  // Claude Code), and the session came up without memory tools.
   await server.connect(transport);
+  process.stderr.write("Memoria MCP server started.\n");
 
   // After connecting, so a slow source (an IMAP login) never delays the
   // client's handshake. Errors are logged inside.
   void resumeCollectorIfConfigured(store);
+  await startBackgroundIndexing(store, { watch: true, shouldStop: () => shuttingDown });
 }
 
 main().catch((err) => {
@@ -97,6 +82,9 @@ async function shutdown(): Promise<void> {
   if (shuttingDown) {
     process.exit(1);
   }
+  // Taken over: no flush, no close (both write the store the new holder
+  // is using), and no normal exit, which closes SQLite handles too.
+  if (store.fenced) MemoryStore.exitWithoutCheckpoint();
   shuttingDown = true;
   setTimeout(() => process.exit(1), 8_000).unref();
   let exitCode = 0;

@@ -18,11 +18,14 @@ Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Co
 - **Spec-complete remote transport.** OAuth 2.1 with PKCE, client credentials, dynamic client registration and metadata discovery — works as a claude.ai custom connector out of the box.
 - **Honest about search.** Three embedding providers (local MiniLM → n-gram fallback, plus OpenAI as an explicit opt-in), three-signal scoring, and every result reports its scan coverage.
 
-## Recent updates — 0.3.0: security hardening and relevance-led search
+## Recent updates — 0.3.0 and 0.3.1: security hardening and relevance-led search
 
 A whole-repo review, and a critical re-review after it, hardened the
-server, the collector, and the sync scripts. Full details are in
-[CHANGELOG.md](CHANGELOG.md) (0.3.0) and [SECURITY.md](SECURITY.md). The
+server, the collector, and the sync scripts; 0.3.1 fixes what a second
+review of 0.3.0 found. Full details are in [CHANGELOG.md](CHANGELOG.md)
+and [SECURITY.md](SECURITY.md). In 0.3.1, custom sources need their
+consent given once more in the dashboard, and the dashboard's Sources
+tab works only in the server that opened the store first. The 0.3.0
 changes most likely to affect you:
 
 - **Search ranks by relevance first.** Default weights are now
@@ -242,7 +245,7 @@ For a durable cloud deployment see [`deploy/gcp/README.md`](deploy/gcp/README.md
 | `OPENAI_API_KEY` | *(none)* | API key for OpenAI embeddings. On its own it does **not** enable remote embeddings (see `MEMORIA_EMBEDDINGS`); when remote embeddings are enabled, memory content and search queries are sent to OpenAI. |
 | `MEMORIA_EMBEDDINGS` | `auto` | Embedding provider: `auto` (local MiniLM if installed, else hash — never remote), `openai` (explicit opt-in: sends content to OpenAI), `minilm` (local all-MiniLM-L6-v2, 384-dim, true semantic), or `hash` (n-gram lexical fallback, 384-dim). |
 | `MEMORIA_TRUST_PROXY` | `1` | Proxy hops in front of the HTTP server, used to find the client IP for rate limiting. `1` suits Cloud Run or one reverse proxy; set `0` when clients reach the server directly (a LAN or VPS deployment), or a client's own `X-Forwarded-For` picks its rate-limit bucket. |
-| `MEMORIA_LOCK_TAKEOVER` | `false` | When `true`, a server takes over a store lock held by a live server on another host instead of waiting for it to stop. Only for deployments that overlap instances on one shared store by design, such as a Cloud Run rollout (set in `deploy/gcp/cloudbuild.yaml`). |
+| `MEMORIA_LOCK_TAKEOVER` | `false` | When `true`, a server takes over a store lock held by a live server on another host instead of waiting for it to stop, then waits one heartbeat (about 17 s) before opening the store. The displaced server notices, stops collecting and writing, and answers 503 until the platform stops it. Only for deployments that overlap instances on one shared store by design, such as a Cloud Run rollout (set in `deploy/gcp/cloudbuild.yaml`). Upgrading from 0.2.x, whose servers take no lock, drain the old revision first. |
 | `MEMORIA_AUTHORIZE_REQUIRE_APPROVAL` | `false` | When `true`, `/authorize` additionally requires the operator: the API key, or a dashboard login in the same browser followed by a click on a consent page. The `client_credentials` grant is disabled. A leaked OAuth client secret alone cannot obtain a token. |
 | `MEMORIA_MODEL_CACHE` | *(package default)* | Directory for the cached MiniLM model. The Docker image pre-bakes it at `/app/mcp-server/.models`; the build fails if the download does, unless you pass `--build-arg PREFETCH_MODEL=false` (for OpenAI or hash embeddings, or offline builds). |
 | `MEMORIA_MODEL_OFFLINE` | `false` | Set to `true` to forbid model downloads (use only the cached/pre-baked model). |
@@ -256,9 +259,9 @@ For a durable cloud deployment see [`deploy/gcp/README.md`](deploy/gcp/README.md
 | `MEMORIA_FILE_WATCHER_ROOTS` | *(none — watchers disabled)* | Comma-separated directories that `file_watcher` collector sources may watch. Unset or empty refuses every watcher; a path inside the collector data directory (key and credentials) is refused regardless. |
 | `MEMORIA_REINDEX_INTERVAL_MS` | `300000` | Interval for the periodic reindex sweep (fallback for inert `fs.watch`). |
 | `MEMORIA_AUTO_OPTIMIZE` | `false` | Set to `true` to run the idempotent decay/promote/staleness passes on a timer (genuinely autonomous self-management), instead of only when an agent calls `memory_optimize`. |
-| `MEMORIA_OPTIMIZE_INTERVAL_MS` | `86400000` | Interval for the auto-optimize pass (default 24h; only used when `MEMORIA_AUTO_OPTIMIZE=true`). |
+| `MEMORIA_OPTIMIZE_INTERVAL_MS` | `86400000` | Interval for the auto-optimize pass (default 24h; only used when `MEMORIA_AUTO_OPTIMIZE=true`). Counted across restarts: the time of the last pass is kept in the store, so a pass that is due runs at startup. |
 | `MEMORIA_AUTO_COMPILE` | `false` | Set to `true` to autonomously roll the daily-log firehose up into linked entity pages on a timer (the "compile, don't retrieve" loop), instead of only when an agent calls `memory_entities`. Drains the ingest-driven compile queue so only sources touched since the last run are rebuilt. |
-| `MEMORIA_COMPILE_INTERVAL_MS` | `86400000` | Interval for the auto-compile pass (default 24h; only used when `MEMORIA_AUTO_COMPILE=true`). |
+| `MEMORIA_COMPILE_INTERVAL_MS` | `86400000` | Interval for the auto-compile pass (default 24h; only used when `MEMORIA_AUTO_COMPILE=true`). Counted across restarts, like the optimize interval. Interval settings that are not a whole number of milliseconds of at least 10 s (1 s for the reindex sweep) are ignored with a warning. |
 | `MEMORIA_RAW_ARCHIVE` | `true` | Durable, immutable provenance archive of every ingested event under `data/raw/<source>/<YYYY-MM>.jsonl` (privacy-aware: `local-only` stores a hash only). **Batched** (one append per source per ingest cycle) and **rotated** (5MB parts), so it is safe on object-storage FUSE mounts. Set to `false` to disable. |
 | `MEMORIA_RAW_ARCHIVE_BATCH` / `MEMORIA_RAW_ARCHIVE_FLUSH_MS` / `MEMORIA_RAW_ARCHIVE_ROTATE_BYTES` | `20` / `60000` / `5242880` | Raw-archive batching knobs: flush after N buffered records or T ms (also flushed every ingest cycle and on shutdown); rotate to a new `-pN.jsonl` part past the byte cap. |
 | `MEMORIA_INGEST_MAX_ATTEMPTS` | `3` | Failed ingest attempts before a poison event is dead-lettered (metadata-only record in `data/.dead-letter.jsonl`; content never written). |
@@ -285,7 +288,7 @@ For a durable cloud deployment see [`deploy/gcp/README.md`](deploy/gcp/README.md
 | `memory_index` | Rebuild vector + FTS5 search index and MEMORY_INDEX.md catalog |
 | `memory_daily` | Append an entry (up to 50,000 characters) to today's daily log. Daily logs are UTC days, and entry times in them are UTC. |
 | `memory_optimize` | Run `decay`, `promote`, `detect_stale`, or `find_duplicates` |
-| `memory_reflect` | Read recent daily logs for agent reflection/synthesis |
+| `memory_reflect` | Read recent daily logs for agent reflection/synthesis, newest first, up to `max_chars` (default 50,000) |
 | `memory_stats` | Health metrics: importance distribution, stale count, access patterns, warnings |
 | `memory_lint` | Proactive health checks: contradiction scan, orphan detection, stale cross-refs, missing descriptions, gap analysis, **index drift** (rule VII), **entity-alias collisions** and **low-confidence claims** (rule VIII), **unknown directories** (files outside the documented layout — how the store once silently split into `reference/` + `references/`) |
 | `memory_compile` | Compile analysis results into structured core memories with auto-generated frontmatter and index update |
@@ -351,31 +354,17 @@ The three Google adapters share a single set of OAuth 2.0 credentials:
 
 **3. Enable the adapters:**
 
+In the Memoria dashboard (Sources tab), click **Enable** on `google-gmail`, agree, and paste the client ID, client secret and refresh token into the form that opens. Credentials, hosts and what a source reads can only be set there (or with the API key against `/dashboard/api`); an MCP client may only change a source's schedule:
+
 ```
-# First grant consent in the Memoria dashboard (Sources tab) — consent
-# cannot be granted through the MCP tool surface.
-memory_sources action="enable" source="google-gmail" config={
-  "google_client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
-  "google_client_secret": "YOUR_CLIENT_SECRET",
-  "google_refresh_token": "YOUR_REFRESH_TOKEN",
-  "labels": ["INBOX"],
-  "excludeLabels": ["SPAM", "TRASH", "PROMOTIONS"]
-}
+memory_sources action="configure" source="google-gmail" config={ "pollIntervalSec": 600 }
 ```
 
-The same credentials work for all three Google adapters. Credentials are stored encrypted (AES-256-GCM).
+The same credentials work for all three Google adapters. Credentials are stored encrypted (AES-256-GCM). Leaving a credential field blank when you configure a source later keeps the stored value. Gmail skips `SPAM`, `TRASH` and the Promotions tab (`CATEGORY_PROMOTIONS`; the tab names `PROMOTIONS`, `SOCIAL`, `UPDATES` and `FORUMS` are accepted too) unless you change the exclude list.
 
 **4. Google Drive folder selection:**
 
-```
-memory_sources action="enable" source="google-drive" config={
-  "google_client_id": "...",
-  "google_client_secret": "...",
-  "google_refresh_token": "...",
-  "folderIds": ["FOLDER_ID_1", "FOLDER_ID_2"],
-  "includeContent": true
-}
-```
+In the same form, list the folder IDs to collect (empty for all) and choose whether document content is included.
 
 To find folder IDs, open the folder in Google Drive — the ID is in the URL after `/folders/`.
 
@@ -448,11 +437,17 @@ All events are classified into privacy tiers before leaving the device:
 
 ```
 1. memory_sources action="list"                    # See available sources
-2. In the Memoria dashboard (Sources tab), grant consent for "imessage"
+2. In the Memoria dashboard (Sources tab), click Enable on "imessage"
    # Consent is dashboard-only by design: an MCP caller cannot grant it.
-3. memory_sources action="enable" source="imessage" # Enable + auto-install deps
-4. memory_priority action="status"                 # Verify it's collecting
+3. memory_priority action="status"                 # Verify it's collecting
 ```
+
+Sources, consent and the collector belong to the server that opened the
+store first. The dashboard only exists in the HTTP server
+(`memoria-mcp-http`), so start it **before** any Claude Code or Claude
+Desktop session on the same store; a dashboard that started second shows
+which process holds the store and takes over within 30 seconds of that
+process exiting.
 
 ### Adding a Custom Source
 
@@ -721,7 +716,7 @@ Where:
 
 **Semantic-scan coverage is never silent:** every result carries `scannedChunks/totalChunks`. Under `MEMORIA_VECTOR_SCAN_CAP` (default 5000) the whole store is scanned; past it, an even sample of **exactly cap** rows spans the entire id range — coverage degrades continuously as the store grows (no recall cliff at cap+1), and the sample's offset is derived from the query text, so different queries reach different residues of the store and no row is permanently invisible to the vector path (the same query stays deterministic). `memory_search` appends a coverage note whenever the scan was partial.
 
-Results are position-optimized: high-importance memories placed at the start and end of output to leverage the primacy/recency effect in LLM attention.
+Results are returned in descending score order.
 > **Provider caveat:** with the `hash` n-gram provider, `vector_cosine_similarity` is only a lexical approximation — the vector and FTS terms largely measure the same thing, so treat a `hash` deployment as keyword search with extra steps, not semantic search. Use `minilm` (local, the default) or `openai` for true semantic retrieval; the Docker image pre-bakes the MiniLM model.
 
 ## Multi-device sync
@@ -747,7 +742,7 @@ memories/daily/*.md merge=union
 
 With that in place, same-day entries from two devices merge silently and none are lost. Core memories (`user/`, `project/`, `decisions/`, …) deliberately keep the normal three-way merge: those files are edited rather than appended, so a both-sides change is a real disagreement that deserves a human. (Union merge keeps every entry but does not reorder them chronologically — see the [sync guide](scripts/sync/README.md#why-daily-logs-never-conflict).)
 
-**Object storage is optional.** If you also run a hosted instance backed by a bucket, drop an executable at `$MEMORIA_DIR/.memoria-mirror.sh` and set `MEMORIA_SYNC_ALLOW_STORE_MIRROR=true`; both scripts then call it with `pull` / `push` around the git sync. (Without that opt-in it is never run: it lives inside the synced store, so anyone able to push to the store could otherwise run code on your machine.)
+**Object storage is optional.** If you also run a hosted instance backed by a bucket, drop an executable at `$MEMORIA_DIR/.memoria-mirror.sh` and set `MEMORIA_SYNC_ALLOW_STORE_MIRROR=true`; the pull then calls it before the git merge. (Without that opt-in it is never run: it lives inside the synced store, so anyone able to push to the store could otherwise run code on your machine.) A mirror copies files rather than merging them, so the pull only takes a bucket file that extends the local one, and the push to the bucket is off unless `MEMORIA_SYNC_MIRROR_PUSH=true` — see the [sync guide](scripts/sync/README.md#object-storage-optional).
 
 **From Claude Code's built-in memory.** [`scripts/sync-from-claude-memory.sh`](scripts/sync-from-claude-memory.sh) one-way-pulls a project's `~/.claude/projects/<project>/memory/*.md` into the store (`MEMORIA_DIR`, default `~/.memoria`) so existing auto-memory is not lost. Pass the memory directory as an argument when more than one project has one.
 
@@ -762,6 +757,7 @@ See [SECURITY.md](SECURITY.md) for the trust model (single-tenant, one static ke
 | **Encryption at rest** | AES-256-GCM for all collector data, configs, and the ring buffer |
 | **Rate limiting** | Per client IP: `/mcp` 30/min, `/token`+`/authorize`+`/register` 20/min, `/ingest`+`/dashboard/api` 120/min (trusts `MEMORIA_TRUST_PROXY` proxy hops, default 1, for the real client IP) |
 | **Body size limit** | 64 KB for unauthenticated routes; 1 MB on `/mcp` and `/dashboard/api` and 5 MB on `/ingest`, parsed only after authentication |
+| **Dashboard CSRF guard** | A state-changing dashboard request on a browser session must come from the dashboard's own origin and carry its `X-Memoria-Request` header; SameSite alone does not stop a page on another localhost port. Bearer callers are unaffected |
 | **Session management** | Max 10 concurrent sessions, 30-minute idle TTL |
 | **Localhost binding** | HTTP server binds to `127.0.0.1` by default; set `BIND_ALL=true` for Docker/cloud. NOTE: every shipped Docker/Cloud Run config sets `BIND_ALL=true`, so in production the network is open and Bearer auth is the only access control. |
 | **Non-root container** | Docker image runs as unprivileged `memoria` user (UID 1001), which owns only its data and the model cache; the application code is root-owned |
@@ -845,11 +841,10 @@ Memoria has been through a critical code review with all findings tracked and fi
 | **Markdown safety** | `MEMORY_INDEX.md` escapes special characters (`]`, `[`, `\`) in link text and encodes spaces/parens in URLs. |
 | **Capacity feedback** | `/ingest` reports `bufferDropped` count when events are dropped at capacity, plus a `nearCapacity` flag at 90% utilization. |
 | **YAML date normalization** | js-yaml auto-parses ISO dates into `Date` objects; we normalize them back to strings so frontmatter round-trips cleanly. |
-| **Concurrent compile safety** | Per-directory locks serialize `memory_compile` calls — no slug collision races even under concurrent requests. |
+| **Concurrent compile safety** | Per-directory locks serialize `memory_compile` calls in one server, and the file is created exclusively, so a second server on the store (another Claude window) compiling the same name gets the next free `-N` name instead of overwriting it. |
 | **Strict input validation** | `/ingest` rejects empty/whitespace-only id, source, or content. `memory_compile` enforces a 100KB body limit. |
 | **Markdown safety in links** | Index escapes backticks, asterisks, underscores, tildes (in addition to brackets/backslash) so memory names with markdown syntax don't break links. |
 | **Live access counts** | Lint orphan detection queries the SQLite `file_meta` table instead of stale frontmatter. |
-| **Smart positional ordering** | Search results only reorder for primacy/recency effect when scores are tightly clustered (< 0.15 spread); pure score-ranking otherwise. Reordering is announced in the output. |
 | **Singleton init lock** | Concurrent `ensureCollector()` calls share a single init promise — no duplicate registries, buffers, or daemons. |
 | **Corrupt checkpoint recovery** | Google adapters reset corrupted JSON checkpoints to start fresh instead of looping on the same parse error. |
 | **Deterministic lint output** | Contradiction pairs sorted by similarity then alphabetically — stable across runs and parallel batches. |
@@ -867,6 +862,7 @@ Honest accounting of what is *not* hardened or covered yet — tracked for follo
 - **Coverage is partial (about 60% of lines).** The HTTP surface, storage, search and ingestion are well covered, but the **MCP tool handlers in `tools.ts` (about 58%)** and the **dashboard's browser-side JavaScript** have gaps: the browser script is tested for escaping, CSP and wiring, not by DOM tests. The collector adapters (Google/iMessage/email, about 14%) are tested at their edges, not against live services. Per-file coverage floors prevent regressions but don't fill these gaps.
 - **No staging environment.** The example deploy workflow goes straight from `main` to production Cloud Run after CI, then smoke-tests the live revision (redirect, dashboard markup, auth-gate 401) and rolls traffic back if it fails. There is no canary or staging, so a bad deploy is caught and reverted, not prevented.
 - **Collector corners.** Packages installed for a source resolve their own dependencies the usual way, including from a `node_modules` in the data or Memoria directory; the server warns at startup when one exists. Journal entries that carry a mood, and free-text `memory_daily` entries, are not split out as separate entries by the entity compiler or `memory_compact`.
+- **The object-storage mirror does not merge.** The optional sync mirror (`.memoria-mirror.sh`) copies whole files. A daily log changed both in the bucket and on a device is not combined: the device keeps its copy, the bucket keeps its own, and the file is named in `.sync.log` for a manual merge. Pushing to the bucket is off by default (`MEMORIA_SYNC_MIRROR_PUSH`) because it overwrote hosted entries. Enable object versioning on the bucket.
 - **Single-writer scaling ceiling.** `max-instances 1` is mandatory because the derived SQLite/FTS5 index lives on the GCS-FUSE volume and concurrent writers across instances corrupt the WAL ("disk I/O error", observed in prod). Horizontal scale requires moving the index off FUSE to a real single-writer or networked store.
 - **~~Hosted search is lexical, not semantic~~ — fixed in Phase 2 (2026-07):** the reference deployment now runs `MEMORIA_EMBEDDINGS=minilm` at 2Gi (true semantic embeddings). Residual caveat: the first startup after the provider switch re-embeds the whole store (one slow cold start), and `hash`-provider deployments remain lexical-only by nature.
 - **~~Dashboard key in `localStorage`~~ — fixed in Phase 3 (2026-07):** the dashboard now exchanges the API key once at `POST /dashboard/login` for an **httpOnly, SameSite=Strict session cookie** scoped to `Path=/dashboard` (never sent to `/mcp`//`/ingest`, unreadable from JS). A legacy key found in localStorage is migrated to a cookie session and removed. Bearer auth is unchanged for API clients.
@@ -874,6 +870,8 @@ Honest accounting of what is *not* hardened or covered yet — tracked for follo
 
 - **Verified against fakes, not the real services.** The 0.3.0 fixes to the IMAP, Gmail and macOS Calendar adapters (cursors, reconnects, collection by fingerprint) are tested against fakes that follow the documented behaviour of imapflow, the Gmail API and the Calendar Cache schema, not against live accounts or a real Calendar database. Report anything they miss.
 - **Ranking defaults measured on the lexical provider.** The 0.3.0 weights (0.8 / 0.1 / 0.1) and OR keyword matching were measured with `npm run eval:hash`; the default MiniLM provider has not been re-measured since (`npm run eval` needs the one-time model download).
+- **A stuck store lock on Windows.** The lock tells a reused pid from its holder by the kernel's record of the process start on Linux and macOS. On Windows, and for a lock left by a 0.3.0 server, a live process with the recorded pid counts as the holder, so the server may run as a secondary until that process exits. With no Memoria server running, delete `data/.memoria.sqlite.lock` in the store; the "running as a secondary" message names the lock file and the pid holding it.
+- **Source consent needs the dashboard in the primary.** Only the server that opened the store first runs the collector, and only the HTTP server has a dashboard. While a Claude Code or Claude Desktop session holds the store, the dashboard's Sources tab says so (503) instead of offering consent; close those sessions or start `memoria-mcp-http` first.
 - **iMessage bodies stored only in `attributedBody`.** Recent macOS versions often leave the `text` column empty and keep the message in `attributedBody`; such messages are skipped.
 
 These are the known open items after the October 2026 review; [issues](https://github.com/Agripp87/memoria_mcp/issues) are welcome for anything missing here.

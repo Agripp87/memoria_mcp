@@ -320,3 +320,51 @@ describe("CollectorDaemon", () => {
     expect(buffer.markSynced).not.toHaveBeenCalled();
   });
 });
+
+describe("CollectorDaemon poll intervals (2026-10 re-review F34, F35)", () => {
+  it("re-arms a running source's timer when its interval changes, keeping its state", async () => {
+    const { daemon, registry } = makeDaemon();
+    daemons.push(daemon);
+    let sec = 10;
+    registry.getEffectiveConfig = () => ({ pollIntervalSec: sec });
+    daemon.start();
+    expect(daemon.getStatus().pollTimers[0].intervalMs).toBe(10_000);
+    const pt = (daemon as any).pollTimers.get("src-a");
+    pt.inFlight = true;
+    sec = 60;
+    daemon.syncPollTimers();
+    const after = (daemon as any).pollTimers.get("src-a");
+    expect(after).toBe(pt);
+    expect(after.intervalMs).toBe(60_000);
+    expect(after.inFlight).toBe(true);
+    pt.inFlight = false;
+  });
+
+  it.each([
+    [604_800, 86_400_000], // a weekly interval saved by 0.2.x: capped, not reset
+    [86_400, 86_400_000],
+    [Number.NaN, 30_000], // unusable: the adapter's default
+    [5, 30_000],
+  ])("a stored interval of %s s runs every %s ms", async (stored, expected) => {
+    const { daemon, registry } = makeDaemon({
+      adapter: makeAdapter({ info: { id: "src-a", defaultConfig: { pollIntervalSec: 30 } } }),
+    });
+    daemons.push(daemon);
+    registry.getEffectiveConfig = () => ({ pollIntervalSec: stored });
+    daemon.start();
+    expect(daemon.getStatus().pollTimers[0].intervalMs).toBe(expected);
+  });
+});
+
+describe("CollectorDaemon.halt (2026-10 final review)", () => {
+  it("stops without a final flush", async () => {
+    const { daemon, buffer } = makeDaemon();
+    daemon.start();
+    await new Promise((r) => setTimeout(r, 20));
+    const before = buffer.fetchUnsyncedFair.mock.calls.length;
+    daemon.halt();
+    expect(daemon.getStatus().running).toBe(false);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(buffer.fetchUnsyncedFair.mock.calls.length).toBe(before);
+  });
+});

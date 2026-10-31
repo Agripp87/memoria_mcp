@@ -68,3 +68,56 @@ describe("setupPeriodicCompile gating (P0)", () => {
     expect(t).not.toBeNull();
   });
 });
+
+describe("interval settings (2026-10 re-review F37)", () => {
+  it.each(["abc", "0", "-5", "5m", "1e3", "3000000000"])(
+    "MEMORIA_COMPILE_INTERVAL_MS=%s falls back to the default",
+    async (raw) => {
+      const { intervalFromEnv } = await import("../tools.js");
+      process.env.MEMORIA_COMPILE_INTERVAL_MS = raw;
+      try {
+        expect(intervalFromEnv("MEMORIA_COMPILE_INTERVAL_MS", 86_400_000)).toBe(86_400_000);
+      } finally {
+        delete process.env.MEMORIA_COMPILE_INTERVAL_MS;
+      }
+    },
+  );
+
+  it("a valid value is used", async () => {
+    const { intervalFromEnv } = await import("../tools.js");
+    process.env.MEMORIA_COMPILE_INTERVAL_MS = "3600000";
+    try {
+      expect(intervalFromEnv("MEMORIA_COMPILE_INTERVAL_MS", 86_400_000)).toBe(3_600_000);
+    } finally {
+      delete process.env.MEMORIA_COMPILE_INTERVAL_MS;
+    }
+  });
+});
+
+describe("daily jobs count across restarts (2026-10 re-review F25)", () => {
+  const settle = () => new Promise((r) => setTimeout(r, 50));
+
+  it("auto-optimize runs at startup when due, and records it", async () => {
+    process.env.MEMORIA_AUTO_OPTIMIZE = "true";
+    store.setMeta("last_auto_optimize", String(Date.now() - 25 * 3_600_000));
+    timers.push(setupPeriodicOptimize(store));
+    await settle();
+    expect(Number(store.getMeta("last_auto_optimize"))).toBeGreaterThan(Date.now() - 10_000);
+    expect(store.getMeta("last_decay_run")).toBe(new Date().toISOString().slice(0, 10));
+  });
+
+  it("auto-compile runs at startup when overdue, not when it ran an hour ago", async () => {
+    process.env.MEMORIA_AUTO_COMPILE = "true";
+    const anHourAgo = String(Date.now() - 3_600_000);
+    store.setMeta("last_auto_compile", anHourAgo);
+    timers.push(setupPeriodicCompile(store));
+    await settle();
+    expect(store.getMeta("last_auto_compile")).toBe(anHourAgo);
+    clearInterval(timers.pop());
+
+    store.setMeta("last_auto_compile", String(Date.now() - 25 * 3_600_000));
+    timers.push(setupPeriodicCompile(store));
+    await settle();
+    expect(Number(store.getMeta("last_auto_compile"))).toBeGreaterThan(Date.now() - 10_000);
+  });
+});

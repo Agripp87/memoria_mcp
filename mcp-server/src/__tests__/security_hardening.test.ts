@@ -6,6 +6,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import os from "os";
 import path from "path";
 import fs from "fs";
+import { execFileSync } from "node:child_process";
 import { z } from "zod";
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "memoria-hardening-"));
@@ -155,7 +156,7 @@ describe("H3: one process per store directory", () => {
     fs.utimesSync(lock, old, old);
     const release = acquireStoreLock(db, { foreignWaitMs: 0 });
     expect(fs.readFileSync(lock, "utf-8")).toMatch(
-      new RegExp(`^${process.pid}\\n${os.hostname()}\\n\\d+$`),
+      new RegExp(`^${process.pid}\\n${os.hostname()}\\n\\d+\\npidspace:.*\\nstart:.*$`),
     );
     release();
     expect(fs.existsSync(lock)).toBe(false);
@@ -168,7 +169,7 @@ describe("H3: one process per store directory", () => {
     fs.writeFileSync(lock, `${process.ppid}\nold-revision`);
     process.env.MEMORIA_LOCK_TAKEOVER = "true";
     try {
-      const release = acquireStoreLock(db, { foreignWaitMs: 0 });
+      const release = acquireStoreLock(db, { foreignWaitMs: 0, takeoverGraceMs: 0 });
       release();
     } finally {
       delete process.env.MEMORIA_LOCK_TAKEOVER;
@@ -194,23 +195,78 @@ describe("H3: one process per store directory", () => {
     const db = path.join(ROOT, "data", "reused.sqlite");
     const lock = path.join(ROOT, "data", ".reused.sqlite.lock");
     const old = new Date(Date.now() - 5 * 60_000);
-    // No start time recorded (or not Linux): a live pid is the holder.
-    fs.writeFileSync(lock, `${process.ppid}\n${os.hostname()}`);
-    fs.utimesSync(lock, old, old);
-    expect(() => acquireStoreLock(db)).toThrow(/already in use/);
-    if (process.platform === "linux") {
-      // A start time that does not match the live process: a reused pid.
-      fs.writeFileSync(lock, `${process.ppid}\n${os.hostname()}\n1000`);
+    const write = (contents: string) => {
+      fs.writeFileSync(lock, contents);
       fs.utimesSync(lock, old, old);
-      acquireStoreLock(db)();
-      // Our own lock records our real start time, so it would be honoured.
-      const release = acquireStoreLock(db);
-      const [, , start] = fs.readFileSync(lock, "utf-8").split("\n");
-      expect(Math.abs(Number(start) - (Date.now() - process.uptime() * 1000))).toBeLessThan(2_000);
-      release();
-    } else {
-      fs.rmSync(lock);
+    };
+    // No start time recorded (0.3.0, or a platform without one): a live pid
+    // is the holder, even with a recorded start time that looks wrong.
+    write(`${process.ppid}\n${os.hostname()}`);
+    expect(() => acquireStoreLock(db)).toThrow(/already in use/);
+    write(`${process.ppid}\n${os.hostname()}\n1000`);
+    expect(() => acquireStoreLock(db)).toThrow(/already in use/);
+    fs.rmSync(lock);
+
+    const mine = ownLockLines(acquireStoreLock, db, lock);
+    if (!mine.pidspace || !mine.start) return; // no start record on this platform
+    const parentStart = parentStartRaw();
+    // The wall-clock line is off by an hour (a clock step): still the holder.
+    write(
+      `${process.ppid}\n${os.hostname()}\n${Date.now() - 3_600_000}\npidspace:${mine.pidspace}\nstart:${parentStart}`,
+    );
+    expect(() => acquireStoreLock(db)).toThrow(/already in use/);
+    // A different kernel start record: the pid was reused.
+    write(`${process.ppid}\n${os.hostname()}\n0\npidspace:${mine.pidspace}\nstart:${parentStart}9`);
+    acquireStoreLock(db)();
+    // Written on this host before a reboot.
+    write(
+      `${process.ppid}\n${os.hostname()}\n0\npidspace:other-boot/${mine.pidspace.split("/")[1]}\nstart:${parentStart}`,
+    );
+    acquireStoreLock(db)();
+  });
+
+  it("a hostname change does not make a live local holder foreign (2026-10 re-review F10)", async () => {
+    const { acquireStoreLock, StoreInUseError } = await import("../store-lock.js");
+    const { MemoryStore } = await import("../store.js");
+    const db = path.join(ROOT, "data", "renamed.sqlite");
+    const lock = path.join(ROOT, "data", ".renamed.sqlite.lock");
+    const mine = ownLockLines(acquireStoreLock, db, lock);
+    if (!mine.pidspace) return;
+    fs.writeFileSync(
+      lock,
+      `${process.ppid}\nold-hostname.local\n0\npidspace:${mine.pidspace}\nstart:${parentStartRaw()}`,
+    );
+    let err: unknown;
+    try {
+      acquireStoreLock(db, { foreignWaitMs: 0 });
+    } catch (e) {
+      err = e;
     }
+    expect(err).toBeInstanceOf(StoreInUseError);
+    expect((err as InstanceType<typeof StoreInUseError>).foreign).toBe(false);
+    // So a shared open runs as a secondary at once instead of waiting 75 s.
+    const started = Date.now();
+    const s = new MemoryStore(db, { shared: true });
+    expect(s.isPrimary).toBe(false);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    s.close();
+    fs.rmSync(lock);
+  });
+
+  it("a holder whose lock is taken over is told, once (2026-10 re-review F11)", async () => {
+    const { acquireStoreLock } = await import("../store-lock.js");
+    const db = path.join(ROOT, "data", "fenced.sqlite");
+    const lock = path.join(ROOT, "data", ".fenced.sqlite.lock");
+    let lost = 0;
+    const release = acquireStoreLock(db, { heartbeatMs: 20, onLost: () => lost++ });
+    await new Promise((r) => setTimeout(r, 60));
+    expect(lost).toBe(0);
+    fs.writeFileSync(lock, `${process.pid}\nnew-revision\n0\npidspace:x\nstart:y`);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(lost).toBe(1);
+    release();
+    expect(fs.existsSync(lock)).toBe(true); // the successor's lock stays
+    fs.rmSync(lock);
   });
 
   it("two spellings of one directory are one lock", async () => {
@@ -311,21 +367,183 @@ describe("shared stores: concurrent sessions (review 2026-10)", () => {
 describe("shared stores stay on one host (review 2026-10)", () => {
   it("a shared open refuses a live lock held on another host instead of becoming a secondary", async () => {
     const { MemoryStore } = await import("../store.js");
-    const { acquireStoreLock } = await import("../store-lock.js");
+    const { StoreInUseError } = await import("../store-lock.js");
     const db = path.join(ROOT, "data", "netmount.sqlite");
     const lock = path.join(ROOT, "data", ".netmount.sqlite.lock");
-    fs.writeFileSync(lock, `${process.ppid}\nother-host`);
-    // MemoryStore uses the default wait; check the refusal at the lock layer
-    // with no wait, then that MemoryStore does not swallow a foreign refusal.
-    expect(() => acquireStoreLock(db, { foreignWaitMs: 0 })).toThrow(/already in use/);
-    const { StoreInUseError } = await import("../store-lock.js");
+    const foreign = `${process.ppid}\nother-host\n0\npidspace:another-machine\nstart:1`;
+    fs.writeFileSync(lock, foreign);
+    let err: unknown;
+    try {
+      new MemoryStore(db, { shared: true, foreignWaitMs: 0 }).close();
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(StoreInUseError);
+    expect((err as InstanceType<typeof StoreInUseError>).foreign).toBe(true);
+    expect(fs.readFileSync(lock, "utf-8")).toBe(foreign);
+    fs.rmSync(lock);
+    const s = new MemoryStore(db, { shared: true, foreignWaitMs: 0 });
+    expect(s.isPrimary).toBe(true);
+    s.close();
+  });
+});
+
+/** The pidspace and start lines this process writes into its own lock. */
+function ownLockLines(
+  acquire: (db: string) => () => void,
+  db: string,
+  lock: string,
+): { pidspace: string; start: string } {
+  const release = acquire(db);
+  const text = fs.readFileSync(lock, "utf-8");
+  release();
+  const tag = (t: string) =>
+    (text.split("\n").find((l) => l.startsWith(`${t}:`)) ?? "").slice(t.length + 1);
+  return { pidspace: tag("pidspace"), start: tag("start") };
+}
+
+/** The parent process's start record, as the lock reads it (Linux, macOS). */
+function parentStartRaw(): string {
+  if (process.platform === "linux") {
+    const stat = fs.readFileSync(`/proc/${process.ppid}/stat`, "utf-8");
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+  }
+  return execFileSync("ps", ["-o", "lstart=", "-p", String(process.ppid)], {
+    encoding: "utf-8",
+    env: { ...process.env, TZ: "UTC", LC_ALL: "C" },
+  }).trim();
+}
+
+describe("shared stores and embedding providers (2026-10 re-review F8)", () => {
+  it("a secondary with another provider refuses to open instead of wiping the index", async () => {
+    const { MemoryStore } = await import("../store.js");
+    const { chunkMarkdown } = await import("../chunker.js");
+    const db = path.join(ROOT, "data", "providers.sqlite");
+    const primary = new MemoryStore(db, { shared: true });
+    try {
+      const c = "---\nname: p\n---\nquokka habitat survey results";
+      await primary.indexChunks(chunkMarkdown(c, "p.md"), 5, c);
+      // The index was built by another provider than this process uses.
+      (primary as any).db
+        .prepare("UPDATE store_meta SET value = 'openai' WHERE key = 'embedding_provider'")
+        .run();
+      expect(() => new MemoryStore(db, { shared: true })).toThrow(/MEMORIA_EMBEDDINGS/);
+      expect(primary.getStats().totalChunks).toBe(1);
+      // This process's vectors do not belong in that index either.
+      const d = "---\nname: q\n---\nwombat burrow depth notes";
+      await expect(primary.indexChunks(chunkMarkdown(d, "q.md"), 5, d)).rejects.toThrow(
+        /another embedding provider/,
+      );
+      // Search still works, by keywords.
+      expect((await primary.search("quokka habitat", 1))[0].file).toBe("p.md");
+    } finally {
+      primary.close();
+    }
+  });
+});
+
+describe("overlapping indexers keep a memory's own date (2026-10 re-review F12)", () => {
+  it("the second of two concurrent indexes of one content is a no-op", async () => {
+    const { MemoryStore } = await import("../store.js");
+    const { chunkMarkdown } = await import("../chunker.js");
+    const s = new MemoryStore(path.join(ROOT, "data", "overlap.sqlite"));
+    try {
+      const c = "---\nname: o\nupdated: 2024-03-01\n---\nplatypus migration decided";
+      const dates = { contentDate: "2024-03-01", mtimeMs: Date.now() };
+      await Promise.all([
+        s.indexChunks(chunkMarkdown(c, "o.md"), 5, c, dates),
+        s.indexChunks(chunkMarkdown(c, "o.md"), 5, c, dates),
+      ]);
+      const rows = (s as any).db
+        .prepare("SELECT updated_at, last_accessed FROM chunks WHERE file = 'o.md'")
+        .all();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].updated_at.slice(0, 10)).toBe("2024-03-01");
+      const meta = (s as any).db
+        .prepare("SELECT updated_at FROM file_meta WHERE file = 'o.md'")
+        .get();
+      expect(meta.updated_at.slice(0, 10)).toBe("2024-03-01");
+    } finally {
+      s.close();
+    }
+  });
+});
+
+describe("a store whose lock was taken over stops writing (2026-10 re-review F11)", () => {
+  it("refuses writes, never retakes the lock, and tells its listeners", async () => {
+    const { MemoryStore } = await import("../store.js");
+    const { chunkMarkdown } = await import("../chunker.js");
+    const s = new MemoryStore(path.join(ROOT, "data", "fence.sqlite"), { shared: true });
+    let told = 0;
+    s.onFenced(() => told++);
+    (s as any).lockOptions().onLost(); // what the heartbeat calls on a takeover
+    expect(told).toBe(1);
+    expect(s.fenced).toBe(true);
+    expect(s.isPrimary).toBe(false);
+    const c = "---\nname: f\n---\nnarwhal tusk length";
+    await expect(s.indexChunks(chunkMarkdown(c, "f.md"), 5, c)).rejects.toThrow(
+      /lost the store lock/,
+    );
+    expect(() => s.removeFile("f.md")).toThrow(/lost the store lock/);
+    expect(s.tryBecomePrimary()).toBe(false);
+    s.close(); // a no-op while fenced: no WAL checkpoint into the new holder's file
+    expect(() => s.getStats()).not.toThrow();
+    (s as any).fenced = false;
+    s.close();
+  });
+});
+
+describe("store lock edge cases (2026-10 final review)", () => {
+  it("one unreadable beat does not fence a healthy holder", async () => {
+    const { acquireStoreLock } = await import("../store-lock.js");
+    const db = path.join(ROOT, "data", "flaky.sqlite");
+    const lock = path.join(ROOT, "data", ".flaky.sqlite.lock");
+    let lost = 0;
+    const release = acquireStoreLock(db, { heartbeatMs: 20, onLost: () => lost++ });
+    const aside = `${lock}.aside`;
+    fs.renameSync(lock, aside); // a transient read failure
+    await new Promise((r) => setTimeout(r, 70));
+    fs.renameSync(aside, lock);
+    await new Promise((r) => setTimeout(r, 70));
+    expect(lost).toBe(0);
+    release();
+    expect(fs.existsSync(lock)).toBe(false);
+  });
+
+  it("a fresh lock from another boot with this hostname is another machine, not a leftover", async () => {
+    const { acquireStoreLock, StoreInUseError } = await import("../store-lock.js");
+    const db = path.join(ROOT, "data", "samename.sqlite");
+    const lock = path.join(ROOT, "data", ".samename.sqlite.lock");
+    const mine = ownLockLines(acquireStoreLock, db, lock);
+    if (!mine.pidspace.includes("/")) return; // Linux pid spaces only
+    const other = `${process.ppid}\n${os.hostname()}\n0\npidspace:other-boot/${mine.pidspace.split("/")[1]}\nstart:1`;
+    fs.writeFileSync(lock, other);
+    let err: unknown;
     try {
       acquireStoreLock(db, { foreignWaitMs: 0 });
     } catch (e) {
-      expect(e).toBeInstanceOf(StoreInUseError);
-      expect((e as InstanceType<typeof StoreInUseError>).foreign).toBe(true);
+      err = e;
     }
-    fs.rmSync(lock);
-    expect(MemoryStore).toBeDefined();
+    expect(err).toBeInstanceOf(StoreInUseError);
+    expect((err as InstanceType<typeof StoreInUseError>).foreign).toBe(true);
+    // Last refreshed before this machine booted: a leftover, reclaimed.
+    const beforeBoot = new Date(Date.now() - os.uptime() * 1000 - 60_000);
+    fs.utimesSync(lock, beforeBoot, beforeBoot);
+    acquireStoreLock(db, { foreignWaitMs: 0 })();
+  });
+
+  it("this container's previous run's lock is reclaimed after one missed heartbeat", async () => {
+    const { acquireStoreLock } = await import("../store-lock.js");
+    const db = path.join(ROOT, "data", "restarted.sqlite");
+    const lock = path.join(ROOT, "data", ".restarted.sqlite.lock");
+    const mine = ownLockLines(acquireStoreLock, db, lock);
+    if (!mine.pidspace.includes("/")) return;
+    const boot = mine.pidspace.split("/")[0];
+    fs.writeFileSync(lock, `7\n${os.hostname()}\n0\npidspace:${boot}/pid:[1]\nstart:1`);
+    const old = new Date(Date.now() - 30_000);
+    fs.utimesSync(lock, old, old);
+    const started = Date.now();
+    acquireStoreLock(db, { foreignWaitMs: 0 })();
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 });

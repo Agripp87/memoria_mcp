@@ -145,3 +145,56 @@ export function createOrAppend(
   fs.appendFileSync(file, appended, "utf-8");
   return "appended";
 }
+
+/**
+ * Create `file` with `data` only if it does not exist yet; false if it
+ * does. writeFileAtomic renames over whatever is there, so two servers on
+ * one store creating the same name (memory_compile in two windows) both
+ * "succeeded" and one file was lost. The content is written to a temp file
+ * and linked into place, so the new file appears complete or not at all.
+ * Where hard links are refused (some FUSE mounts), an exclusive open is used
+ * instead: still exclusive, but briefly visible while being written.
+ */
+export function writeFileExclusive(file: string, data: string | Buffer): boolean {
+  const dir = path.dirname(file);
+  const tmp = path.join(
+    dir,
+    `.${path.basename(file)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`,
+  );
+  const fd = fs.openSync(tmp, "wx", 0o666);
+  try {
+    try {
+      fs.writeFileSync(fd, data);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    try {
+      fs.linkSync(tmp, file);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "EEXIST") return false;
+      if (code !== "EPERM" && code !== "ENOTSUP" && code !== "ENOSYS" && code !== "EXDEV") throw e;
+      let out: number;
+      try {
+        out = fs.openSync(file, "wx", 0o666);
+      } catch (openErr) {
+        if ((openErr as NodeJS.ErrnoException).code === "EEXIST") return false;
+        throw openErr;
+      }
+      try {
+        fs.writeFileSync(out, data);
+        fs.fsyncSync(out);
+      } finally {
+        fs.closeSync(out);
+      }
+    }
+  } finally {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      // already gone
+    }
+  }
+  return true;
+}

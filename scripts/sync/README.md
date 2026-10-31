@@ -73,12 +73,19 @@ hand works exactly as well. Neither one needs Claude Code.
 
 | Script | When | What |
 |--------|------|------|
-| `memoria-sync-pull.sh` | Session start | Commits anything unflushed, optionally pulls an object-storage mirror, fetches and merges the git remote. On an unmergeable conflict it aborts the merge and writes a loud note into today's log. |
+| `memoria-sync-pull.sh` | Session start | Commits anything unflushed, optionally pulls an object-storage mirror, fetches and merges the git remote. On an unmergeable conflict it aborts the merge and writes a loud note into today's (UTC) log, creating the log if needed. |
 | `memoria-sync-push.sh` | Session end (every turn) | Commits the session's changes, then pushes — rate-limited to once every `MEMORIA_SYNC_INTERVAL_S` (default 900s) so the Stop hook does not hit the network on every turn. |
 
 Both fail soft. Offline, no remote, no git repo at all: they log a line and let
 the session proceed. A memory system that blocks your work when the network is
 down has failed at its job.
+
+Both also stand aside while a merge or rebase is in progress in the store (for
+example while you resolve a conflict the pull reported): they log a line and
+do nothing until you have committed or aborted it. Otherwise their `git add`
+would mark the conflicted files resolved with the conflict markers still in
+them. The two scripts also share one lock per store (a directory in `.git`),
+so a push never commits while a pull is half way through its merge.
 
 ### Environment
 
@@ -90,6 +97,8 @@ down has failed at its job.
 | `MEMORIA_SYNC_INTERVAL_S` | `900` | Minimum seconds between pushes; `0` pushes every time. Local commits are never rate-limited. |
 | `MEMORIA_SYNC_MIRROR` | `$MEMORIA_DIR/.memoria-mirror.sh` | Optional object-storage hook (below) |
 | `MEMORIA_SYNC_ALLOW_STORE_MIRROR` | *(unset)* | Set to `true` to let either sync script execute the mirror above. The mirror lives inside the synced store, so it never runs by default. |
+| `MEMORIA_SYNC_MIRROR_PUSH` | *(unset)* | Set to `true` to let the push script run the mirror's `push` too. Off by default, because it overwrites the bucket's files: see [Object storage](#object-storage-optional). |
+| `MEMORIA_SYNC_LOCK_WAIT_S` | `20` | How long either script waits for the store's sync lock while the other holds it. A pull then skips; a push retries in the background a minute later. |
 | `MEMORIA_SYNC_LOG` | `$MEMORIA_DIR/.sync.log` | Where the scripts log |
 
 ## Why daily logs never conflict
@@ -141,13 +150,26 @@ case "$1" in
 esac
 ```
 
-Two things matter here:
+The mirror copies files; it does not merge them. That limits what it can do
+safely:
 
 - **Never pass `-d`** (or `--delete`) on the pull. A delete-enabled sync will
   happily remove memories that exist only on this device.
-- The pull runs **before** the git merge and its result is committed first, so
-  bucket-side changes become ordinary commits and go through the same union
-  merge as everything else.
+- **The pull only takes appends.** `rsync` copies the bucket's version of any
+  file that differs, whole. The pull hook keeps that copy only when it extends
+  this device's copy (the hosted server appended entries) or the file is new to
+  the store. When a file changed on both sides, the local copy is kept, the
+  file is named in `.sync.log`, and the bucket keeps its own copy: merge those
+  entries by hand. Bucket-side changes do **not** go through the union merge;
+  there is no common ancestor to merge them against.
+- **The push is off by default.** Copying this device's files over the bucket
+  drops every entry the hosted server wrote since the last pull, and the Stop
+  hook used to do that on every turn. It runs only with
+  `MEMORIA_SYNC_MIRROR_PUSH=true`; set that only if nothing else writes to the
+  bucket.
+- **Turn on object versioning for the bucket**
+  (`gcloud storage buckets update gs://your-bucket --versioning`). It is the
+  only way back to a file a mirror overwrote.
 
 `.memoria-mirror.sh` is git-ignored by the template, because it usually
 contains bucket names and account details.

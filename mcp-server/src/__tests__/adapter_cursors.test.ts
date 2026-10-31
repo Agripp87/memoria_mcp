@@ -6,12 +6,18 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Database from "better-sqlite3";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 // ── IMAP ────────────────────────────────────────────────────
 
 interface FakeMessage {
   uid: number;
   seq: number;
+  /** As imapflow parses it: a Date, possibly invalid. */
+  date?: Date;
+  internalDate?: Date;
 }
 
 const imap = {
@@ -65,10 +71,18 @@ class FakeImapFlow {
   async *fetch(range: string, query: any, options: any = {}) {
     imap.fetchCalls.push({ range, query, options });
     for (const m of this.select(range, options.uid ? "uid" : "seq")) {
+      const raw = Buffer.from(`Header: x\r\n\r\nWe decided to ship the release on Friday.`);
       yield {
         uid: m.uid,
-        envelope: { from: [{ name: "Alice" }], to: [], subject: `Project update ${m.uid}` },
-        source: Buffer.from(`Header: x\r\n\r\nWe decided to ship the release on Friday.`),
+        envelope: {
+          from: [{ name: "Alice" }],
+          to: [],
+          subject: `Project update ${m.uid}`,
+          date: m.date,
+        },
+        internalDate: query.internalDate ? m.internalDate : undefined,
+        // imapflow reads a partial fetch from start/maxLength.
+        source: typeof query.source === "object" ? raw.subarray(0, query.source.maxLength) : raw,
       };
     }
   }
@@ -167,6 +181,32 @@ describe("EmailAdapter", () => {
     const events = await a.poll();
     expect(imap.instances).toHaveLength(2);
     expect(events.map((e) => e.id)).toEqual(["email-120004"]);
+  });
+
+  it("an unparseable Date header skips nothing and stalls nothing (F3)", async () => {
+    const a = new EmailAdapter();
+    await a.init(emailConfig());
+    a.setCheckpoint("1:119999");
+    const received = new Date("2026-10-29T08:00:00Z");
+    imap.messages[1].date = new Date("Thu, 29 Oct 2026 10:00:00 CEST"); // Invalid Date
+    imap.messages[1].internalDate = received;
+    const events = await a.poll();
+    expect(events).toHaveLength(5);
+    expect(events.find((e) => e.id === `email-${imap.messages[1].uid}`)!.timestamp).toBe(
+      received.toISOString(),
+    );
+    expect(a.getCheckpoint()).toBe(`1:${imap.messages[4].uid}`);
+  });
+
+  it("fetches a bounded part of each message, not the whole of it (F30)", async () => {
+    const a = new EmailAdapter();
+    await a.init(emailConfig());
+    a.setCheckpoint("1:119999");
+    await a.poll();
+    const source = imap.fetchCalls[0].query.source;
+    expect(source).not.toHaveProperty("maxBytes");
+    expect(typeof source.maxLength).toBe("number");
+    expect(source.maxLength).toBeLessThanOrEqual(64 * 1024);
   });
 
   it("throws on a failed poll instead of reporting an empty mailbox", async () => {
@@ -284,6 +324,59 @@ describe("GoogleGmailAdapter history cursor", () => {
     await expect(a.poll()).rejects.toThrow(/rate limited/);
   });
 
+  it("an unparseable Date header falls back to the receive time (F3)", async () => {
+    const { gmail, fetched } = fakeGmail([{ history: [record(101, "m1"), record(102, "m2")] }]);
+    const get = gmail.users.messages.get;
+    gmail.users.messages.get = vi.fn(async (args: { id: string }) => {
+      const r = await get(args);
+      if (args.id === "m1") {
+        r.data.payload.headers[2].value = "Thu, 29 Oct 2026 10:00:00 CEST";
+        (r.data as any).internalDate = String(Date.parse("2026-10-29T08:00:00Z"));
+      }
+      return r;
+    });
+    const a = gmailAdapter(gmail, 50);
+    const events = await a.poll();
+    expect(events).toHaveLength(2);
+    expect(events[0].timestamp).toBe("2026-10-29T08:00:00.000Z");
+    expect(a.getCheckpoint()).toBe("900");
+    expect(fetched).toEqual(["m1", "m2"]);
+  });
+
+  it("the default excludes skip the Promotions tab, also in the old spelling (F20)", async () => {
+    const history = [
+      {
+        id: "101",
+        messagesAdded: [{ message: { id: "promo", labelIds: ["INBOX", "CATEGORY_PROMOTIONS"] } }],
+      },
+      { id: "102", messagesAdded: [{ message: { id: "real", labelIds: ["INBOX"] } }] },
+    ];
+    for (const excludeLabels of [
+      new GoogleGmailAdapter().info.defaultConfig.settings!.excludeLabels,
+      ["SPAM", "TRASH", "PROMOTIONS"],
+      ["promotions"],
+    ]) {
+      const { gmail, fetched } = fakeGmail([{ history }]);
+      const a = gmailAdapter(gmail, 50);
+      (a as any).config.settings.excludeLabels = excludeLabels;
+      await a.poll();
+      expect(fetched, JSON.stringify(excludeLabels)).toEqual(["real"]);
+    }
+  });
+
+  it("list mode excludes the tab as a category (F20)", async () => {
+    const { gmail } = fakeGmail([{ history: [] }]);
+    const list = vi.fn(async () => ({ data: { messages: [] } }));
+    (gmail.users.messages as any).list = list;
+    const a = gmailAdapter(gmail, 50);
+    (a as any).config.settings.excludeLabels = ["SPAM", "PROMOTIONS"];
+    a.setCheckpoint("");
+    await a.poll();
+    const q = (list.mock.calls[0] as any)[0].q as string;
+    expect(q).toContain("-category:promotions");
+    expect(q).toContain("-label:spam");
+  });
+
   it("skips a message deleted since its history record (404)", async () => {
     const { gmail } = fakeGmail([{ history: [record(101, "m1")] }]);
     gmail.users.messages.get = vi.fn(async () => {
@@ -329,8 +422,11 @@ function addEvent(
   );
 }
 
+// The adapter keys its event ids with the collector key in this directory.
+const CAL_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "memoria-cal-data-"));
+
 function calendarAdapter(db: Database.Database, lookAheadDays = 7) {
-  const a = new CalendarAdapter();
+  const a = new CalendarAdapter({ dataDir: CAL_DATA });
   (a as any).db = db;
   (a as any).config = {
     enabled: true,
@@ -352,6 +448,23 @@ describe("CalendarAdapter collection", () => {
       "Planning meeting A",
       "Planning meeting B",
     ]);
+  });
+
+  it("event ids carry no title text, and change when the event is edited (F2)", async () => {
+    // Ids reach the synced daily log (its ref) even for local-only events.
+    const db = calendarDb();
+    const id = addEvent(db, "Zoom passcode 123456", 2, nowCore() - 600);
+    const a = calendarAdapter(db);
+    const [first] = await a.poll();
+    expect(first.id).toMatch(/^cal-\d+-\d+-[0-9a-f]{16}$/);
+    expect(first.id).not.toMatch(/passcode|123456|Zoom/);
+    db.prepare("UPDATE ZCALENDARITEM SET ZSUMMARY = ? WHERE Z_PK = ?").run(
+      "Zoom passcode 654321",
+      id,
+    );
+    const [edited] = await a.poll();
+    expect(edited.id).not.toBe(first.id);
+    expect(edited.id).not.toMatch(/passcode|654321/);
   });
 
   it("collects each event once, and again when it is edited", async () => {

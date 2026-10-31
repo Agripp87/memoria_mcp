@@ -67,8 +67,9 @@ steps:
       # --memory 2Gi above.
       # MEMORIA_TOKEN_DB_DIR keeps the OAuth token DB on container-local /tmp
       # (SQLite WAL is unreliable on the GCS-FUSE mount). Also set in the image.
-      # MEMORIA_AUTO_COMPILE=true runs the "compile, don't retrieve" loop on a
-      # 24h timer: it rolls the daily-log firehose up into linked entity pages
+      # MEMORIA_AUTO_COMPILE=true runs the "compile, don't retrieve" loop once
+      # a day, counted across cold starts (the last run is kept in the store):
+      # it rolls the daily-log firehose up into linked entity pages
       # under entities/ (draining the ingest→compile queue so only touched
       # sources rebuild). Deterministic + idempotent, and max-instances=1 means
       # no concurrency hazard.
@@ -104,6 +105,26 @@ steps:
       - "--service-account"
       - "memoria-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
       - "--allow-unauthenticated"
+
+  # Route all traffic to the revision just deployed. `gcloud run deploy` only
+  # moves traffic while the service routes to LATEST, and a rollback
+  # (`update-traffic --to-revisions <prev>=100`, as the example workflow does)
+  # replaces that with a pin: every later deploy then succeeded while serving
+  # 0% of traffic, and the smoke test passed against the old revision. This
+  # restores LATEST on every deploy, the manual ones in README.md included.
+  # It moves 100% at once, so two revisions never serve the store together.
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      - "run"
+      - "services"
+      - "update-traffic"
+      - "memoria"
+      - "--region"
+      - "${_REGION}"
+      - "--platform"
+      - "managed"
+      - "--to-latest"
 
 substitutions:
   _REGION: us-central1

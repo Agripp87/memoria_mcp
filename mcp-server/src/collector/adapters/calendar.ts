@@ -11,6 +11,7 @@ import * as os from "node:os";
 import * as fs from "node:fs";
 import type { SourceAdapter, AdapterInfo, AdapterConfig, RawEvent } from "./base.js";
 import { estimateImportance, classifyPrivacy, CORE_DATA_EPOCH } from "./base.js";
+import { keyedContentHash } from "../crypto.js";
 
 export class CalendarAdapter implements SourceAdapter {
   readonly info: AdapterInfo = {
@@ -45,6 +46,9 @@ export class CalendarAdapter implements SourceAdapter {
   /** A pre-v2 cursor: on the next poll, emit only events modified since. */
   private legacyCursor: string | null = null;
   private config!: AdapterConfig;
+
+  /** @param opts.dataDir where the collector key lives (for keyed event ids) */
+  constructor(private readonly opts: { dataDir?: string } = {}) {}
 
   async init(config: AdapterConfig): Promise<void> {
     this.config = config;
@@ -181,7 +185,11 @@ export class CalendarAdapter implements SourceAdapter {
       if (importance < this.config.importanceThreshold) continue;
 
       events.push({
-        id: `cal-${startTime.getTime()}-${row.title.slice(0, 20)}`,
+        // No title text in the id: ids travel where content may not (the
+        // daily-log ref, provenance), and titles carry passcodes. The keyed
+        // fingerprint keeps an edited event distinct from its earlier
+        // version, which the buffer would otherwise drop as a duplicate.
+        id: `cal-${key}-${startTime.getTime()}-${keyedContentHash(fingerprint, this.opts.dataDir).slice(0, 16)}`,
         source: "calendar",
         eventType: row.all_day ? "all_day_event" : "event",
         content,

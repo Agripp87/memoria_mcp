@@ -68,3 +68,31 @@ export function listDailyLogNames(memoriesDir: string): string[] {
     return [];
   }
 }
+
+/**
+ * A directory directly under memories/ that Memoria writes generated files
+ * into (entities/), held to the same rule as daily/: it may not be a
+ * symlink, so a pushed `entities -> ~/.claude/commands` cannot make the
+ * entity compiler write outside the store. With `create`, makes it and
+ * checks that it really is memories/<name> afterwards (a link swapped in
+ * between the check and mkdir).
+ */
+export function storeSubdir(memoriesDir: string, name: string, create = false): string {
+  const dir = path.join(memoriesDir, name);
+  let st: fs.Stats | undefined;
+  try {
+    st = fs.lstatSync(dir);
+  } catch {
+    st = undefined; // missing
+  }
+  if (st && (st.isSymbolicLink() || !st.isDirectory())) {
+    throw new Error(`Refusing memories/${name}: not a real directory (a symlink?).`);
+  }
+  if (create) {
+    fs.mkdirSync(dir, { recursive: true });
+    if (fs.realpathSync(dir) !== path.join(fs.realpathSync(memoriesDir), name)) {
+      throw new Error(`Refusing memories/${name}: it resolves outside the store.`);
+    }
+  }
+  return dir;
+}

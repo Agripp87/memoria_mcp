@@ -146,3 +146,79 @@ describe("lint index drift (P1)", () => {
     expect(result.indexDrift.missingFromIndex).not.toContain("feedback/be-terse.md");
   });
 });
+
+describe("lint with %, spaces and parentheses in file names (2026-10 re-review F43)", () => {
+  it("resolves, and reports none of them missing or stale", async () => {
+    for (const name of ["50%-plan.md", "my plan.md", "a%41b.md", "notes (v2).md"]) {
+      writeMemory(`decisions/${name}`, { name, description: "d", type: "decision" }, "body");
+    }
+    rebuildMarkdownIndex();
+    const r = await runLint(store, MEM, tools.getAllMemoryFiles, tools.getRelativePath);
+    for (const name of ["50%-plan.md", "my plan.md", "a%41b.md", "notes (v2).md"]) {
+      expect(r.indexDrift.missingFromIndex).not.toContain(`decisions/${name}`);
+      expect(r.indexDrift.staleInIndex).not.toContain(`decisions/${name}`);
+    }
+    // A link that cannot be decoded is reported, not fatal.
+    fs.appendFileSync(path.join(MEM, "MEMORY_INDEX.md"), "\n- [bad](decisions/bad%zz.md)\n");
+    const again = await runLint(store, MEM, tools.getAllMemoryFiles, tools.getRelativePath);
+    expect(again.indexDrift.staleInIndex).toContain("decisions/bad%zz.md");
+    for (const name of ["50%-plan.md", "my plan.md", "a%41b.md", "notes (v2).md"]) {
+      fs.rmSync(path.join(MEM, "decisions", name));
+    }
+    rebuildMarkdownIndex();
+  });
+});
+
+describe("a case-only rename drops the old index key (2026-10 re-review F40)", () => {
+  it("keeps only the spelling on disk, even where lstat ignores case", async () => {
+    const old = writeMemory(
+      "decisions/API-Plan.md",
+      { name: "p", type: "decision" },
+      "zebrafish sprint",
+    );
+    await tools.reindexAll(store);
+    expect(store.getIndexedFiles()).toContain("decisions/API-Plan.md");
+    // Rename to a new case; emulate a case-insensitive filesystem's lstat.
+    fs.renameSync(old, path.join(MEM, "decisions", "api-plan.md"));
+    fs.writeFileSync(
+      path.join(MEM, "decisions", "api-plan.md"),
+      "---\nname: p\ntype: decision\n---\n\nmanatee sprint\n",
+    );
+    const lstat = fs.lstatSync;
+    (fs as any).lstatSync = (p: fs.PathLike, ...rest: any[]) =>
+      (lstat as any)(String(p).replace("API-Plan.md", "api-plan.md"), ...rest);
+    try {
+      await tools.reindexAll(store);
+    } finally {
+      (fs as any).lstatSync = lstat;
+    }
+    const files = store.getIndexedFiles();
+    expect(files).toContain("decisions/api-plan.md");
+    expect(files).not.toContain("decisions/API-Plan.md");
+    expect((await store.search("zebrafish sprint", 5)).map((r: any) => r.file)).not.toContain(
+      "decisions/API-Plan.md",
+    );
+    fs.rmSync(path.join(MEM, "decisions", "api-plan.md"));
+    await tools.reindexAll(store);
+  });
+});
+
+describe("MEMORIA_DIR default (2026-10 re-review F48)", () => {
+  it("warns about a 0.2.x store in /data/memoria and does not switch to it", () => {
+    const warnings: string[] = [];
+    const dir = tools.resolveDefaultMemoriaDir({
+      env: {},
+      homedir: "/home/u",
+      exists: (p) => p === "/data/memoria/memories",
+      warn: (m) => warnings.push(m),
+    });
+    expect(dir).toBe(path.join("/home/u", ".memoria"));
+    expect(warnings.join("")).toMatch(/MEMORIA_DIR=\/data\/memoria/);
+    expect(tools.resolveDefaultMemoriaDir({ env: { DOCKER: "true" }, exists: () => true })).toBe(
+      "/data/memoria",
+    );
+    const quiet: string[] = [];
+    tools.resolveDefaultMemoriaDir({ env: {}, exists: () => false, warn: (m) => quiet.push(m) });
+    expect(quiet).toEqual([]);
+  });
+});
