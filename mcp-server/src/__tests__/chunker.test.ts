@@ -265,3 +265,14 @@ describe("chunkMarkdown never splits a surrogate pair (re-review 2026-10)", () =
     }
   });
 });
+
+describe("chunk line numbers with CRLF or a BOM (2026-10 re-review F42)", () => {
+  it("are the same as for LF", () => {
+    const lf = "---\nname: x\ntype: user\nimportance: 5\n---\n\n# Title\n\nLine one\nLine two\n";
+    const start = (c: string) => chunkMarkdown(c, "x.md")[0].startLine;
+    const expected = start(lf);
+    expect(start(lf.replace(/\n/g, "\r\n"))).toBe(expected);
+    expect(start("﻿" + lf)).toBe(expected);
+    expect(start("﻿" + lf.replace(/\n/g, "\r\n"))).toBe(expected);
+  });
+});

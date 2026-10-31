@@ -786,17 +786,25 @@ export class MemoryStore {
     // ── Stage 1: Collect candidate IDs ──────────────────────
     const candidateIds = new Set<number>();
     const ftsScores = new Map<number, number>();
+    // Whether the keyword query ran, and whether its LIMIT cut it short. A
+    // candidate it ran over and did not return has no query term at all
+    // (terms are OR-ed), so its keyword score is 0.
+    let ftsQuery = "";
+    let ftsRan = false;
+    let ftsTruncated = false;
 
     // FTS5 candidates (keyword relevance)
     if (useFts) {
       try {
-        const ftsQuery = toFtsQuery(query);
+        ftsQuery = toFtsQuery(query);
         if (ftsQuery) {
           const ftsRows = this.db
             .prepare(
               `SELECT rowid, rank FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?`,
             )
             .all(ftsQuery, maxResults * 10) as Array<{ rowid: number; rank: number }>;
+          ftsRan = true;
+          ftsTruncated = ftsRows.length >= maxResults * 10;
 
           if (ftsRows.length > 0) {
             for (const row of ftsRows) {
@@ -934,6 +942,26 @@ export class MemoryStore {
         .all() as typeof rows;
     }
 
+    // Past the LIMIT, score the remaining candidates with the same BM25, so
+    // a strong match the cut-off missed is not scored as no match.
+    if (ftsRan && ftsTruncated) {
+      const missing = rows.map((r) => r.id).filter((id) => !ftsScores.has(id));
+      for (let i = 0; i < missing.length; i += 500) {
+        const batch = missing.slice(i, i + 500);
+        const more = this.db
+          .prepare(
+            `SELECT rowid, rank FROM chunks_fts WHERE chunks_fts MATCH ?
+             AND rowid IN (${batch.map(() => "?").join(",")})`,
+          )
+          .all(ftsQuery, ...batch) as Array<{ rowid: number; rank: number }>;
+        for (const row of more) {
+          const bm25 = Math.max(0, -row.rank);
+          ftsScores.set(row.rowid, bm25 / (bm25 + 10));
+        }
+      }
+    }
+    const fallbackTerms = (query.toLowerCase().match(FTS_TERM_RE) ?? []).filter(Boolean);
+
     const scored: SearchResult[] = rows.map((row) => {
       // Reuse the similarity computed during the vector candidate scan; only
       // recompute for candidates that came in beyond the scan cap.
@@ -951,19 +979,18 @@ export class MemoryStore {
       // query matched use the fixed BM25 transform; every other candidate
       // (recency/vector-sourced) gets the substring fallback instead of a flat
       // 0, so scoring is consistent no matter which path surfaced the row.
-      let keywordScore: number | undefined = useFts ? ftsScores.get(row.id) : undefined;
-      if (keywordScore === undefined) {
-        const textLower = row.text.toLowerCase();
-        const queryTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
-        let keywordHits = 0;
-        for (const term of queryTerms) {
-          if (textLower.includes(term)) keywordHits++;
-        }
-        keywordScore = queryTerms.length > 0 ? keywordHits / queryTerms.length : 0;
-        // The substring fallback is coarser than BM25 — cap it below the BM25
-        // transform's typical range so a fallback-scored row can't outrank a
-        // genuine FTS match on keyword signal alone.
-        keywordScore = Math.min(keywordScore, 0.6);
+      let keywordScore: number | undefined = ftsScores.get(row.id);
+      if (keywordScore === undefined && ftsRan) {
+        // FTS ran over this row and found none of the query's words. The
+        // substring fallback used to give such rows up to 0.6 for words
+        // found INSIDE other words, more than many genuine BM25 matches.
+        keywordScore = 0;
+      } else if (keywordScore === undefined) {
+        // No FTS5, or it failed: whole-word matches, capped below BM25's
+        // usual range since this is the coarser signal.
+        const words = new Set(row.text.toLowerCase().match(FTS_TERM_RE) ?? []);
+        const hits = fallbackTerms.filter((t) => words.has(t)).length;
+        keywordScore = fallbackTerms.length > 0 ? Math.min(hits / fallbackTerms.length, 0.6) : 0;
       }
 
       const relevanceScore = vectorMix * vectorSim + (1 - vectorMix) * keywordScore;

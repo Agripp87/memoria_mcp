@@ -48,6 +48,11 @@ export function resolveLink(token: string, store: StoreEntry[]): string | null {
   const base = (f: string) => f.replace(/\.md$/i, "").split("/").pop() || f;
   const byFile = store.find((e) => norm(e.file) === t);
   if (byFile) return byFile.file;
+  // A path without its extension, as entity pages link their daily logs
+  // ([[daily/2026-10-28]]).
+  const noExt = t.replace(/\.md$/, "");
+  const byPath = store.find((e) => norm(e.file).replace(/\.md$/, "") === noExt);
+  if (byPath) return byPath.file;
   const byName = store.find((e) => norm(e.name) === t);
   if (byName) return byName.file;
   const byBase = store.find((e) => norm(base(e.file)) === t);

@@ -76,7 +76,8 @@ server core. Concretely:
   is contained to its configured path and cannot read the collector key or
   credential store.
 - **Google adapters** require a refresh token with read-only scopes; store
-  credentials only through `memory_sources` (they are encrypted) and revoke the
+  credentials only through the dashboard's Sources tab (they are encrypted; an
+  MCP client cannot set or change them) and revoke the
   token at <https://myaccount.google.com/permissions> when you stop using
   them.
 - **A compromised Memoria instance = compromised source credentials** (IMAP

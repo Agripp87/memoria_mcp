@@ -36,16 +36,42 @@ import { dailyLogPath, listDailyLogNames } from "./daily-paths.js";
 
 // ─── Path resolution ────────────────────────────────────────
 
-function resolveDefaultMemoriaDir(): string {
+export function resolveDefaultMemoriaDir(
+  opts: {
+    env?: NodeJS.ProcessEnv;
+    homedir?: string;
+    exists?: (p: string) => boolean;
+    warn?: (msg: string) => void;
+  } = {},
+): string {
+  const env = opts.env ?? process.env;
   // Docker / cloud: the image sets DOCKER=true (and MEMORIA_DIR). Merely
   // having a /data directory used to count too, so on an ordinary host with
   // one the local server used /data/memoria while the sync hooks used
   // ~/.memoria, and an unwritable /data crashed the server at import.
-  if (process.env.DOCKER === "true") {
+  if (env.DOCKER === "true") {
     return "/data/memoria";
   }
+  // A 0.2.x install outside Docker on a host with /data kept its store
+  // there; say so instead of silently starting from an empty one.
+  const exists =
+    opts.exists ??
+    ((p: string) => {
+      try {
+        return fs.existsSync(p);
+      } catch {
+        return false;
+      }
+    });
+  if (exists("/data/memoria/memories")) {
+    (opts.warn ?? ((m: string) => process.stderr.write(m)))(
+      "Memoria: a store exists at /data/memoria, which versions before 0.3.0 used by default " +
+        "on hosts with a /data directory. This server uses ~/.memoria; set " +
+        "MEMORIA_DIR=/data/memoria to keep using the old store.\n",
+    );
+  }
   // Local: ~/.memoria
-  return path.join(os.homedir(), ".memoria");
+  return path.join(opts.homedir ?? os.homedir(), ".memoria");
 }
 
 const MEMORIA_DIR = process.env.MEMORIA_DIR || resolveDefaultMemoriaDir();
@@ -318,13 +344,13 @@ async function sweep(
     await new Promise((resolve) => setImmediate(resolve));
   }
   if (!shouldStop?.() && !store.fenced) {
-    store.retainFiles(files.map(getRelativePath), (rel) => {
-      try {
-        return fs.lstatSync(path.join(MEMORIES_DIR, rel)).isFile();
-      } catch {
-        return false;
-      }
-    });
+    // A file written while this pass ran is not in `files`; a second
+    // listing finds it. It used to ask lstat, which on a case-insensitive
+    // filesystem (macOS, Windows) also "found" a file under its old
+    // spelling after a case-only rename, so the old key, with the text the
+    // user had since removed, was never dropped.
+    const fresh = new Set(getAllMemoryFiles().map(getRelativePath));
+    store.retainFiles(files.map(getRelativePath), (rel) => fresh.has(rel));
     if (failed.length === 0) store.needsReindex = false;
   }
   return { files: files.length, chunks, failed };
@@ -387,6 +413,14 @@ export function setupPrimaryTakeover(store: MemoryStore): NodeJS.Timeout | null 
   return timer;
 }
 
+function existsWithExactName(file: string): boolean {
+  try {
+    return fs.readdirSync(path.dirname(file)).includes(path.basename(file));
+  } catch {
+    return false;
+  }
+}
+
 export function setupWatcher(store: MemoryStore): void {
   if (!fs.existsSync(MEMORIES_DIR)) return;
 
@@ -406,7 +440,10 @@ export function setupWatcher(store: MemoryStore): void {
       pendingChanges.clear();
       for (const file of changed) {
         try {
-          if (fs.existsSync(file)) {
+          // By exact spelling: after a case-only rename, the old name still
+          // "exists" on a case-insensitive filesystem; its key is dropped and
+          // the new name, which has its own event, is indexed under its own.
+          if (existsWithExactName(file)) {
             await reindexFile(store, file);
           } else {
             store.removeFile(getRelativePath(file));
@@ -1707,7 +1744,14 @@ function escapeMarkdownText(s: string): string {
 /** Encode characters that are unsafe in markdown link URLs: spaces, `(`, `)`. */
 function escapeMarkdownUrl(s: string): string {
   // Convert Windows backslashes to forward slashes for URL safety
-  return s.replace(/\\/g, "/").replace(/ /g, "%20").replace(/\(/g, "%28").replace(/\)/g, "%29");
+  // "%" first, so a file name that contains one links to itself instead of
+  // to whatever its "%xx" decodes to (or to a malformed URI).
+  return s
+    .replace(/\\/g, "/")
+    .replace(/%/g, "%25")
+    .replace(/ /g, "%20")
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29");
 }
 
 /** Escape pipes in table cells. */

@@ -119,7 +119,11 @@ export function chunkMarkdown(content: string, filePath: string): Chunk[] {
   // .split("\n").length over-counts by 1 for any string with content after
   // the last newline, which made search results report off-by-one line
   // numbers in indexes.
-  const frontmatterMatch = content.match(/^---\n[\s\S]*?\n---\n?/);
+  // On the same normalized text parseFrontmatter reads: against the raw
+  // content, a BOM or CRLF line endings kept the pattern from matching, and
+  // every line number then counted from the start of the body.
+  const normalized = content.replace(/^\ufeff/, "").replace(/\r\n/g, "\n");
+  const frontmatterMatch = normalized.match(/^---\n[\s\S]*?\n---\n?/);
   const frontmatterLines = frontmatterMatch ? (frontmatterMatch[0].match(/\n/g) || []).length : 0;
 
   // A single line longer than a chunk (pasted logs, minified JSON, a long

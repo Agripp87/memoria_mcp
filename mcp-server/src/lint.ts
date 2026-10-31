@@ -290,28 +290,35 @@ function findIndexDrift(
     return { missingFromIndex: ["(MEMORY_INDEX.md does not exist)"], staleInIndex: [] };
   }
 
-  // Core (non-daily) files that should appear in the catalog.
+  // Markdown links in the index, decoded, and those pointing at files that
+  // no longer exist. A "%" not followed by hex used to throw from
+  // decodeURIComponent and fail the whole lint report.
+  const staleInIndex: string[] = [];
+  const linkRe = /\]\(([^)]+\.md)(?:#[^)]*)?\)/g;
+  const targets = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = linkRe.exec(indexText)) !== null) {
+    if (m[1].includes("://")) continue; // external link
+    let ref: string;
+    try {
+      ref = decodeURIComponent(m[1]).trim();
+    } catch {
+      ref = m[1].trim();
+    }
+    if (!ref.endsWith(".md") || targets.has(ref)) continue;
+    targets.add(ref);
+    const abs = path.resolve(memoriesDir, ref);
+    if (!fs.existsSync(abs)) staleInIndex.push(ref);
+  }
+
+  // Core (non-daily) files that should appear in the catalog: compared with
+  // the decoded link targets, so names with spaces, parentheses or "%" (which
+  // the generator escapes) are not reported missing.
   const missingFromIndex: string[] = [];
   for (const file of files) {
     const relPath = getRelativePath(file);
     if (isDailyPath(relPath) || relPath === "MEMORY_INDEX.md") continue;
-    // The generator links by relative path; a plain substring check is robust
-    // to surrounding markdown ([name](path) | desc | ...).
-    if (!indexText.includes(relPath)) missingFromIndex.push(relPath);
-  }
-
-  // Markdown links in the index pointing at files that no longer exist.
-  const staleInIndex: string[] = [];
-  const linkRe = /\]\(([^)]+\.md)(?:#[^)]*)?\)/g;
-  const seen = new Set<string>();
-  let m: RegExpExecArray | null;
-  while ((m = linkRe.exec(indexText)) !== null) {
-    const ref = decodeURIComponent(m[1].replace(/%20/g, " ")).trim();
-    if (!ref.endsWith(".md") || seen.has(ref)) continue;
-    seen.add(ref);
-    if (ref.includes("://")) continue; // external link
-    const abs = path.resolve(memoriesDir, ref);
-    if (!fs.existsSync(abs)) staleInIndex.push(ref);
+    if (!targets.has(relPath)) missingFromIndex.push(relPath);
   }
 
   return { missingFromIndex, staleInIndex };

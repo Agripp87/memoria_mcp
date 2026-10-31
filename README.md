@@ -351,31 +351,17 @@ The three Google adapters share a single set of OAuth 2.0 credentials:
 
 **3. Enable the adapters:**
 
+In the Memoria dashboard (Sources tab), click **Enable** on `google-gmail`, agree, and paste the client ID, client secret and refresh token into the form that opens. Credentials, hosts and what a source reads can only be set there (or with the API key against `/dashboard/api`); an MCP client may only change a source's schedule:
+
 ```
-# First grant consent in the Memoria dashboard (Sources tab) — consent
-# cannot be granted through the MCP tool surface.
-memory_sources action="enable" source="google-gmail" config={
-  "google_client_id": "YOUR_CLIENT_ID.apps.googleusercontent.com",
-  "google_client_secret": "YOUR_CLIENT_SECRET",
-  "google_refresh_token": "YOUR_REFRESH_TOKEN",
-  "labels": ["INBOX"],
-  "excludeLabels": ["SPAM", "TRASH", "PROMOTIONS"]
-}
+memory_sources action="configure" source="google-gmail" config={ "pollIntervalSec": 600 }
 ```
 
-The same credentials work for all three Google adapters. Credentials are stored encrypted (AES-256-GCM).
+The same credentials work for all three Google adapters. Credentials are stored encrypted (AES-256-GCM). Leaving a credential field blank when you configure a source later keeps the stored value. Gmail skips `SPAM`, `TRASH` and the Promotions tab (`CATEGORY_PROMOTIONS`; the tab names `PROMOTIONS`, `SOCIAL`, `UPDATES` and `FORUMS` are accepted too) unless you change the exclude list.
 
 **4. Google Drive folder selection:**
 
-```
-memory_sources action="enable" source="google-drive" config={
-  "google_client_id": "...",
-  "google_client_secret": "...",
-  "google_refresh_token": "...",
-  "folderIds": ["FOLDER_ID_1", "FOLDER_ID_2"],
-  "includeContent": true
-}
-```
+In the same form, list the folder IDs to collect (empty for all) and choose whether document content is included.
 
 To find folder IDs, open the folder in Google Drive — the ID is in the URL after `/folders/`.
 
@@ -727,7 +713,7 @@ Where:
 
 **Semantic-scan coverage is never silent:** every result carries `scannedChunks/totalChunks`. Under `MEMORIA_VECTOR_SCAN_CAP` (default 5000) the whole store is scanned; past it, an even sample of **exactly cap** rows spans the entire id range — coverage degrades continuously as the store grows (no recall cliff at cap+1), and the sample's offset is derived from the query text, so different queries reach different residues of the store and no row is permanently invisible to the vector path (the same query stays deterministic). `memory_search` appends a coverage note whenever the scan was partial.
 
-Results are position-optimized: high-importance memories placed at the start and end of output to leverage the primacy/recency effect in LLM attention.
+Results are returned in descending score order.
 > **Provider caveat:** with the `hash` n-gram provider, `vector_cosine_similarity` is only a lexical approximation — the vector and FTS terms largely measure the same thing, so treat a `hash` deployment as keyword search with extra steps, not semantic search. Use `minilm` (local, the default) or `openai` for true semantic retrieval; the Docker image pre-bakes the MiniLM model.
 
 ## Multi-device sync
@@ -856,7 +842,6 @@ Memoria has been through a critical code review with all findings tracked and fi
 | **Strict input validation** | `/ingest` rejects empty/whitespace-only id, source, or content. `memory_compile` enforces a 100KB body limit. |
 | **Markdown safety in links** | Index escapes backticks, asterisks, underscores, tildes (in addition to brackets/backslash) so memory names with markdown syntax don't break links. |
 | **Live access counts** | Lint orphan detection queries the SQLite `file_meta` table instead of stale frontmatter. |
-| **Smart positional ordering** | Search results only reorder for primacy/recency effect when scores are tightly clustered (< 0.15 spread); pure score-ranking otherwise. Reordering is announced in the output. |
 | **Singleton init lock** | Concurrent `ensureCollector()` calls share a single init promise — no duplicate registries, buffers, or daemons. |
 | **Corrupt checkpoint recovery** | Google adapters reset corrupted JSON checkpoints to start fresh instead of looping on the same parse error. |
 | **Deterministic lint output** | Contradiction pairs sorted by similarity then alphabetically — stable across runs and parallel batches. |
