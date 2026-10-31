@@ -70,16 +70,17 @@ Replace paths with your checkout and store. Build once with `npm run build` in `
 
 - **Tool count:** Memoria registers many tools (memory, collector, lint, compile, …). Cursor may warn when total MCP tools across all servers grow large; disable individual tools you do not need under **Customize → MCPs** rather than trimming Memoria’s surface in code.
 - **First start:** Without OpenAI embeddings, the server downloads the local MiniLM model once (~23 MB). Allow network on the first `npx` launch. From a git checkout you can prefetch with `node scripts/prefetch-model.mjs` in `mcp-server/` (same script the Docker build uses).
-- **Collector consent:** Enabling ingestion sources still requires consent in the **dashboard**; MCP clients cannot consent on your behalf (see README security notes).
+- **Collector consent:** Enabling ingestion sources still requires consent in the **dashboard**; MCP clients cannot consent on your behalf (see README security notes). The dashboard runs in the HTTP server, so start `memoria-mcp-http` before Cursor or Claude when you want to set up sources: the server that opens the store first runs the collector.
 
 ### Quick sanity check (terminal)
 
-This is the same process Cursor spawns; it should print a startup line and then wait on stdio (Ctrl+C to exit):
+This is the same process Cursor spawns; it should print startup lines and then wait on stdio (Ctrl+C to exit). Since 0.3.1 the server answers the client before it indexes, so the index line follows the startup line:
 
 ```bash
 export MEMORIA_DIR="${MEMORIA_DIR:-/tmp/memoria-mcp-test}"
 npx -y @agrippa87/memoria-mcp
-# → "Memoria MCP server started. Indexed N files."
+# → "Memoria MCP server started."
+# → "Memoria: indexed N memory files."
 ```
 
 ## Contributing another client
