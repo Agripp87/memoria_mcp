@@ -20,7 +20,7 @@ import {
   entryImportance,
   stripImportanceTrailer,
 } from "./daily-format.js";
-import { createOrAppend, writeFileAtomic } from "./atomic-fs.js";
+import { createOrAppend, writeFileAtomic, writeFileExclusive } from "./atomic-fs.js";
 import { SourceRegistry } from "./collector/registry.js";
 import { EventBuffer } from "./collector/buffer.js";
 import { CollectorDaemon } from "./collector/daemon.js";
@@ -225,15 +225,55 @@ export async function reindexFile(store: MemoryStore, filePath: string): Promise
  * process, and the periodic sweep stopped at the first bad file. Index state
  * for files no longer on disk is dropped.
  */
+/** The sweep in progress, if any, and how far it has got. */
+let sweepInFlight: Promise<{ files: number; chunks: number; failed: string[] }> | null = null;
+const sweepProgress = { done: 0, total: 0 };
+
+/**
+ * While a rebuild (provider or index format change) is still re-embedding
+ * the store, a line saying search results may be incomplete; else null.
+ * The server answers the client before that sweep finishes.
+ */
+export function indexRebuildNote(store: MemoryStore): string | null {
+  if (!store.needsReindex || !sweepInFlight) return null;
+  return (
+    `Note: the search index is being rebuilt (${sweepProgress.done} of ${sweepProgress.total} ` +
+    `files done); results may be incomplete until it finishes.`
+  );
+}
+
+/**
+ * Index every memory file (unchanged ones are skipped by hash) and drop the
+ * index entries of deleted ones. One sweep runs at a time: a call while one
+ * is running joins it, or with `fresh` (after a forced re-embed was asked
+ * for) waits for it and then runs another.
+ */
 export async function reindexAll(
   store: MemoryStore,
-  opts: { shouldStop?: () => boolean } = {},
+  opts: { shouldStop?: () => boolean; fresh?: boolean } = {},
+): Promise<{ files: number; chunks: number; failed: string[] }> {
+  while (sweepInFlight) {
+    if (!opts.fresh) return sweepInFlight;
+    await sweepInFlight.catch(() => {});
+  }
+  const run = sweep(store, opts.shouldStop).finally(() => {
+    sweepInFlight = null;
+  });
+  sweepInFlight = run;
+  return run;
+}
+
+async function sweep(
+  store: MemoryStore,
+  shouldStop?: () => boolean,
 ): Promise<{ files: number; chunks: number; failed: string[] }> {
   const files = getAllMemoryFiles();
   let chunks = 0;
   const failed: string[] = [];
+  sweepProgress.done = 0;
+  sweepProgress.total = files.length;
   for (const f of files) {
-    if (opts.shouldStop?.()) break;
+    if (shouldStop?.() || store.fenced) break;
     try {
       chunks += await reindexFile(store, f);
     } catch (err) {
@@ -242,8 +282,13 @@ export async function reindexAll(
         `Memoria: indexing ${getRelativePath(f)} failed (skipped, retried on the next sweep): ${(err as Error).message}\n`,
       );
     }
+    sweepProgress.done++;
+    // Let I/O in between files: with a synchronous provider (hash) the
+    // awaits above never reach the event loop, and a whole-store sweep held
+    // off the client's requests, the handshake included, until it finished.
+    await new Promise((resolve) => setImmediate(resolve));
   }
-  if (!opts.shouldStop?.()) {
+  if (!shouldStop?.() && !store.fenced) {
     store.retainFiles(files.map(getRelativePath), (rel) => {
       try {
         return fs.lstatSync(path.join(MEMORIES_DIR, rel)).isFile();
@@ -251,8 +296,43 @@ export async function reindexAll(
         return false;
       }
     });
+    if (failed.length === 0) store.needsReindex = false;
   }
   return { files: files.length, chunks, failed };
+}
+
+/**
+ * Everything a server runs after it has answered its client: the startup
+ * sweep (a provider change or index upgrade re-embeds the whole store,
+ * which took longer than an MCP client waits for the handshake), then the
+ * watcher and the periodic jobs. Resolves when the startup sweep is done.
+ */
+export async function startBackgroundIndexing(
+  store: MemoryStore,
+  opts: { watch: boolean; shouldStop: () => boolean },
+): Promise<void> {
+  if (store.needsReindex) {
+    process.stderr.write(
+      "Memoria: full reindex (embedding provider or index format changed) running in the background...\n",
+    );
+  }
+  // Per file: one failure is logged and skipped instead of exiting. A stop
+  // signal during a long first index stops before shutdown() closes the
+  // store under the next reindexFile. Files deleted while the server was
+  // down are dropped.
+  const indexed = await reindexAll(store, { shouldStop: opts.shouldStop });
+  if (opts.shouldStop()) return;
+  process.stderr.write(
+    `Memoria: indexed ${indexed.files} memory files` +
+      (indexed.failed.length ? ` (${indexed.failed.length} failed, see above).\n` : ".\n"),
+  );
+  if (opts.watch) setupWatcher(store);
+  // fs.watch is inert on the GCS FUSE / Cloud Run mount, so sweep
+  // periodically to pick up memory files changed by `git pull` elsewhere.
+  setupPeriodicReindex(store);
+  setupPeriodicOptimize(store); // no-op unless MEMORIA_AUTO_OPTIMIZE=true
+  setupPeriodicCompile(store); // no-op unless MEMORIA_AUTO_COMPILE=true
+  setupPrimaryTakeover(store); // no-op in the primary
 }
 
 // ─── File watcher (1.5s debounce) ───────────────────────────
@@ -566,8 +646,14 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
     },
     async ({ query, max_results }) => {
       const results = await store.search(query, max_results);
+      const rebuilding = indexRebuildNote(store);
       if (results.length === 0) {
-        return { content: [{ type: "text" as const, text: "No matching memories found." }] };
+        const none = "No matching memories found.";
+        return {
+          content: [
+            { type: "text" as const, text: rebuilding ? `${none}\n\n${rebuilding}` : none },
+          ],
+        };
       }
 
       // Results are returned in score order — the consumer is an LLM reading a
@@ -603,6 +689,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
           `(store exceeds MEMORIA_VECTOR_SCAN_CAP). Keyword (FTS) matching still covered everything; ` +
           `raise the cap for exhaustive semantic recall.*`;
       }
+      if (rebuilding) output += `\n\n*${rebuilding}*`;
 
       return { content: [{ type: "text" as const, text: output }] };
     },
@@ -821,7 +908,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       // Unchanged files are skipped by content hash, so without force this
       // could not repair an index whose rows were damaged.
       if (force) store.forgetContentHashes();
-      const result = await reindexAll(store);
+      const result = await reindexAll(store, { fresh: force });
       const files = { length: result.files };
       const totalChunks = result.chunks;
 
@@ -1055,6 +1142,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         ...(warnings.length > 0
           ? [``, `**Health warnings:**`, ...warnings]
           : [``, `No health warnings.`]),
+        ...(indexRebuildNote(store) ? [``, indexRebuildNote(store)!] : []),
       ].join("\n");
 
       return { content: [{ type: "text" as const, text: output }] };
@@ -1243,10 +1331,28 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
           };
         }
 
-        // Write file
-        const fullPath = resolveMemoryPath(relFile);
+        // Write file. Exclusive create: the check above is in this process
+        // only, and another server on the store (a second Claude window) may
+        // have created the same name meanwhile; renaming over it lost that
+        // file while both reported success. Take the next free name instead.
+        let fullPath = resolveMemoryPath(relFile);
         fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-        writeFileAtomic(fullPath, fileContent);
+        while (!writeFileExclusive(fullPath, fileContent)) {
+          if (counter > 100) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `Error: too many filename collisions for "${baseSlug}"`,
+                },
+              ],
+            };
+          }
+          slug = `${baseSlug}-${counter}`;
+          relFile = `${dir}/${slug}.md`;
+          fullPath = resolveMemoryPath(relFile);
+          counter++;
+        }
 
         const chunksIndexed = await reindexFile(store, fullPath);
         const indexSummary = rebuildMarkdownIndex();

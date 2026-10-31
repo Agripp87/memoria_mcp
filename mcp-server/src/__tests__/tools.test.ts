@@ -240,6 +240,31 @@ describe("memory_compile", () => {
   });
 });
 
+describe("memory_compile across servers (2026-10 re-review F27)", () => {
+  it("never replaces a file another server created meanwhile", async () => {
+    // Another window on the store creates the target while this compile
+    // embeds for its dedup check.
+    const target = path.join(MEM, "references", "race-insight.md");
+    const findSimilar = store.findSimilar.bind(store);
+    store.findSimilar = async (...args: Parameters<typeof store.findSimilar>) => {
+      fs.writeFileSync(target, "---\nname: other window\n---\nsentinel from the other server\n");
+      return findSimilar(...args);
+    };
+    try {
+      const r = await handlers.get("memory_compile")!({
+        content: "A compiled note about the race between two windows, with enough distinct words.",
+        name: "Race insight",
+        type: "reference",
+        tags: [],
+      });
+      expect(text(r)).toContain("references/race-insight-2.md");
+      expect(fs.readFileSync(target, "utf-8")).toContain("sentinel from the other server");
+    } finally {
+      store.findSimilar = findSimilar;
+    }
+  });
+});
+
 describe("memory_entities", () => {
   it("compiles daily-log events into an entity rollup page", async () => {
     const today = new Date().toISOString().split("T")[0];

@@ -5,31 +5,47 @@
  * last-writer-wins. Taking an exclusive lock file at store open makes the
  * second process fail loudly at startup instead.
  *
- * The lock records "<pid>\n<hostname>\n<process start ms>" and its holder
- * refreshes the file's mtime every HEARTBEAT_MS. A lock is stale, and
- * reclaimed, when:
+ * The lock records, one per line: the pid, the hostname, the start time
+ * in epoch ms (read by 0.3.0; no longer compared), `pidspace:<id>` and
+ * `start:<raw>`. Its holder refreshes the file's mtime every HEARTBEAT_MS.
  *
- * - it was written on this host and its pid is gone (ESRCH);
+ * The pid space says whose pids these are: on Linux the boot id plus the
+ * pid namespace, on macOS the boot session. A lock from this pid space is
+ * judged by its pid whatever the hostname (a laptop's hostname changes
+ * with the network); `start:` is the kernel's own record of when that
+ * process started (/proc ticks since boot, ps lstart), compared exactly,
+ * so a clock step cannot make a live holder look like a reused pid. 0.3.0
+ * derived the start time from the wall clock, which moves when the clock
+ * is stepped.
+ *
+ * A lock is stale, and reclaimed, when:
+ *
+ * - it is from this pid space and its pid is gone (ESRCH);
  * - it names our own pid but this process does not hold it: a container
  *   restarted after a crash usually hands node the same small pid, and the
  *   leftover lock used to block every restart;
- * - its pid is alive but belongs to a process that started at a different
- *   time (a reused pid; checked through /proc on Linux, elsewhere a live
- *   pid counts as the holder);
- * - it was written on another host (a recreated container, a shared mount),
- *   whose pid means nothing here, and its heartbeat stopped more than
- *   STALE_MS ago.
+ * - its pid is alive but started at a different time (a reused pid);
+ * - it was written on this host before a reboot;
+ * - it is from another pid space (another host, a shared mount), whose
+ *   pid means nothing here, and its heartbeat stopped more than STALE_MS
+ *   ago.
  *
  * A live local holder is never judged by its heartbeat: a process paused
  * by SIGSTOP or a laptop's sleep misses beats while still running, and
- * taking its lock would put two writers on one store.
+ * taking its lock would put two writers on one store. Where the start
+ * time cannot be read (Windows; a lock written by 0.3.0), a live pid
+ * counts as the holder: refusing wrongly is safe, since a shared open then
+ * runs as a secondary.
  *
  * A fresh lock from another host is waited on for up to one stale window
  * (its holder may just have crashed), then refused. A deployment that
  * deliberately overlaps instances on one shared store, as a Cloud Run
  * rollout does, sets MEMORIA_LOCK_TAKEOVER=true: the new instance must
- * start while the old one still runs, so it takes the lock over instead.
+ * start while the old one still runs, so it takes the lock over, then
+ * waits one heartbeat so the old holder notices and fences itself (see
+ * `onLost`) before the new one opens the database.
  */
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -43,12 +59,22 @@ const MAX_RECLAIMS = 5;
 /** Locks held by this process, by real path, with their heartbeat timers. */
 const heldLocks = new Map<string, NodeJS.Timeout>();
 
-function parseLock(text: string): { pid: number; host: string | null; startMs: number } {
-  const [pidLine, hostLine, startLine] = text.split("\n");
+function parseLock(text: string): {
+  pid: number;
+  host: string | null;
+  pidSpace: string | null;
+  startRaw: string | null;
+} {
+  const lines = text.split("\n");
+  const tagged = (tag: string) => {
+    const line = lines.find((l) => l.startsWith(`${tag}:`));
+    return line ? line.slice(tag.length + 1).trim() || null : null;
+  };
   return {
-    pid: parseInt((pidLine ?? "").trim(), 10),
-    host: hostLine?.trim() || null,
-    startMs: Number((startLine ?? "").trim()) || NaN,
+    pid: parseInt((lines[0] ?? "").trim(), 10),
+    host: lines[1]?.trim() || null,
+    pidSpace: tagged("pidspace"),
+    startRaw: tagged("start"),
   };
 }
 
@@ -56,22 +82,91 @@ function parseLock(text: string): { pid: number; host: string | null; startMs: n
  * When a process started, in epoch ms, from /proc (Linux only). Field 22 of
  * /proc/<pid>/stat is the start time in clock ticks since boot (USER_HZ,
  * 100 on every mainstream Linux); /proc/stat's btime is the boot time.
- * Both live in the same clock, also inside a container's pid namespace.
+ * Written to the lock for 0.3.0 readers only: btime moves when the clock
+ * is stepped, so it is not compared.
  */
 function linuxProcessStartMs(pid: number): number | undefined {
+  const ticks = linuxStartTicks(pid);
+  if (ticks === undefined) return undefined;
+  try {
+    const btime = Number(/^btime (\d+)$/m.exec(fs.readFileSync("/proc/stat", "utf-8"))?.[1]);
+    return Number.isFinite(btime) ? btime * 1000 + Number(ticks) * 10 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Field 22 of /proc/<pid>/stat: start time in ticks since boot. */
+function linuxStartTicks(pid: number): string | undefined {
   if (process.platform !== "linux") return undefined;
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf-8");
     // The command name may contain spaces or parentheses; fields resume
     // after its last ")". The first field there is field 3 (state).
-    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
-    const startTicks = Number(fields[22 - 3]);
-    const btime = Number(/^btime (\d+)$/m.exec(fs.readFileSync("/proc/stat", "utf-8"))?.[1]);
-    if (!Number.isFinite(startTicks) || !Number.isFinite(btime)) return undefined;
-    return btime * 1000 + startTicks * 10;
+    const ticks = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[22 - 3];
+    return ticks && /^\d+$/.test(ticks) ? ticks : undefined;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The kernel's record of when `pid` started, as an opaque string compared
+ * exactly; undefined when it cannot be read (the caller then treats a live
+ * pid as the holder). macOS: ps's lstart, the process's recorded start
+ * time, printed in UTC so a time zone change does not alter it.
+ */
+function processStartRaw(pid: number): string | undefined {
+  if (process.platform === "linux") return linuxStartTicks(pid);
+  if (process.platform === "darwin") {
+    try {
+      const out = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+        encoding: "utf-8",
+        env: { ...process.env, TZ: "UTC", LC_ALL: "C" },
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 2_000,
+      }).trim();
+      return out || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+let cachedPidSpace: string | null | undefined;
+
+/**
+ * Which pid space this process's pids belong to, or null when unknown.
+ * Linux: "<boot id>/<pid namespace>", so two containers on one host are
+ * told apart. macOS: the boot session UUID. Elsewhere unknown, and locks
+ * are judged by hostname as before.
+ */
+function ownPidSpace(): string | null {
+  if (cachedPidSpace !== undefined) return cachedPidSpace;
+  cachedPidSpace = null;
+  try {
+    if (process.platform === "linux") {
+      const boot = fs.readFileSync("/proc/sys/kernel/random/boot_id", "utf-8").trim();
+      const ns = fs.readlinkSync("/proc/self/ns/pid");
+      if (boot && ns) cachedPidSpace = `${boot}/${ns}`;
+    } else if (process.platform === "darwin") {
+      const uuid = execFileSync("sysctl", ["-n", "kern.bootsessionuuid"], {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 2_000,
+      }).trim();
+      if (uuid) cachedPidSpace = uuid;
+    }
+  } catch {
+    // unknown: hostname rules apply
+  }
+  return cachedPidSpace;
+}
+
+/** The boot part of a pid space: what a reboot changes. */
+function bootOf(pidSpace: string): string {
+  return pidSpace.split("/")[0];
 }
 
 function ownStartMs(): number {
@@ -99,19 +194,31 @@ function inspect(lockPath: string): Verdict {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return { kind: "gone" };
     return { kind: "held", pid: NaN }; // unreadable: treat as held rather than race
   }
-  const { pid, host, startMs } = parseLock(observed);
+  const { pid, host, pidSpace, startRaw } = parseLock(observed);
   if (!Number.isFinite(pid)) {
     return ageMs > UNWRITTEN_GRACE_MS
       ? { kind: "stale", observed, why: "it is empty" }
       : { kind: "pending" };
   }
-  // A lock without a host predates the host field and the heartbeat; it is
-  // judged by its pid alone.
-  const heartbeats = host !== null;
-  if (heartbeats && host !== os.hostname()) {
+  const mySpace = ownPidSpace();
+  const sameHost = host === os.hostname();
+  // Whether the pid in the lock means anything here. A lock that names its
+  // pid space is local exactly when that is ours, whatever the hostname.
+  // Without one (0.3.0, or a platform where it is unknown) the hostname
+  // decides; a lock without a host predates heartbeats and is local too.
+  let local: boolean;
+  if (pidSpace !== null && mySpace !== null) {
+    local = pidSpace === mySpace;
+    if (!local && sameHost && bootOf(pidSpace) !== bootOf(mySpace)) {
+      return { kind: "stale", observed, why: "it was written before this machine restarted" };
+    }
+  } else {
+    local = host === null || sameHost;
+  }
+  if (!local) {
     return ageMs > STALE_MS
       ? { kind: "stale", observed, why: `its holder on "${host}" stopped refreshing it` }
-      : { kind: "foreign", observed, host, pid };
+      : { kind: "foreign", observed, host: host ?? "another host", pid };
   }
   if (pid === process.pid) {
     // Held by this process (a second open), or a leftover from an earlier
@@ -131,9 +238,11 @@ function inspect(lockPath: string): Verdict {
   }
   // Alive. Ours only if it is the same process that wrote the lock: a
   // different start time means the pid was reused.
-  const liveStart = Number.isFinite(startMs) ? linuxProcessStartMs(pid) : undefined;
-  if (liveStart !== undefined && Math.abs(liveStart - startMs) > 1_000) {
-    return { kind: "stale", observed, why: `pid ${pid} now belongs to another process` };
+  if (startRaw !== null) {
+    const live = processStartRaw(pid);
+    if (live !== undefined && live !== startRaw) {
+      return { kind: "stale", observed, why: `pid ${pid} now belongs to another process` };
+    }
   }
   return { kind: "held", pid };
 }
@@ -194,10 +303,22 @@ function inUse(dir: string, pid: number, cause?: unknown, foreign = false): Erro
   return new StoreInUseError(dir, pid, cause, foreign);
 }
 
-export function acquireStoreLock(
-  dbPath: string,
-  opts: { foreignWaitMs?: number } = {},
-): () => void {
+export interface StoreLockOptions {
+  /** How long to wait on a fresh lock from another host before refusing. */
+  foreignWaitMs?: number;
+  /**
+   * Called once if another process takes this lock over (MEMORIA_LOCK_TAKEOVER
+   * on the new instance). The holder must stop writing the store: two hosts
+   * writing one SQLite WAL corrupt it.
+   */
+  onLost?: () => void;
+  /** Tests: the heartbeat period. */
+  heartbeatMs?: number;
+  /** Tests: the wait after a takeover (default one heartbeat plus 2 s). */
+  takeoverGraceMs?: number;
+}
+
+export function acquireStoreLock(dbPath: string, opts: StoreLockOptions = {}): () => void {
   const dir = path.dirname(dbPath);
   fs.mkdirSync(dir, { recursive: true });
   // Per database file: the two server entry points share one DB_PATH, while
@@ -207,7 +328,9 @@ export function acquireStoreLock(
   const takeover = process.env.MEMORIA_LOCK_TAKEOVER === "true";
   const foreignWaitMs = opts.foreignWaitMs ?? STALE_MS + HEARTBEAT_MS;
   const foreignDeadline = Date.now() + foreignWaitMs;
+  const heartbeatMs = opts.heartbeatMs ?? HEARTBEAT_MS;
   let reclaims = 0;
+  let tookOver = false;
 
   for (;;) {
     let fd: number;
@@ -230,7 +353,11 @@ export function acquireStoreLock(
               `Memoria: taking over the store lock at ${lockPath} from host "${v.host}" ` +
                 `(pid ${v.pid}) because MEMORIA_LOCK_TAKEOVER=true.\n`,
             );
-            if (reclaim(lockPath, v.observed) || ++reclaims < MAX_RECLAIMS) continue;
+            if (reclaim(lockPath, v.observed)) {
+              tookOver = true;
+              continue;
+            }
+            if (++reclaims < MAX_RECLAIMS) continue;
             throw inUse(dir, v.pid, err, true);
           }
           if (Date.now() < foreignDeadline) {
@@ -252,7 +379,13 @@ export function acquireStoreLock(
       }
     }
 
-    const written = `${process.pid}\n${os.hostname()}\n${ownStartMs()}`;
+    const written = [
+      process.pid,
+      os.hostname(),
+      ownStartMs(),
+      `pidspace:${ownPidSpace() ?? ""}`,
+      `start:${processStartRaw(process.pid) ?? ""}`,
+    ].join("\n");
     fs.writeFileSync(fd, written, "utf-8");
     fs.closeSync(fd);
     // Everything below acts only while the file still holds what we wrote:
@@ -265,15 +398,21 @@ export function acquireStoreLock(
         return false;
       }
     };
-    let lostWarned = false;
+    let lost = false;
     const heartbeat = setInterval(() => {
+      if (lost) return;
       if (!stillOurs()) {
-        if (!lostWarned) {
-          lostWarned = true;
-          process.stderr.write(
-            `Memoria: WARNING — the store lock at ${lockPath} was taken over by another ` +
-              `process. Two servers may now be writing this store; stop one of them.\n`,
-          );
+        lost = true;
+        clearInterval(heartbeat);
+        heldLocks.delete(lockPath);
+        process.stderr.write(
+          `Memoria: the store lock at ${lockPath} was taken over by another process; ` +
+            `this server stops writing the store.\n`,
+        );
+        try {
+          opts.onLost?.();
+        } catch (e) {
+          process.stderr.write(`Memoria: stepping down failed: ${(e as Error).message}\n`);
         }
         return;
       }
@@ -283,9 +422,13 @@ export function acquireStoreLock(
       } catch {
         // best effort; a missed beat only risks a takeover after STALE_MS
       }
-    }, HEARTBEAT_MS);
+    }, heartbeatMs);
     heartbeat.unref();
     heldLocks.set(lockPath, heartbeat);
+
+    // Taken over from a live holder: give it one heartbeat to notice and
+    // stop writing before this process opens the database.
+    if (tookOver) sleepSync(opts.takeoverGraceMs ?? heartbeatMs + 2_000);
 
     let released = false;
     return () => {

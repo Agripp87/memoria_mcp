@@ -234,3 +234,16 @@ describe("bumpFileImportance with empty frontmatter (2026-09 re-review, round 3)
     expect(fs.readFileSync(f, "utf-8")).toBe(text);
   });
 });
+
+describe("writeFileExclusive (2026-10 re-review F27)", () => {
+  it("creates a missing file and refuses an existing one, leaving it as it was", async () => {
+    const { writeFileExclusive } = await import("../atomic-fs.js");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "memoria-excl-"));
+    const f = path.join(dir, "a.md");
+    expect(writeFileExclusive(f, "first")).toBe(true);
+    expect(writeFileExclusive(f, "second")).toBe(false);
+    expect(fs.readFileSync(f, "utf-8")).toBe("first");
+    expect(fs.readdirSync(dir)).toEqual(["a.md"]); // no temp file left
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
