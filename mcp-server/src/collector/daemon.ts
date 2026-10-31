@@ -136,6 +136,23 @@ export class CollectorDaemon {
   /**
    * Stop the daemon gracefully.
    */
+  /**
+   * Stop polling and ingesting at once, with no final flush: for a server
+   * that lost the store to another instance and must not write it again
+   * (the final flush appends daily logs and writes the buffer database).
+   */
+  halt(): void {
+    this.running = false;
+    for (const [, pt] of this.pollTimers) {
+      if (pt.timer) clearInterval(pt.timer);
+    }
+    this.pollTimers.clear();
+    if (this.ingestionTimer) clearInterval(this.ingestionTimer);
+    this.ingestionTimer = null;
+    if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+    this.cleanupTimer = null;
+  }
+
   async stop(): Promise<void> {
     if (!this.running) return;
     this.running = false;

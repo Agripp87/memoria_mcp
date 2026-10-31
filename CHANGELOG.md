@@ -66,7 +66,8 @@ memory file format is unchanged and the index is not rebuilt.
   outside the store. Both are refused.
 - **Collected text could forge daily-log entries** for another source or
   override an entry's importance (read by `memory_compact` and entity
-  pages). Heading and trailer lines in content are escaped.
+  pages). Heading and trailer lines in content are escaped, and sender,
+  location and other metadata are kept to one line.
 - **`disable` on `__proto__`** wrote `Object.prototype`, and on an unknown
   id it reported success while the intended source kept collecting.
 - **Example deploy workflow** deployed a fork's PR when its branch was
@@ -89,8 +90,10 @@ memory file format is unchanged and the index is not rebuilt.
 - **Store lock:** the holder is identified by its pid space and the
   kernel's record of its start, so a clock step no longer hands a live
   primary's lock to a second server, a hostname change no longer makes new
-  sessions wait 75 s and crash, and a lock from before a reboot is
-  reclaimed at once. Under `MEMORIA_LOCK_TAKEOVER` the displaced instance
+  sessions wait 75 s and crash, a lock from before a reboot is reclaimed
+  at once, and a restarted container reclaims its previous run's lock
+  after one missed heartbeat. A failed read of the lock file is not
+  taken as a takeover. Under `MEMORIA_LOCK_TAKEOVER` the displaced instance
   now stops writing (503) instead of writing the same SQLite file from two
   hosts, and the new one waits a heartbeat before opening it.
 - **The startup re-embed ran before the MCP handshake**; after an index

@@ -1157,3 +1157,22 @@ describe("custom source consent over the dashboard API (2026-10 re-review F16)",
     }
   });
 });
+
+describe("a fenced instance serves nothing from the store (2026-10 final review)", () => {
+  it("answers 503 whatever the path's case", async () => {
+    const { store } = await import("../http.js");
+    (store as any).fenced = true;
+    try {
+      for (const url of ["/mcp", "/MCP", "/Ingest", "/dashboard/API/stats"]) {
+        const r = await request(app)
+          .post(url)
+          .set(auth)
+          .set("X-Forwarded-For", "10.66.9.1")
+          .send({});
+        expect(r.status, url).toBe(503);
+      }
+    } finally {
+      (store as any).fenced = false;
+    }
+  });
+});

@@ -355,3 +355,16 @@ describe("CollectorDaemon poll intervals (2026-10 re-review F34, F35)", () => {
     expect(daemon.getStatus().pollTimers[0].intervalMs).toBe(expected);
   });
 });
+
+describe("CollectorDaemon.halt (2026-10 final review)", () => {
+  it("stops without a final flush", async () => {
+    const { daemon, buffer } = makeDaemon();
+    daemon.start();
+    await new Promise((r) => setTimeout(r, 20));
+    const before = buffer.fetchUnsyncedFair.mock.calls.length;
+    daemon.halt();
+    expect(daemon.getStatus().running).toBe(false);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(buffer.fetchUnsyncedFair.mock.calls.length).toBe(before);
+  });
+});

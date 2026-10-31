@@ -38,6 +38,7 @@ import {
   registerTools,
   registerCollectorTools,
   destroyCollector,
+  haltCollector,
   getCollectorPipeline,
   resumeCollectorIfConfigured,
   collectorInPrimaryMessage,
@@ -291,7 +292,7 @@ interface AuthCodeEntry {
 // Shared, like the stdio server: a second server on the same store (a local
 // stdio session, a rollout without MEMORIA_LOCK_TAKEOVER) runs as a
 // secondary rather than failing; see MemoryStore.
-const store = new MemoryStore(DB_PATH, { shared: true });
+export const store = new MemoryStore(DB_PATH, { shared: true });
 
 function createServer(): McpServer {
   const server = new McpServer({
@@ -358,15 +359,17 @@ app.use(
 // AFTER authenticate(): /mcp (memory_write content up to 100KB, JSON-escaped)
 // and /dashboard/api at 1MB, /ingest at 5MB. Everything else is small.
 const AUTHED_BODY_ROUTES = ["/mcp", "/dashboard/api", "/ingest"];
+// Case-insensitive, as Express routes are: "/MCP" reaches the /mcp handlers.
+function onAuthedRoute(req: express.Request): boolean {
+  const p = req.path.toLowerCase();
+  return AUTHED_BODY_ROUTES.some((r) => p === r || p.startsWith(`${r}/`));
+}
 
 // A server whose store lock was taken over by a newer instance (a Cloud Run
 // rollout with MEMORIA_LOCK_TAKEOVER) must not touch the store again; until
 // the platform stops it, it says so instead of serving.
 app.use((req, res, next) => {
-  if (
-    store.fenced &&
-    AUTHED_BODY_ROUTES.some((r) => req.path === r || req.path.startsWith(`${r}/`))
-  ) {
+  if (store.fenced && onAuthedRoute(req)) {
     res
       .status(503)
       .set("Retry-After", "5")
@@ -377,7 +380,7 @@ app.use((req, res, next) => {
 });
 const smallJson = express.json({ limit: "64kb" });
 app.use((req, res, next) => {
-  if (AUTHED_BODY_ROUTES.some((r) => req.path === r || req.path.startsWith(`${r}/`))) {
+  if (onAuthedRoute(req)) {
     next();
     return;
   }
@@ -387,7 +390,7 @@ app.use((req, res, next) => {
 // authenticated subtrees, which take JSON only.
 const formBody = express.urlencoded({ extended: false, limit: "64kb" });
 app.use((req, res, next) => {
-  if (AUTHED_BODY_ROUTES.some((r) => req.path === r || req.path.startsWith(`${r}/`))) {
+  if (onAuthedRoute(req)) {
     next();
     return;
   }
@@ -1453,7 +1456,7 @@ app.use(errorHandler);
 async function main(): Promise<void> {
   // Another instance took the store over (MEMORIA_LOCK_TAKEOVER): stop
   // collecting; the routes answer 503 from here on (see fencedGuard).
-  store.onFenced(() => void destroyCollector());
+  store.onFenced(haltCollector);
 
   // Bind to 0.0.0.0 when BIND_ALL=true (for cloud/Docker), else localhost only
   const host = process.env.BIND_ALL === "true" ? "0.0.0.0" : "127.0.0.1";
@@ -1514,6 +1517,9 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   if (shuttingDown) {
     process.exit(1);
   }
+  // Taken over: no flush, no close (both write the store the new holder
+  // is using), and no normal exit, which closes SQLite handles too.
+  if (store.fenced) MemoryStore.exitWithoutCheckpoint();
   shuttingDown = true;
   process.stderr.write(`Memoria: ${signal} received, shutting down\n`);
   setTimeout(() => process.exit(1), 8_000).unref();
@@ -1532,7 +1538,6 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     tokenDb.close();
     store.close();
   }
-  if (store.fenced) MemoryStore.exitWithoutCheckpoint();
   process.exit(exitCode);
 }
 

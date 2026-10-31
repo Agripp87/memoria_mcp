@@ -492,3 +492,58 @@ describe("a store whose lock was taken over stops writing (2026-10 re-review F11
     s.close();
   });
 });
+
+describe("store lock edge cases (2026-10 final review)", () => {
+  it("one unreadable beat does not fence a healthy holder", async () => {
+    const { acquireStoreLock } = await import("../store-lock.js");
+    const db = path.join(ROOT, "data", "flaky.sqlite");
+    const lock = path.join(ROOT, "data", ".flaky.sqlite.lock");
+    let lost = 0;
+    const release = acquireStoreLock(db, { heartbeatMs: 20, onLost: () => lost++ });
+    const aside = `${lock}.aside`;
+    fs.renameSync(lock, aside); // a transient read failure
+    await new Promise((r) => setTimeout(r, 70));
+    fs.renameSync(aside, lock);
+    await new Promise((r) => setTimeout(r, 70));
+    expect(lost).toBe(0);
+    release();
+    expect(fs.existsSync(lock)).toBe(false);
+  });
+
+  it("a fresh lock from another boot with this hostname is another machine, not a leftover", async () => {
+    const { acquireStoreLock, StoreInUseError } = await import("../store-lock.js");
+    const db = path.join(ROOT, "data", "samename.sqlite");
+    const lock = path.join(ROOT, "data", ".samename.sqlite.lock");
+    const mine = ownLockLines(acquireStoreLock, db, lock);
+    if (!mine.pidspace.includes("/")) return; // Linux pid spaces only
+    const other = `${process.ppid}\n${os.hostname()}\n0\npidspace:other-boot/${mine.pidspace.split("/")[1]}\nstart:1`;
+    fs.writeFileSync(lock, other);
+    let err: unknown;
+    try {
+      acquireStoreLock(db, { foreignWaitMs: 0 });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(StoreInUseError);
+    expect((err as InstanceType<typeof StoreInUseError>).foreign).toBe(true);
+    // Last refreshed before this machine booted: a leftover, reclaimed.
+    const beforeBoot = new Date(Date.now() - os.uptime() * 1000 - 60_000);
+    fs.utimesSync(lock, beforeBoot, beforeBoot);
+    acquireStoreLock(db, { foreignWaitMs: 0 })();
+  });
+
+  it("this container's previous run's lock is reclaimed after one missed heartbeat", async () => {
+    const { acquireStoreLock } = await import("../store-lock.js");
+    const db = path.join(ROOT, "data", "restarted.sqlite");
+    const lock = path.join(ROOT, "data", ".restarted.sqlite.lock");
+    const mine = ownLockLines(acquireStoreLock, db, lock);
+    if (!mine.pidspace.includes("/")) return;
+    const boot = mine.pidspace.split("/")[0];
+    fs.writeFileSync(lock, `7\n${os.hostname()}\n0\npidspace:${boot}/pid:[1]\nstart:1`);
+    const old = new Date(Date.now() - 30_000);
+    fs.utimesSync(lock, old, old);
+    const started = Date.now();
+    acquireStoreLock(db, { foreignWaitMs: 0 })();
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+});

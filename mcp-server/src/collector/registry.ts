@@ -268,6 +268,18 @@ export class SourceRegistry {
     return statuses;
   }
 
+  /** Why a custom source's command or path cannot be shown faithfully, if so. */
+  private hiddenTextIn(sourceId: string): string | null {
+    const def = this.state.customSources.find((d) => `custom-${d.id}` === sourceId);
+    for (const field of ["command", "watchPath"] as const) {
+      const v = def?.[field];
+      if (v !== undefined && (typeof v !== "string" || HIDDEN_TEXT_RE.test(v))) {
+        return `${field} must be a single line of visible text (no control, line-break or bidi characters). Remove the source and add it again.`;
+      }
+    }
+    return null;
+  }
+
   private customFingerprint(sourceId: string): string | null {
     const def = this.state.customSources.find((d) => `custom-${d.id}` === sourceId);
     return def ? consentFingerprint(def) : null;
@@ -340,6 +352,9 @@ export class SourceRegistry {
           `Supported platforms: ${adapter.info.platforms.join(", ")}`,
       };
     }
+
+    const hidden = this.hiddenTextIn(sourceId);
+    if (hidden) return { success: false, message: hidden };
 
     // Check user agreement
     if (!this.hasAgreement(sourceId)) {
@@ -691,6 +706,10 @@ export class SourceRegistry {
     sourceId: string,
     expectedFingerprint?: string,
   ): { success: boolean; message: string } {
+    // A definition stored before such commands were refused must not be
+    // consented to either: the dialog would show it with its tail hidden.
+    const hidden = this.hiddenTextIn(sourceId);
+    if (hidden) return { success: false, message: hidden };
     const fingerprint = this.customFingerprint(sourceId);
     if (expectedFingerprint !== undefined && expectedFingerprint !== fingerprint) {
       return {

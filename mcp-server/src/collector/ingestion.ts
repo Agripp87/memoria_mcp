@@ -14,7 +14,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { keyedContentHash } from "./crypto.js";
 import { dailyLogPath } from "../daily-paths.js";
-import { collectorDailyHeader, neutralizeEntryContent, utcTimeLabel } from "../daily-format.js";
+import {
+  collectorDailyHeader,
+  neutralizeEntryContent,
+  neutralizeHeadingLabel,
+  utcTimeLabel,
+} from "../daily-format.js";
 import { createOrAppend, writeFileAtomic } from "../atomic-fs.js";
 import { getProvider } from "../embeddings.js";
 import { enforceEventPrivacy } from "./adapters/base.js";
@@ -466,7 +471,11 @@ export class IngestionPipeline {
   private formatDailyEntry(event: RawEvent, importance: number): string {
     const time = utcTimeLabel(new Date(event.timestamp));
 
-    const sourceLabel = this.getSourceLabel(event.source);
+    // Every one-line field is collapsed to one line: a newline in a sender
+    // name or an invite's location (third-party text) could otherwise start
+    // a forged entry, as event content could before it was escaped.
+    const line = (v: unknown) => neutralizeHeadingLabel(String(v));
+    const sourceLabel = line(this.getSourceLabel(event.source));
     const privacyNote = event.privacyTier === "summarize" ? " *(summarized)*" : "";
 
     const lines = [
@@ -478,11 +487,11 @@ export class IngestionPipeline {
 
     // Add relevant metadata
     const metaLines: string[] = [];
-    if (event.meta?.from) metaLines.push(`From: ${event.meta.from}`);
+    if (event.meta?.from) metaLines.push(`From: ${line(event.meta.from)}`);
     if (event.meta?.chatName && event.meta.chatName !== "direct")
-      metaLines.push(`Chat: ${event.meta.chatName}`);
-    if (event.meta?.calendarName) metaLines.push(`Calendar: ${event.meta.calendarName}`);
-    if (event.meta?.location) metaLines.push(`Location: ${event.meta.location}`);
+      metaLines.push(`Chat: ${line(event.meta.chatName)}`);
+    if (event.meta?.calendarName) metaLines.push(`Calendar: ${line(event.meta.calendarName)}`);
+    if (event.meta?.location) metaLines.push(`Location: ${line(event.meta.location)}`);
 
     if (metaLines.length > 0) {
       lines.push(`> ${metaLines.join(" | ")}`);
@@ -491,7 +500,7 @@ export class IngestionPipeline {
 
     // Provenance pointer (rule I): source:id ties this entry back to the
     // immutable raw archive record under data/raw/<source>/.
-    const ref = event.id ? ` | ref: ${event.source}:${event.id}` : "";
+    const ref = event.id ? ` | ref: ${line(event.source)}:${line(event.id)}` : "";
     lines.push(`*importance: ${importance} | privacy: ${event.privacyTier}${ref}*`);
     lines.push("");
 

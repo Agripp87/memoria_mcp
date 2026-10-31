@@ -404,6 +404,15 @@ export function setupPrimaryTakeover(store: MemoryStore): NodeJS.Timeout | null 
         clearInterval(timer);
         void resumeCollectorIfConfigured(store);
         for (const run of onPromotion) run();
+        // Promotion found the index built by another provider and cleared
+        // it: rebuild now rather than at the next periodic sweep.
+        if (store.needsReindex) {
+          void reindexAll(store).catch((err) =>
+            process.stderr.write(
+              `Memoria: rebuild after takeover failed: ${(err as Error).message}\n`,
+            ),
+          );
+        }
       }
     } catch (err) {
       process.stderr.write(`Memoria: lock takeover check failed: ${(err as Error).message}\n`);
@@ -2579,6 +2588,19 @@ export async function getCollector(store: MemoryStore): Promise<{
 /**
  * Clean up collector subsystem on shutdown.
  */
+/**
+ * For a server whose store was taken over (see MemoryStore.fenced): stop
+ * the collector's timers and nothing else. destroyCollector's flush and
+ * buffer close write the shared data directory, which the new holder is
+ * using; the process ends without them (exitWithoutCheckpoint).
+ */
+export function haltCollector(): void {
+  if (resumeRetryTimer) clearInterval(resumeRetryTimer);
+  resumeRetryTimer = null;
+  collectorReady = false;
+  daemon?.halt();
+}
+
 export async function destroyCollector(): Promise<void> {
   // Flush any buffered provenance records before teardown (batched writes).
   try {

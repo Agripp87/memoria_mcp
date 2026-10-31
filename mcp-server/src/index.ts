@@ -13,6 +13,7 @@ import {
   registerTools,
   registerCollectorTools,
   destroyCollector,
+  haltCollector,
   resumeCollectorIfConfigured,
   SERVER_DESCRIPTION,
 } from "./tools.js";
@@ -37,7 +38,7 @@ let shuttingDown = false;
 
 async function main(): Promise<void> {
   // Another instance took the store over: stop collecting (see fenced).
-  store.onFenced(() => void destroyCollector());
+  store.onFenced(haltCollector);
 
   const transport = new StdioServerTransport();
   // Exit when the client goes away. Without this a server whose client died
@@ -81,6 +82,9 @@ async function shutdown(): Promise<void> {
   if (shuttingDown) {
     process.exit(1);
   }
+  // Taken over: no flush, no close (both write the store the new holder
+  // is using), and no normal exit, which closes SQLite handles too.
+  if (store.fenced) MemoryStore.exitWithoutCheckpoint();
   shuttingDown = true;
   setTimeout(() => process.exit(1), 8_000).unref();
   let exitCode = 0;
@@ -92,7 +96,6 @@ async function shutdown(): Promise<void> {
   } finally {
     store.close();
   }
-  if (store.fenced) MemoryStore.exitWithoutCheckpoint();
   process.exit(exitCode);
 }
 

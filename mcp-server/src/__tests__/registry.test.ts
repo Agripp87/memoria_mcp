@@ -694,3 +694,15 @@ describe("a source whose first enable fails (2026-10 re-review F36)", () => {
     expect(after.getActiveAdapters().has("custom-w")).toBe(true);
   });
 });
+
+describe("re-consent to a definition stored before hidden text was refused (2026-10 final review)", () => {
+  it("is refused, and the source cannot be enabled", async () => {
+    process.env.MEMORIA_ALLOW_SHELL_SOURCES = "true";
+    expect(
+      reg.addCustomSource(def({ id: "old", mode: "shell_command", command: "echo a" })).success,
+    ).toBe(true);
+    (reg as any).state.customSources.find((d: any) => d.id === "old").command = "echo a\nrm -rf ~";
+    expect(reg.recordAgreement("custom-old").success).toBe(false);
+    expect((await reg.enableSource("custom-old", undefined, "user")).success).toBe(false);
+  });
+});

@@ -25,7 +25,9 @@
  *   restarted after a crash usually hands node the same small pid, and the
  *   leftover lock used to block every restart;
  * - its pid is alive but started at a different time (a reused pid);
- * - it was written on this host before a reboot;
+ * - it was last refreshed on this host before the machine booted;
+ * - it is from this host and boot but another pid namespace (the same
+ *   container's previous run) and missed a heartbeat;
  * - it is from another pid space (another host, a shared mount), whose
  *   pid means nothing here, and its heartbeat stopped more than STALE_MS
  *   ago.
@@ -52,6 +54,13 @@ import * as path from "node:path";
 
 const HEARTBEAT_MS = 15_000;
 const STALE_MS = 60_000;
+/**
+ * A lock from this host and boot but another pid namespace is almost always
+ * the same container's previous run (a restart gets a new namespace and
+ * keeps its hostname). It is stale after one missed heartbeat plus margin,
+ * not after the full window: the restart used to wait a minute for it.
+ */
+const STALE_SAME_BOOT_MS = HEARTBEAT_MS + 10_000;
 /** A lock caught between create and its content being written. */
 const UNWRITTEN_GRACE_MS = 5_000;
 const MAX_RECLAIMS = 5;
@@ -207,16 +216,24 @@ function inspect(lockPath: string): Verdict {
   // Without one (0.3.0, or a platform where it is unknown) the hostname
   // decides; a lock without a host predates heartbeats and is local too.
   let local: boolean;
+  let staleAfterMs = STALE_MS;
   if (pidSpace !== null && mySpace !== null) {
     local = pidSpace === mySpace;
-    if (!local && sameHost && bootOf(pidSpace) !== bootOf(mySpace)) {
-      return { kind: "stale", observed, why: "it was written before this machine restarted" };
+    if (!local && sameHost) {
+      if (bootOf(pidSpace) === bootOf(mySpace)) {
+        staleAfterMs = STALE_SAME_BOOT_MS;
+      } else if (ageMs > os.uptime() * 1000 + HEARTBEAT_MS) {
+        // Last refreshed before this machine booted. A boot id that differs
+        // on a FRESH lock is another machine with the same hostname (Cloud
+        // Run instances, cloned VMs): judged by its heartbeat, below.
+        return { kind: "stale", observed, why: "it was written before this machine restarted" };
+      }
     }
   } else {
     local = host === null || sameHost;
   }
   if (!local) {
-    return ageMs > STALE_MS
+    return ageMs > staleAfterMs
       ? { kind: "stale", observed, why: `its holder on "${host}" stopped refreshing it` }
       : { kind: "foreign", observed, host: host ?? "another host", pid };
   }
@@ -398,10 +415,20 @@ export function acquireStoreLock(dbPath: string, opts: StoreLockOptions = {}): (
         return false;
       }
     };
+    // Taken over only when the lock reads back as someone else's. A read
+    // that fails (a transient FUSE error, the file briefly missing) is no
+    // proof; fencing on it stopped a healthy primary for good.
+    const takenOver = () => {
+      try {
+        return fs.readFileSync(lockPath, "utf-8") !== written;
+      } catch {
+        return false;
+      }
+    };
     let lost = false;
     const heartbeat = setInterval(() => {
       if (lost) return;
-      if (!stillOurs()) {
+      if (takenOver()) {
         lost = true;
         clearInterval(heartbeat);
         heldLocks.delete(lockPath);
@@ -416,6 +443,7 @@ export function acquireStoreLock(dbPath: string, opts: StoreLockOptions = {}): (
         }
         return;
       }
+      if (!stillOurs()) return; // unreadable this beat: try again on the next
       try {
         const now = new Date();
         fs.utimesSync(lockPath, now, now);
