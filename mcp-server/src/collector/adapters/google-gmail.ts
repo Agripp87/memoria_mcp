@@ -45,6 +45,8 @@ export class GoogleGmailAdapter implements SourceAdapter {
   };
 
   private gmail: any = null;
+  /** Label name or id, lower-cased → label id; null until first loaded. */
+  private labelIndex: Map<string, string> | null = null;
   private checkpoint: string = ""; // historyId for incremental sync
   private config!: AdapterConfig;
 
@@ -74,7 +76,9 @@ export class GoogleGmailAdapter implements SourceAdapter {
   async poll(): Promise<RawEvent[]> {
     if (!this.gmail) return [];
 
-    const labels = (this.config.settings?.labels as string[]) ?? ["INBOX"];
+    // Names for the list fallback (Gmail search takes names), ids for history.
+    const labelNames = (this.config.settings?.labels as string[]) ?? ["INBOX"];
+    const labels = await this.resolveLabels(labelNames);
     const excludeLabels = normalizeExcludeLabels(
       (this.config.settings?.excludeLabels as string[]) ?? ["SPAM", "TRASH", "CATEGORY_PROMOTIONS"],
     );
@@ -93,14 +97,14 @@ export class GoogleGmailAdapter implements SourceAdapter {
         events.push(...historyEvents);
       } else {
         // Fallback: list recent messages
-        const listEvents = await this.pollList(labels, excludeLabels, maxResults);
+        const listEvents = await this.pollList(labelNames, excludeLabels, maxResults);
         events.push(...listEvents);
       }
     } catch (err: any) {
       // historyId expired — fall back to list
       if (err.code === 404 || err.message?.includes("historyId")) {
         process.stderr.write("Memoria: Gmail historyId expired, falling back to list\n");
-        const listEvents = await this.pollList(labels, excludeLabels, maxResults);
+        const listEvents = await this.pollList(labelNames, excludeLabels, maxResults);
         events.push(...listEvents);
       } else {
         // Propagate: the daemon backs off, surfaces the error and restores
@@ -110,6 +114,32 @@ export class GoogleGmailAdapter implements SourceAdapter {
     }
 
     return events;
+  }
+
+  /**
+   * Configured labels as Gmail label ids. Users write label names ("Work"),
+   * but history records and the history filter carry ids ("Label_12"), so a
+   * name matched nothing. System labels (INBOX, STARRED) are their own ids.
+   * A label that cannot be resolved is kept as written.
+   */
+  private async resolveLabels(labels: string[]): Promise<string[]> {
+    if (!this.labelIndex) {
+      try {
+        const res = await this.gmail.users.labels.list({ userId: "me" });
+        const index = new Map<string, string>();
+        for (const l of res.data.labels || []) {
+          if (!l?.id) continue;
+          index.set(String(l.id).toLowerCase(), l.id);
+          if (l.name) index.set(String(l.name).toLowerCase(), l.id);
+        }
+        this.labelIndex = index;
+      } catch (err: any) {
+        // Not cached: retried next poll.
+        process.stderr.write(`Memoria Gmail: could not list labels: ${err.message}\n`);
+        return labels;
+      }
+    }
+    return labels.map((l) => this.labelIndex!.get(String(l).toLowerCase()) ?? l);
   }
 
   // ── History-based incremental sync ─────────────────────────
@@ -136,6 +166,9 @@ export class GoogleGmailAdapter implements SourceAdapter {
       const response = await this.gmail.users.history.list({
         userId: "me",
         startHistoryId,
+        // The API filters by one label at most; with several, the filter
+        // below keeps a message carrying any of them. It used to keep
+        // every message in the mailbox.
         labelId: labels.length === 1 ? labels[0] : undefined,
         historyTypes: ["messageAdded"],
         maxResults: Math.min(maxResults, 100),
@@ -146,11 +179,14 @@ export class GoogleGmailAdapter implements SourceAdapter {
         const ids: string[] = [];
         for (const msg of record.messagesAdded || []) {
           if (!msg.message?.id) continue;
-          // Skip excluded labels
-          const msgLabels = msg.message.labelIds || [];
-          if (!msgLabels.some((l: string) => excludeLabels.includes(String(l).toUpperCase()))) {
-            ids.push(msg.message.id);
-          }
+          const msgLabels = (msg.message.labelIds || []).map((l: string) =>
+            String(l).toUpperCase(),
+          );
+          // One label is filtered by the API itself.
+          const wanted =
+            labels.length <= 1 || labels.some((l) => msgLabels.includes(l.toUpperCase()));
+          const excluded = msgLabels.some((l: string) => excludeLabels.includes(l));
+          if (wanted && !excluded) ids.push(msg.message.id);
         }
         // Never split a record: take all of it, or stop before it so the
         // next poll starts here. A single record larger than the batch is

@@ -11,6 +11,15 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Gmail with several labels collected the whole mailbox.** The history
+  API filters by one label at most, and with more than one configured no
+  filter was applied. Messages are now kept when they carry any of the
+  labels. Label names (`Work`) are resolved to Gmail's label ids
+  (`Label_12`) once per server start, so user labels match too; before,
+  only system labels such as `INBOX` did.
+
 ## [0.3.1] — 2026-10-31
 
 Fixes from a second whole-repo review of 0.3.0 (50 verified findings). The
