@@ -34,10 +34,13 @@ Usage in Orchestrator:
 import hashlib
 import json
 import logging
+import math
+import numbers
 import os
 import threading
 import time
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Optional
 
 try:
@@ -65,6 +68,62 @@ def _http_status(exc: Exception) -> Optional[int]:
     response = getattr(exc, "response", None)
     status = getattr(response, "status_code", None)
     return status if isinstance(status, int) else None
+
+
+def _finite(value: float) -> Optional[float]:
+    return value if math.isfinite(value) else None
+
+
+def _coerce(value: Any) -> Any:
+    """json.dumps fallback: a JSON value for one that has none.
+
+    Decimal and numpy scalars become plain numbers (numpy.bool_ a bool), and
+    anything else its str(). Non-finite numbers become None, as JSON has no
+    NaN or Infinity.
+    """
+    # A numpy scalar (checked without importing numpy) to its Python value.
+    if type(value).__module__ == "numpy" and getattr(value, "shape", None) == ():
+        value = value.item()
+        if isinstance(value, (bool, str)):
+            return value
+    if isinstance(value, float):
+        return _finite(value)
+    if isinstance(value, numbers.Integral):
+        return int(value)
+    if isinstance(value, (numbers.Real, Decimal)):
+        return _finite(float(value))
+    return str(value)
+
+
+def _without_non_finite(value: Any) -> Any:
+    """A copy with NaN and +-Infinity floats replaced by None.
+
+    json.dumps writes those as bare NaN/Infinity tokens, which no strict JSON
+    parser (Memoria's /ingest included) accepts, and allow_nan=False raises
+    on them instead of calling `default`, so they are replaced first.
+    """
+    if isinstance(value, float):
+        return _finite(value)
+    if isinstance(value, dict):
+        return {k: _without_non_finite(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_without_non_finite(v) for v in value]
+    return value
+
+
+def _normalize_event(event: dict) -> dict:
+    """The event as it will travel: strict JSON, round-tripped.
+
+    One value json.dumps cannot write used to fail a whole batch: a NaN went
+    out as a bare token, /ingest answered 400 and the flush dropped up to
+    MAX_BATCH events with it; a Decimal raised TypeError before sending,
+    which counted as an outage, so the batch was re-queued and the queue
+    stalled behind it on every flush. Raises if the event still cannot be
+    serialized (a dict key that is not a string or a number, a cycle).
+    """
+    return json.loads(
+        json.dumps(_without_non_finite(event), allow_nan=False, default=_coerce)
+    )
 
 
 class MemoriaHook:
@@ -107,6 +166,18 @@ class MemoriaHook:
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
     def _push(self, event: dict) -> None:
+        # Normalized here, not at send time, so whatever is queued is known
+        # to serialize: one bad event is dropped alone instead of taking its
+        # batch with it.
+        try:
+            event = _normalize_event(event)
+        except (TypeError, ValueError, RecursionError) as e:
+            logger.error(
+                "Memoria event %r cannot be sent as JSON; dropping it: %s",
+                event.get("id"),
+                e,
+            )
+            return
         with self._lock:
             self._buffer.append(event)
             full = len(self._buffer) >= self.max_buffer
@@ -370,7 +441,9 @@ class MemoriaHook:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        body = json.dumps({"events": events})
+        # allow_nan=False: a NaN that got past _push fails here, locally,
+        # rather than as a server 400 that drops the whole batch.
+        body = json.dumps({"events": events}, allow_nan=False)
 
         if _HAS_HTTPX:
             resp = httpx.post(self.url, content=body, headers=headers, timeout=10)
