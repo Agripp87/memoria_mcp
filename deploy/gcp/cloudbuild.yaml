@@ -67,8 +67,9 @@ steps:
       # --memory 2Gi above.
       # MEMORIA_TOKEN_DB_DIR keeps the OAuth token DB on container-local /tmp
       # (SQLite WAL is unreliable on the GCS-FUSE mount). Also set in the image.
-      # MEMORIA_AUTO_COMPILE=true runs the "compile, don't retrieve" loop on a
-      # 24h timer: it rolls the daily-log firehose up into linked entity pages
+      # MEMORIA_AUTO_COMPILE=true runs the "compile, don't retrieve" loop once
+      # a day, counted across cold starts (the last run is kept in the store):
+      # it rolls the daily-log firehose up into linked entity pages
       # under entities/ (draining the ingest→compile queue so only touched
       # sources rebuild). Deterministic + idempotent, and max-instances=1 means
       # no concurrency hazard.

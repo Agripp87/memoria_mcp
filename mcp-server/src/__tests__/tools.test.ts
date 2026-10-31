@@ -265,6 +265,90 @@ describe("memory_compile across servers (2026-10 re-review F27)", () => {
   });
 });
 
+describe("a write whose indexing fails (2026-10 re-review F18)", () => {
+  it("memory_daily reports the entry saved, once, and the sweep indexes it later", async () => {
+    const indexChunks = store.indexChunks.bind(store);
+    store.indexChunks = async () => {
+      throw new Error("embeddings unreachable");
+    };
+    let r: any;
+    try {
+      r = await handlers.get("memory_daily")!({
+        entry: "Deferred entry about the quarterly gecko census",
+      });
+    } finally {
+      store.indexChunks = indexChunks;
+    }
+    expect(r.isError).toBeFalsy();
+    expect(text(r)).toMatch(/indexing is deferred/);
+    const today = new Date().toISOString().slice(0, 10);
+    const log = fs.readFileSync(path.join(MEM, "daily", `${today}.md`), "utf-8");
+    expect(log.split("gecko census").length - 1).toBe(1);
+    const tools = await import("../tools.js");
+    await tools.reindexAll(store);
+    expect((await store.search("gecko census", 3)).map((x: any) => x.file)).toContain(
+      `daily/${today}.md`,
+    );
+  });
+
+  it("memory_compile writes one file, not a -2 copy on retry", async () => {
+    const indexChunks = store.indexChunks.bind(store);
+    store.indexChunks = async () => {
+      throw new Error("embeddings unreachable");
+    };
+    let r: any;
+    try {
+      r = await handlers.get("memory_compile")!({
+        content: "A compiled note about the axolotl breeding programme, with distinct words.",
+        name: "Axolotl programme",
+        type: "reference",
+        tags: [],
+      });
+    } finally {
+      store.indexChunks = indexChunks;
+    }
+    expect(r.isError).toBeFalsy();
+    expect(text(r)).toContain("references/axolotl-programme.md");
+    expect(fs.existsSync(path.join(MEM, "references", "axolotl-programme-2.md"))).toBe(false);
+  });
+});
+
+describe("memory_reflect output cap (2026-10 re-review F39)", () => {
+  it("returns the newest logs within max_chars and says it truncated", async () => {
+    const dir = path.join(MEM, "daily");
+    for (let d = 1; d <= 20; d++) {
+      const date = `2025-01-${String(d).padStart(2, "0")}`;
+      fs.writeFileSync(path.join(dir, `${date}.md`), `# ${date}\n${"x".repeat(10_000)}\n`);
+    }
+    const r = await handlers.get("memory_reflect")!({ days: 365, max_chars: 5000 });
+    const out = text(r);
+    expect(out.length).toBeLessThan(5000 + 1000);
+    expect(out).toContain("(truncated");
+    for (let d = 1; d <= 20; d++)
+      fs.rmSync(path.join(dir, `2025-01-${String(d).padStart(2, "0")}.md`));
+  });
+});
+
+describe("memory_list tags of any YAML shape (2026-10 re-review F38)", () => {
+  it("filters by tag although some memories hold a scalar tags value", async () => {
+    const write = (f: string, tags: string) =>
+      fs.writeFileSync(
+        path.join(MEM, "project", f),
+        `---\nname: ${f}\ntype: project\ntags: ${tags}\n---\nbody\n`,
+      );
+    fs.mkdirSync(path.join(MEM, "project"), { recursive: true });
+    write("q4.md", "2024");
+    write("scalar.md", "urgent");
+    write("other.md", "[infra]");
+    const r = await handlers.get("memory_list")!({ tag: "infra" });
+    expect(text(r)).toContain("project/other.md");
+    expect(text(r)).not.toContain("project/q4.md");
+    const urgent = await handlers.get("memory_list")!({ tag: "urgent" });
+    expect(text(urgent)).toContain("project/scalar.md");
+    for (const f of ["q4.md", "scalar.md", "other.md"]) fs.rmSync(path.join(MEM, "project", f));
+  });
+});
+
 describe("memory_entities", () => {
   it("compiles daily-log events into an entity rollup page", async () => {
     const today = new Date().toISOString().split("T")[0];

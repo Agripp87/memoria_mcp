@@ -16,7 +16,7 @@ import type { NextFunction, Response } from "express";
 import { randomBytes, randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
-import { parseFrontmatter } from "./chunker.js";
+import { frontmatterTags, parseFrontmatter } from "./chunker.js";
 import { utcTimeLabel } from "./daily-format.js";
 import { createOrAppend } from "./atomic-fs.js";
 import { MemoryStore } from "./store.js";
@@ -30,6 +30,7 @@ import {
   reindexFile,
   getCollector,
   collectorInPrimaryMessage,
+  indexAfterWrite,
 } from "./tools.js";
 import {
   renderMemoryHtml,
@@ -181,7 +182,7 @@ export function createDashboardRouter(store: MemoryStore): Router {
           type: (metadata.type as string) || "unknown",
           importance: (metadata.importance as number) || 5,
           updated: (metadata.updated as string) || "unknown",
-          tags: (metadata.tags as string[]) || [],
+          tags: frontmatterTags(metadata.tags),
           accessCount: (metadata.access_count as number) || 0,
         };
       });
@@ -330,8 +331,8 @@ export function createDashboardRouter(store: MemoryStore): Router {
       createOrAppend(fullPath, block, block);
       bustScanCache(); // file changed on disk — invalidate now, before the index
       // rebuild (which can fail), so the wiki reflects the note
-      await reindexFile(store, fullPath);
-      res.json({ success: true });
+      const indexed = await indexAfterWrite(store, fullPath);
+      res.json({ success: true, indexingDeferred: indexed.note !== "" });
     } catch (err: any) {
       sendServerError(res, err);
     }
@@ -598,9 +599,14 @@ export function createDashboardRouter(store: MemoryStore): Router {
       // Daily log changed on disk — invalidate now, before the index rebuild
       // (which can fail), so the wiki index/calendar reflects the entry.
       bustScanCache();
-      await reindexFile(store, dailyFile);
+      const indexed = await indexAfterWrite(store, dailyFile);
 
-      res.json({ success: true, date: today, message: "Journal entry saved" });
+      res.json({
+        success: true,
+        date: today,
+        message: `Journal entry saved${indexed.note}`,
+        indexingDeferred: indexed.note !== "",
+      });
     } catch (err: any) {
       sendServerError(res, err);
     }

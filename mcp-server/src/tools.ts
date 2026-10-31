@@ -9,7 +9,12 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { dump } from "js-yaml";
-import { FRONTMATTER_WRITE_SCHEMA, chunkMarkdown, parseFrontmatter } from "./chunker.js";
+import {
+  FRONTMATTER_WRITE_SCHEMA,
+  chunkMarkdown,
+  frontmatterTags,
+  parseFrontmatter,
+} from "./chunker.js";
 import { MemoryStore } from "./store.js";
 import { runOptimize } from "./optimize.js";
 import { runLint, formatLintReport } from "./lint.js";
@@ -225,6 +230,30 @@ export async function reindexFile(store: MemoryStore, filePath: string): Promise
  * process, and the periodic sweep stopped at the first bad file. Index state
  * for files no longer on disk is dropped.
  */
+/**
+ * Index a file that was just written. The write is what the caller asked
+ * for and it has happened; a failure to index it (embeddings unreachable,
+ * say) must not turn into an error, or a retry writes the entry twice.
+ * The content hash is stored only after a successful embed, so the next
+ * sweep indexes the file. Returns a note to add to the result instead.
+ */
+export async function indexAfterWrite(
+  store: MemoryStore,
+  fullPath: string,
+): Promise<{ chunks: number; note: string }> {
+  try {
+    return { chunks: await reindexFile(store, fullPath), note: "" };
+  } catch (err) {
+    process.stderr.write(
+      `Memoria: indexing ${getRelativePath(fullPath)} deferred: ${(err as Error).message}\n`,
+    );
+    return {
+      chunks: 0,
+      note: ` (saved, but indexing is deferred: ${(err as Error).message}; the periodic reindex retries it)`,
+    };
+  }
+}
+
 /** The sweep in progress, if any, and how far it has got. */
 let sweepInFlight: Promise<{ files: number; chunks: number; failed: string[] }> | null = null;
 const sweepProgress = { done: 0, total: 0 };
@@ -348,6 +377,7 @@ export function setupPrimaryTakeover(store: MemoryStore): NodeJS.Timeout | null 
       if (store.tryBecomePrimary()) {
         clearInterval(timer);
         void resumeCollectorIfConfigured(store);
+        for (const run of onPromotion) run();
       }
     } catch (err) {
       process.stderr.write(`Memoria: lock takeover check failed: ${(err as Error).message}\n`);
@@ -404,10 +434,77 @@ export function setupWatcher(store: MemoryStore): void {
  * each sweep only re-embeds what actually changed. Deleted files are dropped
  * from the index. Interval overridable via MEMORIA_REINDEX_INTERVAL_MS.
  */
+/** setInterval's limit: a longer delay overflows and fires every 1 ms. */
+const MAX_TIMER_MS = 2_147_483_647;
+
+/**
+ * An interval from the environment, in ms. A value that is not a whole
+ * number of ms in [minMs, MAX_TIMER_MS] ("5m", "0", "abc", a number past
+ * setInterval's limit) used to reach setInterval as NaN, 0 or an overflow,
+ * all of which run the job every millisecond. It is refused with a warning
+ * and the default used.
+ */
+export function intervalFromEnv(name: string, defMs: number, minMs = 10_000): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return defMs;
+  return checkedInterval(Number(raw), defMs, minMs, `${name}=${raw}`);
+}
+
+function checkedInterval(ms: number, defMs: number, minMs: number, label: string): number {
+  if (Number.isInteger(ms) && ms >= minMs && ms <= MAX_TIMER_MS) return ms;
+  process.stderr.write(
+    `Memoria: ignoring ${label}: an interval must be a whole number of milliseconds from ` +
+      `${minMs} to ${MAX_TIMER_MS}; using ${defMs}.\n`,
+  );
+  return defMs;
+}
+
+/** Jobs to run as soon as a secondary becomes the primary (overdue passes). */
+const onPromotion: Array<() => void> = [];
+
+/**
+ * Run `job` every `intervalMs`, counted across restarts: the time of its last
+ * run is kept in the store (`metaKey`), and a check every hour (or every
+ * interval, if shorter) runs it once that much time has passed. A plain
+ * setInterval restarted its count with every process start, so a daily job
+ * in a stdio server (one per Claude session) or a scale-to-zero deployment
+ * practically never ran. Only the primary runs it; a secondary that takes
+ * over runs whatever is overdue at once.
+ */
+function scheduleDue(
+  store: MemoryStore,
+  metaKey: string,
+  intervalMs: number,
+  job: () => Promise<void> | void,
+): NodeJS.Timeout {
+  let running = false;
+  const tick = async () => {
+    if (!store.isPrimary || store.fenced || running) return;
+    const last = Number(store.getMeta(metaKey));
+    // A minute's slack: an hourly check landing just short of the mark.
+    if (Number.isFinite(last) && Date.now() - last < intervalMs - 60_000) return;
+    running = true;
+    try {
+      await job();
+      store.setMeta(metaKey, String(Date.now()));
+    } catch (err) {
+      process.stderr.write(`Memoria: scheduled ${metaKey} failed: ${(err as Error).message}\n`);
+    } finally {
+      running = false;
+    }
+  };
+  const timer = setInterval(() => void tick(), Math.min(intervalMs, 3_600_000));
+  timer.unref?.();
+  onPromotion.push(() => void tick());
+  void tick();
+  return timer;
+}
+
 export function setupPeriodicReindex(
   store: MemoryStore,
-  intervalMs = parseInt(process.env.MEMORIA_REINDEX_INTERVAL_MS || "300000", 10),
+  intervalMs = intervalFromEnv("MEMORIA_REINDEX_INTERVAL_MS", 300_000),
 ): NodeJS.Timeout {
+  intervalMs = checkedInterval(intervalMs, 300_000, 1_000, "the reindex interval");
   let running = false;
   const sweep = async () => {
     if (running) return;
@@ -440,35 +537,22 @@ export function setupPeriodicReindex(
  */
 export function setupPeriodicOptimize(
   store: MemoryStore,
-  intervalMs = parseInt(
-    process.env.MEMORIA_OPTIMIZE_INTERVAL_MS || String(24 * 60 * 60 * 1000),
-    10,
-  ),
+  intervalMs = intervalFromEnv("MEMORIA_OPTIMIZE_INTERVAL_MS", 24 * 60 * 60 * 1000),
 ): NodeJS.Timeout | null {
   if (process.env.MEMORIA_AUTO_OPTIMIZE !== "true") return null;
+  intervalMs = checkedInterval(intervalMs, 24 * 60 * 60 * 1000, 10_000, "the optimize interval");
 
-  let running = false;
+  // Only the primary maintains the store; a secondary sharing it skips.
   const run = () => {
-    // Only the primary maintains the store; a secondary sharing it skips.
-    if (!store.isPrimary) return;
-    if (running) return;
-    running = true;
-    try {
-      for (const action of ["decay", "promote", "detect_stale"] as const) {
-        const r = runOptimize(store, action);
-        if (r.affected > 0) {
-          process.stderr.write(`Memoria auto-optimize: ${action} affected ${r.affected}\n`);
-        }
+    for (const action of ["decay", "promote", "detect_stale"] as const) {
+      const r = runOptimize(store, action);
+      if (r.affected > 0) {
+        process.stderr.write(`Memoria auto-optimize: ${action} affected ${r.affected}\n`);
       }
-    } catch (err) {
-      process.stderr.write(`Memoria auto-optimize failed: ${(err as Error).message}\n`);
-    } finally {
-      running = false;
     }
   };
 
-  const timer = setInterval(run, intervalMs);
-  timer.unref?.();
+  const timer = scheduleDue(store, "last_auto_optimize", intervalMs, run);
   process.stderr.write(
     `Memoria: auto-optimize enabled (every ${Math.round(intervalMs / 3_600_000)}h).\n`,
   );
@@ -487,47 +571,32 @@ export function setupPeriodicOptimize(
  */
 export function setupPeriodicCompile(
   store: MemoryStore,
-  intervalMs = parseInt(process.env.MEMORIA_COMPILE_INTERVAL_MS || String(24 * 60 * 60 * 1000), 10),
+  intervalMs = intervalFromEnv("MEMORIA_COMPILE_INTERVAL_MS", 24 * 60 * 60 * 1000),
 ): NodeJS.Timeout | null {
   if (process.env.MEMORIA_AUTO_COMPILE !== "true") return null;
+  intervalMs = checkedInterval(intervalMs, 24 * 60 * 60 * 1000, 10_000, "the compile interval");
 
-  let running = false;
   const run = async () => {
-    if (!store.isPrimary) return; // see setupPeriodicOptimize
-    if (running) return;
-    running = true;
-    try {
-      // Drain the ingest-driven queue (P2): if specific sources were touched
-      // since the last run, rebuild just those; else do a full rollup.
-      const touched = drainCompileQueue();
-      const res = buildEntityPages(
-        MEMORIES_DIR,
-        touched.length > 0 ? { onlySources: touched } : {},
-      );
-      for (const rel of res.written) {
-        try {
-          await reindexFile(store, resolveMemoryPath(rel));
-        } catch (err) {
-          process.stderr.write(
-            `Memoria auto-compile: reindex of ${rel} failed: ${(err as Error).message}\n`,
-          );
-        }
-      }
-      if (res.written.length > 0) {
-        rebuildMarkdownIndex();
+    // Drain the ingest-driven queue (P2): if specific sources were touched
+    // since the last run, rebuild just those; else do a full rollup.
+    const touched = drainCompileQueue();
+    const res = buildEntityPages(MEMORIES_DIR, touched.length > 0 ? { onlySources: touched } : {});
+    for (const rel of res.written) {
+      try {
+        await reindexFile(store, resolveMemoryPath(rel));
+      } catch (err) {
         process.stderr.write(
-          `Memoria auto-compile: updated ${res.written.length} entity page(s).\n`,
+          `Memoria auto-compile: reindex of ${rel} failed: ${(err as Error).message}\n`,
         );
       }
-    } catch (err) {
-      process.stderr.write(`Memoria auto-compile failed: ${(err as Error).message}\n`);
-    } finally {
-      running = false;
+    }
+    if (res.written.length > 0) {
+      rebuildMarkdownIndex();
+      process.stderr.write(`Memoria auto-compile: updated ${res.written.length} entity page(s).\n`);
     }
   };
 
-  const timer = setInterval(run, intervalMs);
-  timer.unref?.();
+  const timer = scheduleDue(store, "last_auto_compile", intervalMs, run);
   process.stderr.write(
     `Memoria: auto-compile enabled (every ${Math.round(intervalMs / 3_600_000)}h).\n`,
   );
@@ -817,13 +886,13 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
       writeFileAtomic(fullPath, fileContent);
 
-      const chunksIndexed = await reindexFile(store, fullPath);
+      const indexed = await indexAfterWrite(store, fullPath);
 
       return {
         content: [
           {
             type: "text" as const,
-            text: `Written: ${file} (${chunksIndexed} chunks indexed)`,
+            text: `Written: ${file} (${indexed.chunks} chunks indexed)${indexed.note}`,
           },
         ],
       };
@@ -854,7 +923,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         const relPath = getRelativePath(f);
 
         const memType = (metadata.type as string) || "unknown";
-        const memTags = (metadata.tags as string[]) || [];
+        const memTags = frontmatterTags(metadata.tags);
 
         if (type && memType !== type) continue;
         if (tag && !memTags.includes(tag)) continue;
@@ -949,7 +1018,7 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       const header = `---\nname: Daily log ${today}\ndescription: Session log for ${today}\ntype: session\nimportance: 3\ncreated: ${today}\nupdated: ${today}\ntags: [daily]\n---\n\n# Daily Log — ${today}\n\n`;
       createOrAppend(dailyFile, header + entry, `\n${entry}`);
 
-      await reindexFile(store, dailyFile);
+      const indexed = await indexAfterWrite(store, dailyFile);
       // Refresh the index so a new day's log is immediately navigable
       // (idempotent — no-op when the catalog is unchanged).
       try {
@@ -961,7 +1030,9 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       }
 
       return {
-        content: [{ type: "text" as const, text: `Appended to daily log: ${today}` }],
+        content: [
+          { type: "text" as const, text: `Appended to daily log: ${today}${indexed.note}` },
+        ],
       };
     },
   );
@@ -1001,8 +1072,16 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         .optional()
         .default(7)
         .describe("Number of days of daily logs to read (1-365)"),
+      max_chars: z
+        .number()
+        .int()
+        .min(1)
+        .max(100000)
+        .optional()
+        .default(50000)
+        .describe("Max characters of log content to return, newest first (1-100000)"),
     },
-    async ({ days }) => {
+    async ({ days, max_chars }) => {
       const dailyDir = path.join(MEMORIES_DIR, "daily");
       if (!fs.existsSync(dailyDir)) {
         return { content: [{ type: "text" as const, text: "No daily logs found." }] };
@@ -1014,11 +1093,23 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         return { content: [{ type: "text" as const, text: "No daily logs found." }] };
       }
 
+      // Bounded, newest first: a year of collector logs in one response
+      // went past the stdio transport's 10 MB message limit and dropped the
+      // connection.
       const logs: string[] = [];
+      let budget = max_chars;
       for (const f of files) {
+        if (budget <= 0) break;
         const content = fs.readFileSync(path.join(dailyDir, f), "utf-8");
-        logs.push(`## ${f}\n\n${content}`);
+        const block = `## ${f}\n\n${content}`;
+        logs.push(block.length > budget ? block.slice(0, budget) : block);
+        budget -= block.length;
       }
+      const truncated =
+        budget < 0 || logs.length < files.length
+          ? `\n\n*(truncated at max_chars=${max_chars}: ${logs.length} of ${files.length} log(s) shown, ` +
+            `the last one cut; raise max_chars or lower days)*`
+          : "";
 
       return {
         content: [
@@ -1026,7 +1117,8 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
             type: "text" as const,
             text:
               `Found ${files.length} daily log(s). Review these for recurring themes and synthesize reflections:\n\n` +
-              logs.join("\n\n---\n\n"),
+              logs.join("\n\n---\n\n") +
+              truncated,
           },
         ],
       };
@@ -1354,14 +1446,21 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
           counter++;
         }
 
-        const chunksIndexed = await reindexFile(store, fullPath);
-        const indexSummary = rebuildMarkdownIndex();
+        const indexed = await indexAfterWrite(store, fullPath);
+        let indexSummary = "";
+        try {
+          indexSummary = rebuildMarkdownIndex();
+        } catch (err) {
+          process.stderr.write(
+            `Memoria: index refresh after compile failed (non-fatal): ${(err as Error).message}\n`,
+          );
+        }
 
         return {
           content: [
             {
               type: "text" as const,
-              text: `Compiled: ${relFile} (importance: ${importance}, ${chunksIndexed} chunks indexed)\n${indexSummary}`,
+              text: `Compiled: ${relFile} (importance: ${importance}, ${indexed.chunks} chunks indexed)${indexed.note}\n${indexSummary}`,
             },
           ],
         };

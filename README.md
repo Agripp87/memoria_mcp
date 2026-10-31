@@ -256,9 +256,9 @@ For a durable cloud deployment see [`deploy/gcp/README.md`](deploy/gcp/README.md
 | `MEMORIA_FILE_WATCHER_ROOTS` | *(none — watchers disabled)* | Comma-separated directories that `file_watcher` collector sources may watch. Unset or empty refuses every watcher; a path inside the collector data directory (key and credentials) is refused regardless. |
 | `MEMORIA_REINDEX_INTERVAL_MS` | `300000` | Interval for the periodic reindex sweep (fallback for inert `fs.watch`). |
 | `MEMORIA_AUTO_OPTIMIZE` | `false` | Set to `true` to run the idempotent decay/promote/staleness passes on a timer (genuinely autonomous self-management), instead of only when an agent calls `memory_optimize`. |
-| `MEMORIA_OPTIMIZE_INTERVAL_MS` | `86400000` | Interval for the auto-optimize pass (default 24h; only used when `MEMORIA_AUTO_OPTIMIZE=true`). |
+| `MEMORIA_OPTIMIZE_INTERVAL_MS` | `86400000` | Interval for the auto-optimize pass (default 24h; only used when `MEMORIA_AUTO_OPTIMIZE=true`). Counted across restarts: the time of the last pass is kept in the store, so a pass that is due runs at startup. |
 | `MEMORIA_AUTO_COMPILE` | `false` | Set to `true` to autonomously roll the daily-log firehose up into linked entity pages on a timer (the "compile, don't retrieve" loop), instead of only when an agent calls `memory_entities`. Drains the ingest-driven compile queue so only sources touched since the last run are rebuilt. |
-| `MEMORIA_COMPILE_INTERVAL_MS` | `86400000` | Interval for the auto-compile pass (default 24h; only used when `MEMORIA_AUTO_COMPILE=true`). |
+| `MEMORIA_COMPILE_INTERVAL_MS` | `86400000` | Interval for the auto-compile pass (default 24h; only used when `MEMORIA_AUTO_COMPILE=true`). Counted across restarts, like the optimize interval. Interval settings that are not a whole number of milliseconds of at least 10 s (1 s for the reindex sweep) are ignored with a warning. |
 | `MEMORIA_RAW_ARCHIVE` | `true` | Durable, immutable provenance archive of every ingested event under `data/raw/<source>/<YYYY-MM>.jsonl` (privacy-aware: `local-only` stores a hash only). **Batched** (one append per source per ingest cycle) and **rotated** (5MB parts), so it is safe on object-storage FUSE mounts. Set to `false` to disable. |
 | `MEMORIA_RAW_ARCHIVE_BATCH` / `MEMORIA_RAW_ARCHIVE_FLUSH_MS` / `MEMORIA_RAW_ARCHIVE_ROTATE_BYTES` | `20` / `60000` / `5242880` | Raw-archive batching knobs: flush after N buffered records or T ms (also flushed every ingest cycle and on shutdown); rotate to a new `-pN.jsonl` part past the byte cap. |
 | `MEMORIA_INGEST_MAX_ATTEMPTS` | `3` | Failed ingest attempts before a poison event is dead-lettered (metadata-only record in `data/.dead-letter.jsonl`; content never written). |
@@ -285,7 +285,7 @@ For a durable cloud deployment see [`deploy/gcp/README.md`](deploy/gcp/README.md
 | `memory_index` | Rebuild vector + FTS5 search index and MEMORY_INDEX.md catalog |
 | `memory_daily` | Append an entry (up to 50,000 characters) to today's daily log. Daily logs are UTC days, and entry times in them are UTC. |
 | `memory_optimize` | Run `decay`, `promote`, `detect_stale`, or `find_duplicates` |
-| `memory_reflect` | Read recent daily logs for agent reflection/synthesis |
+| `memory_reflect` | Read recent daily logs for agent reflection/synthesis, newest first, up to `max_chars` (default 50,000) |
 | `memory_stats` | Health metrics: importance distribution, stale count, access patterns, warnings |
 | `memory_lint` | Proactive health checks: contradiction scan, orphan detection, stale cross-refs, missing descriptions, gap analysis, **index drift** (rule VII), **entity-alias collisions** and **low-confidence claims** (rule VIII), **unknown directories** (files outside the documented layout — how the store once silently split into `reference/` + `references/`) |
 | `memory_compile` | Compile analysis results into structured core memories with auto-generated frontmatter and index update |

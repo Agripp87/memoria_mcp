@@ -1184,6 +1184,19 @@ export class MemoryStore {
     return gone.length;
   }
 
+  /** A value this server keeps in the store (schedules and the like). */
+  getMeta(key: string): string | undefined {
+    return (
+      this.db.prepare("SELECT value FROM store_meta WHERE key = ?").get(key) as
+        { value: string } | undefined
+    )?.value;
+  }
+
+  setMeta(key: string, value: string): void {
+    this.assertWritable();
+    this.db.prepare("INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)").run(key, value);
+  }
+
   /**
    * Get all indexed files.
    */
