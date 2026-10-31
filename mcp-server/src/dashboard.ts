@@ -428,8 +428,9 @@ export function createDashboardRouter(store: MemoryStore): Router {
 
   router.post("/api/sources/:id/configure", operatorOnly, async (req, res) => {
     try {
-      const { registry } = await getCollector(store);
+      const { registry, daemon } = await getCollector(store);
       const result = registry.updateSourceConfig(req.params.id, req.body, "user");
+      if (result.success) daemon.syncPollTimers();
       res.json(result);
     } catch (err: any) {
       sendServerError(res, err);

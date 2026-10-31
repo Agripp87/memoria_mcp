@@ -108,7 +108,7 @@ export function consentFingerprint(def: CustomSourceDefinition): string {
   return createHash("sha256").update(JSON.stringify(shown)).digest("hex").slice(0, 32);
 }
 
-const MIN_POLL_SEC = 10;
+export const MIN_POLL_SEC = 10;
 /** One day. Larger values overflow setInterval (2^31-1 ms) into a 1ms loop. */
 export const MAX_POLL_SEC = 86_400;
 const UNSAFE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -390,6 +390,7 @@ export class SourceRegistry {
       }
     }
 
+    const wasEnabled = this.state.configs[sourceId]?.enabled === true;
     const config: AdapterConfig = { ...change.config, enabled: true };
     this.state.configs[sourceId] = config;
 
@@ -432,6 +433,15 @@ export class SourceRegistry {
       };
     } catch (err: any) {
       this.errors.set(sourceId, err.message);
+      // A source that never got going (a wrong password, a missing
+      // permission) is switched off, keeping the settings the user typed:
+      // left enabled, the resume timer retried it every 10 minutes with the
+      // same bad credentials. One that worked before and failed to resume
+      // (offline at boot) stays enabled and is retried.
+      if (origin === "user" || !wasEnabled) {
+        this.state.configs[sourceId] = { ...config, enabled: false };
+        this.saveState();
+      }
       return {
         success: false,
         message: `Failed to initialize "${adapter.info.name}": ${err.message}`,
@@ -513,7 +523,9 @@ export class SourceRegistry {
     this.saveState();
     return {
       success: true,
-      message: `Configuration updated for "${sourceId}". Restart the source for changes to take effect.`,
+      message: change.settingsChanged
+        ? `Configuration updated for "${sourceId}". Settings take effect when the source is next enabled.`
+        : `Configuration updated for "${sourceId}".`,
     };
   }
 

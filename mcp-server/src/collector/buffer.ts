@@ -37,6 +37,9 @@ export interface BufferStats {
    *  means ingestion fell behind and personal events were lost before reaching
    *  core memory — an operator should investigate a stalled sync. */
   droppedUnsynced: number;
+  /** Cumulative count of HELD (undecryptable) events dropped at capacity: they
+   *  can no longer be recovered by restoring the original key. */
+  droppedHeld: number;
   /** Cumulative count of events dead-lettered after exhausting ingest retries
    *  (poison events). Their metadata is preserved in data/.dead-letter.jsonl. */
   deadLettered: number;
@@ -52,6 +55,8 @@ const DEFAULT_BATCH_SIZE = 50;
 
 /** `synced` value for rows that cannot be decrypted with the current key. */
 const HELD = 2;
+/** `synced` value for rows delivered to ingestion. */
+const SYNCED = 1;
 
 export class EventBuffer {
   private db: any = null;
@@ -60,6 +65,7 @@ export class EventBuffer {
   private maxEvents: number;
   private retentionMs: number;
   private droppedUnsynced = 0;
+  private droppedHeld = 0;
   private deadLettered = 0;
 
   constructor(
@@ -507,25 +513,25 @@ export class EventBuffer {
 
     const excess = count.cnt - this.maxEvents;
 
-    // The DELETE orders synced rows first (synced DESC), so synced events are
-    // evicted before any unsynced one. Unsynced rows are only dropped once all
-    // synced rows are gone and we're STILL over capacity — i.e. the buffer is
-    // full of un-ingested events because the sync/ingestion path has stalled.
-    // That is real data loss, so account for it separately and loudly.
-    // Synced and held rows (synced <> 0) both go before any unsynced one.
-    const syncedCount = (
-      this.db.prepare("SELECT COUNT(*) as cnt FROM events WHERE synced <> 0").get() as {
-        cnt: number;
-      }
-    ).cnt;
-    const unsyncedToDrop = Math.max(0, excess - syncedCount);
+    // Eviction order: delivered rows first, then HELD rows (undecryptable,
+    // kept in case the original key is restored), then unsynced ones. Only
+    // delivered rows are safe to drop; losing a held or an unsynced row is
+    // data loss and is counted and reported. Held rows used to sort first
+    // (synced DESC put 2 above 1) and went silently.
+    const countWhere = (cond: string) =>
+      (this.db.prepare(`SELECT COUNT(*) as cnt FROM events WHERE ${cond}`).get() as { cnt: number })
+        .cnt;
+    const syncedCount = countWhere(`synced = ${SYNCED}`);
+    const heldCount = countWhere(`synced = ${HELD}`);
+    const heldToDrop = Math.min(heldCount, Math.max(0, excess - syncedCount));
+    const unsyncedToDrop = Math.max(0, excess - syncedCount - heldCount);
 
-    // Drop oldest synced events first, then oldest low-importance unsynced
     const result = this.db
       .prepare(
         `DELETE FROM events WHERE rowid IN (
           SELECT rowid FROM events
-          ORDER BY synced DESC, importance ASC, buffered_at ASC
+          ORDER BY CASE synced WHEN ${SYNCED} THEN 0 WHEN ${HELD} THEN 1 ELSE 2 END ASC,
+                   importance ASC, buffered_at ASC
           LIMIT ?
         )`,
       )
@@ -534,6 +540,14 @@ export class EventBuffer {
     if (result.changes > 0) {
       process.stderr.write(
         `Memoria buffer: dropped ${result.changes} oldest event(s) to stay under capacity (${this.maxEvents})\n`,
+      );
+    }
+    if (heldToDrop > 0) {
+      this.droppedHeld += heldToDrop;
+      process.stderr.write(
+        `Memoria buffer: WARNING — dropped ${heldToDrop} held (undecryptable) event(s) at capacity; ` +
+          `restoring the original encryption key can no longer recover them. ` +
+          `Cumulative held dropped: ${this.droppedHeld}.\n`,
       );
     }
     if (unsyncedToDrop > 0) {
@@ -571,6 +585,7 @@ export class EventBuffer {
         newestEvent: null,
         bufferSizeBytes: 0,
         droppedUnsynced: this.droppedUnsynced,
+        droppedHeld: this.droppedHeld,
         deadLettered: this.deadLettered,
       };
     }
@@ -602,6 +617,7 @@ export class EventBuffer {
       newestEvent: newest?.buffered_at ?? null,
       bufferSizeBytes: sizeBytes,
       droppedUnsynced: this.droppedUnsynced,
+      droppedHeld: this.droppedHeld,
       deadLettered: this.deadLettered,
     };
   }

@@ -9,9 +9,9 @@
  *   - Graceful shutdown with checkpoint saving
  */
 
-import { SourceRegistry } from "./registry.js";
+import { SourceRegistry, MIN_POLL_SEC, MAX_POLL_SEC } from "./registry.js";
 import { EventBuffer } from "./buffer.js";
-import type { RawEvent } from "./adapters/base.js";
+import type { RawEvent, SourceAdapter } from "./adapters/base.js";
 import type { IngestionResult } from "./ingestion.js";
 
 // ── Types ──────────────────────────────────────────────────
@@ -193,20 +193,21 @@ export class CollectorDaemon {
       }
     }
 
-    // Add timers for new active adapters
+    // Add timers for new active adapters, and re-arm those whose interval
+    // changed (a re-enable or configure with a new pollIntervalSec kept the
+    // old cadence until a restart).
     for (const [sourceId, adapter] of activeAdapters) {
-      if (this.pollTimers.has(sourceId)) continue;
-
-      // Honor the user-configured interval (persisted per-source), not just the
-      // adapter's static default. Sanitize against a bad persisted value so a
-      // 0/NaN/negative interval can't spin a runaway poll loop.
-      const effective = this.registry.getEffectiveConfig(sourceId);
-      const rawSec = effective?.pollIntervalSec ?? adapter.info.defaultConfig.pollIntervalSec ?? 60;
-      const MIN_POLL_SEC = 10;
-      const MAX_POLL_SEC = 86_400; // beyond 2^31-1 ms setInterval fires every 1ms
-      const pollSec =
-        Number.isFinite(rawSec) && rawSec >= MIN_POLL_SEC && rawSec <= MAX_POLL_SEC ? rawSec : 60;
-      const intervalMs = pollSec * 1000;
+      const intervalMs = this.intervalMsFor(sourceId, adapter);
+      const existing = this.pollTimers.get(sourceId);
+      if (existing) {
+        if (existing.intervalMs !== intervalMs) {
+          // In place: inFlight and the backoff state carry over.
+          if (existing.timer) clearInterval(existing.timer);
+          existing.intervalMs = intervalMs;
+          existing.timer = setInterval(() => this.pollSource(sourceId), intervalMs);
+        }
+        continue;
+      }
 
       const pt: PollTimer = {
         sourceId,
@@ -231,6 +232,22 @@ export class CollectorDaemon {
       // never rejects, and start() must not block on a slow first poll.
       void this.pollSource(sourceId);
     }
+  }
+
+  /**
+   * The poll interval for a source: the user-configured one (persisted per
+   * source), not just the adapter's static default. An unusable stored
+   * value (0, NaN, negative) falls back to the default, so it cannot spin a
+   * runaway poll loop; one above a day is capped at a day, since 0.2.x
+   * accepted weekly intervals and setInterval overflows past 2^31-1 ms.
+   */
+  private intervalMsFor(sourceId: string, adapter: SourceAdapter): number {
+    const fallback = adapter.info.defaultConfig.pollIntervalSec;
+    const usable = (v: unknown): v is number =>
+      typeof v === "number" && Number.isFinite(v) && v >= MIN_POLL_SEC;
+    const raw = this.registry.getEffectiveConfig(sourceId)?.pollIntervalSec;
+    const sec = usable(raw) ? raw : usable(fallback) ? fallback : 60;
+    return Math.min(sec, MAX_POLL_SEC) * 1000;
   }
 
   // ── Polling ────────────────────────────────────────────────

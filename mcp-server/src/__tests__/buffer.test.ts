@@ -105,3 +105,31 @@ describe("EventBuffer undecryptable rows and retention (review 2026-10)", () => 
     ).toEqual(["e1"]);
   });
 });
+
+describe("EventBuffer eviction order (2026-10 re-review F31)", () => {
+  const db = () => (buf as any).db;
+
+  it("evicts delivered rows before held ones, and counts held losses", () => {
+    buf.pushBatch(Array.from({ length: 100 }, (_, i) => ev(i)));
+    // 30 held (undecryptable), 30 delivered, 40 unsynced.
+    db()
+      .prepare(
+        "UPDATE events SET synced = 2 WHERE event_id IN (SELECT event_id FROM events ORDER BY rowid LIMIT 30)",
+      )
+      .run();
+    db()
+      .prepare(
+        "UPDATE events SET synced = 1 WHERE synced = 0 AND event_id IN (SELECT event_id FROM events WHERE synced = 0 ORDER BY rowid LIMIT 30)",
+      )
+      .run();
+    buf.pushBatch(Array.from({ length: 20 }, (_, i) => ev(1000 + i)));
+    const held = () => db().prepare("SELECT COUNT(*) AS n FROM events WHERE synced = 2").get().n;
+    expect(held()).toBe(30);
+    expect(buf.getStats().droppedHeld).toBe(0);
+    expect(buf.getStats().droppedUnsynced).toBe(0);
+    // Past the delivered rows, held ones go next, and that is reported.
+    buf.pushBatch(Array.from({ length: 20 }, (_, i) => ev(2000 + i)));
+    expect(held()).toBe(20);
+    expect(buf.getStats().droppedHeld).toBe(10);
+  });
+});

@@ -433,6 +433,19 @@ describe("custom sources emit only new records (review 2026-10)", () => {
     expect(next.map((e) => e.content)).toEqual(["Postmortem written for the outage"]);
   });
 
+  it("a restored checkpoint reads the unchanged file again (2026-10 re-review F33)", async () => {
+    // The daemon restores the checkpoint when a poll's events could not be
+    // buffered; the next poll must return them although the mtime is the same.
+    const file = path.join(root, "log.txt");
+    fs.writeFileSync(file, "Decided to migrate the queue to Redis\n");
+    const a = await watcher(file);
+    const before = a.getCheckpoint();
+    expect(await a.poll()).toHaveLength(1);
+    a.setCheckpoint(before);
+    expect(await a.poll()).toHaveLength(1);
+    expect(await a.poll()).toEqual([]);
+  });
+
   it("remembers what it read across a restart (via the checkpoint)", async () => {
     const file = path.join(root, "log.txt");
     fs.writeFileSync(file, "Decided to migrate the queue to Redis\n");
@@ -626,5 +639,58 @@ describe("disabling an unknown source (2026-10 re-review F17)", () => {
     await reg.disableSource("constructor", "user");
     expect(Object.hasOwn(Object.prototype, "enabled")).toBe(false);
     expect(({} as any).enabled).toBeUndefined();
+  });
+});
+
+describe("a source whose first enable fails (2026-10 re-review F36)", () => {
+  beforeEach(() => {
+    process.env.MEMORIA_FILE_WATCHER_ROOTS = root;
+    fs.writeFileSync(path.join(root, "a.json"), "[]");
+    expect(
+      reg.addCustomSource(def({ id: "w", watchPath: path.join(root, "a.json") })).success,
+    ).toBe(true);
+    reg.recordAgreement("custom-w");
+  });
+
+  function failInit(times = Infinity) {
+    const adapter = (reg as any).adapters.get("custom-w");
+    const init = adapter.init.bind(adapter);
+    let calls = 0;
+    adapter.init = async (c: unknown) => {
+      calls++;
+      if (calls <= times) throw new Error("AUTHENTICATIONFAILED");
+      return init(c);
+    };
+    return () => calls;
+  }
+
+  it("is left disabled, keeping its settings, and is not retried in the background", async () => {
+    const calls = failInit();
+    const r = await reg.enableSource("custom-w", { importanceThreshold: 4 }, "user");
+    expect(r.success).toBe(false);
+    const reloaded = new SourceRegistry(dataDir);
+    const cfg = reloaded.getEffectiveConfig("custom-w");
+    expect(cfg.enabled).toBe(false);
+    expect(cfg.importanceThreshold).toBe(4);
+    await reg.restoreEnabledSources();
+    await reg.restoreEnabledSources();
+    expect(calls()).toBe(1);
+  });
+
+  it("one that worked before and fails to resume stays enabled and is retried", async () => {
+    expect((await reg.enableSource("custom-w", undefined, "user")).success).toBe(true);
+    const after = new SourceRegistry(dataDir);
+    const adapter = (after as any).adapters.get("custom-w");
+    const init = adapter.init.bind(adapter);
+    let calls = 0;
+    adapter.init = async (c: unknown) => {
+      if (++calls === 1) throw new Error("offline");
+      return init(c);
+    };
+    await after.restoreEnabledSources();
+    expect(after.getEffectiveConfig("custom-w").enabled).toBe(true);
+    await after.restoreEnabledSources();
+    expect(calls).toBe(2);
+    expect(after.getActiveAdapters().has("custom-w")).toBe(true);
   });
 });

@@ -494,6 +494,10 @@ export class CustomAdapter implements SourceAdapter {
 
   setCheckpoint(cursor: string): void {
     this.checkpoint = cursor;
+    // The daemon restores a checkpoint when a poll's events could not be
+    // buffered. The file must then be read again even though its mtime has
+    // not changed; the seen-set keeps already-collected records out.
+    this.lastModified = 0;
     this.seenIds = null;
     this.seenCapped = cursor.startsWith("v2c:");
     this.baselineOnly = cursor === CUSTOM_BASELINE;

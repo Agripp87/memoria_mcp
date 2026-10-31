@@ -2051,6 +2051,8 @@ export function registerCollectorTools(server: McpServer, store: MemoryStore): v
           if (!config)
             return { content: [{ type: "text" as const, text: "Error: config required" }] };
           const result = registry!.updateSourceConfig(source, config, "agent");
+          // A new pollIntervalSec applies to the running source right away.
+          if (result.success) daemon!.syncPollTimers();
           return { content: [{ type: "text" as const, text: result.message }] };
         }
 
@@ -2242,6 +2244,9 @@ export function registerCollectorTools(server: McpServer, store: MemoryStore): v
               ? [
                   `- ⚠ Unsynced events DROPPED at capacity (data loss): ${bufferStats.droppedUnsynced}`,
                 ]
+              : []),
+            ...(bufferStats.droppedHeld > 0
+              ? [`- ⚠ Held (undecryptable) events DROPPED at capacity: ${bufferStats.droppedHeld}`]
               : []),
             ...(bufferStats.deadLettered > 0
               ? [
