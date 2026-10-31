@@ -34,7 +34,11 @@ afterAll(() => {
   try {
     primary.close();
   } catch {}
-  fs.rmSync(ROOT, { recursive: true, force: true });
+  // The imported server keeps its store open; Windows refuses to delete an
+  // open file (EBUSY), as in the other suites that import http.ts.
+  try {
+    fs.rmSync(ROOT, { recursive: true, force: true });
+  } catch {}
 });
 
 describe("dashboard in a secondary (F6)", () => {
