@@ -21,9 +21,9 @@ import { createHash } from "node:crypto";
 import fs from "fs";
 import path from "path";
 import { parseFrontmatter } from "./chunker.js";
-import { TIME_LABEL_SRC } from "./daily-format.js";
+import { TIME_LABEL_SRC, entryImportance, stripImportanceTrailer } from "./daily-format.js";
 import { writeFileAtomic } from "./atomic-fs.js";
-import { listDailyLogNames } from "./daily-paths.js";
+import { listDailyLogNames, storeSubdir } from "./daily-paths.js";
 
 /** Marker placed in entity-page frontmatter so we only ever overwrite our own
  * generated files — never something a human took over. */
@@ -106,11 +106,9 @@ function aggregate(
     ENTRY_RE.lastIndex = 0;
     while ((m = ENTRY_RE.exec(content)) !== null) {
       const [, time, source, rawBody] = m;
-      const impMatch = rawBody.match(/\*importance:\s*(\d+)/);
-      const importance = impMatch ? parseInt(impMatch[1], 10) : 5;
-      const body = rawBody
+      const importance = entryImportance(rawBody);
+      const body = stripImportanceTrailer(rawBody)
         .replace(/\n>.*$/gm, "") // drop meta blockquote lines
-        .replace(/\*importance:.*$/m, "")
         .trim();
       eventsScanned++;
 
@@ -291,7 +289,8 @@ export function buildEntityPages(
     eventsScanned,
   };
 
-  const entitiesDir = path.join(memoriesDir, "entities");
+  // Throws for a symlinked entities/ before anything is read through it.
+  const entitiesDir = storeSubdir(memoriesDir, "entities");
 
   for (const agg of bySource.values()) {
     if (only && !only.has(agg.source)) continue;
@@ -320,7 +319,7 @@ export function buildEntityPages(
       changed = true;
     }
     if (changed) {
-      fs.mkdirSync(entitiesDir, { recursive: true });
+      storeSubdir(memoriesDir, "entities", true);
       // Re-check at rename time: a human edit (or takeover) landing between
       // the check above and the write must win, not be overwritten (L3).
       const wrote = writeFileAtomic(abs, page, {

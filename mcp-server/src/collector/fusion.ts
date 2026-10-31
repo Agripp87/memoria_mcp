@@ -20,7 +20,7 @@
 
 import type { RawEvent } from "./adapters/base.js";
 import { enforceEventPrivacy } from "./adapters/base.js";
-import { utcTimeLabel } from "../daily-format.js";
+import { neutralizeEntryContent, neutralizeHeadingLabel, utcTimeLabel } from "../daily-format.js";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -246,11 +246,13 @@ export class TemporalFusion {
     for (const [source, sourceEvents] of bySource) {
       const label = this.sourceLabel(source);
       if (sourceEvents.length === 1) {
-        lines.push(`**${label}**: ${sourceEvents[0].content.slice(0, 150)}`);
+        lines.push(
+          `**${label}**: ${neutralizeEntryContent(sourceEvents[0].content.slice(0, 150))}`,
+        );
       } else {
         lines.push(`**${label}** (${sourceEvents.length} events):`);
         for (const e of sourceEvents.slice(0, 3)) {
-          lines.push(`  - ${e.content.slice(0, 100)}`);
+          lines.push(`  - ${neutralizeEntryContent(e.content.slice(0, 100))}`);
         }
         if (sourceEvents.length > 3) {
           lines.push(`  - ... and ${sourceEvents.length - 3} more`);
@@ -309,7 +311,7 @@ export function formatFusedActivity(activity: FusedActivity): string {
   const endTime = utcTimeLabel(new Date(activity.endTime));
 
   return [
-    `## ${activity.label}`,
+    `## ${neutralizeHeadingLabel(activity.label)}`,
     "",
     `**Time**: ${startTime} – ${endTime} on ${date}`,
     `**Sources**: ${activity.sourceEvents.map((e) => e.source).join(", ")} (${activity.sourceCount} sources)`,

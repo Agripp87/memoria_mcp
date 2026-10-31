@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { keyedContentHash } from "./crypto.js";
 import { dailyLogPath } from "../daily-paths.js";
-import { collectorDailyHeader, utcTimeLabel } from "../daily-format.js";
+import { collectorDailyHeader, neutralizeEntryContent, utcTimeLabel } from "../daily-format.js";
 import { createOrAppend, writeFileAtomic } from "../atomic-fs.js";
 import { getProvider } from "../embeddings.js";
 import { enforceEventPrivacy } from "./adapters/base.js";
@@ -419,7 +419,16 @@ export class IngestionPipeline {
    * mislabeled or caller-supplied "send" cannot leak sensitive content.
    */
   private enforcePrivacy(event: RawEvent): RawEvent {
-    return enforceEventPrivacy(event);
+    const safe = enforceEventPrivacy(event);
+    // A local-only event's id goes where its content may not: the daily
+    // log's ref and the provenance archive. Built-in adapters use row
+    // numbers, but an /ingest caller or a custom adapter may put text in an
+    // id. Keyed, the ref still ties the log entry to its archive record.
+    if (safe.privacyTier === "local-only" && safe.id) {
+      const opaque = keyedContentHash(`${safe.source}:${safe.id}`, this.dataDir).slice(0, 16);
+      return { ...safe, id: `k-${opaque}` };
+    }
+    return safe;
   }
 
   // ── Stage 5: Writing ───────────────────────────────────────
@@ -460,7 +469,12 @@ export class IngestionPipeline {
     const sourceLabel = this.getSourceLabel(event.source);
     const privacyNote = event.privacyTier === "summarize" ? " *(summarized)*" : "";
 
-    const lines = [`## ${time} — ${sourceLabel}${privacyNote}`, "", event.content, ""];
+    const lines = [
+      `## ${time} — ${sourceLabel}${privacyNote}`,
+      "",
+      neutralizeEntryContent(event.content),
+      "",
+    ];
 
     // Add relevant metadata
     const metaLines: string[] = [];

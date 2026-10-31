@@ -1123,3 +1123,37 @@ describe("/ingest event validation (2026-10 re-review F29)", () => {
     expect(r.status).toBe(400);
   });
 });
+
+describe("custom source consent over the dashboard API (2026-10 re-review F16)", () => {
+  it("needs the shown fingerprint, and refuses a stale one", async () => {
+    process.env.MEMORIA_FILE_WATCHER_ROOTS = ROOT;
+    try {
+      fs.writeFileSync(path.join(ROOT, "notes.json"), "[]");
+      const { getCollector } = await import("../tools.js");
+      const { registry } = await getCollector({ isPrimary: true } as any);
+      expect(
+        registry.addCustomSource({
+          id: "notes",
+          name: "Notes",
+          description: "d",
+          mode: "file_watcher",
+          watchPath: path.join(ROOT, "notes.json"),
+        }).success,
+      ).toBe(true);
+      const agree = (body: object) =>
+        request(app)
+          .post("/dashboard/api/sources/custom-notes/agree")
+          .set(auth)
+          .set("X-Forwarded-For", "10.66.3.1")
+          .send(body);
+      expect((await agree({})).status).toBe(400);
+      expect((await agree({ fingerprint: "0".repeat(32) })).status).toBe(409);
+      expect(registry.hasAgreement("custom-notes")).toBe(false);
+      const shown = registry.listSources().find((s) => s.id === "custom-notes")!.consentFingerprint;
+      expect((await agree({ fingerprint: shown })).status).toBe(200);
+      expect(registry.hasAgreement("custom-notes")).toBe(true);
+    } finally {
+      delete process.env.MEMORIA_FILE_WATCHER_ROOTS;
+    }
+  });
+});

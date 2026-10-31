@@ -14,7 +14,12 @@ import { MemoryStore } from "./store.js";
 import { runOptimize } from "./optimize.js";
 import { runLint, formatLintReport } from "./lint.js";
 import { buildEntityPages } from "./entities.js";
-import { TIME_LABEL_SRC, collectorDailyHeader } from "./daily-format.js";
+import {
+  TIME_LABEL_SRC,
+  collectorDailyHeader,
+  entryImportance,
+  stripImportanceTrailer,
+} from "./daily-format.js";
 import { createOrAppend, writeFileAtomic } from "./atomic-fs.js";
 import { SourceRegistry } from "./collector/registry.js";
 import { EventBuffer } from "./collector/buffer.js";
@@ -1328,9 +1333,8 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         let m: RegExpExecArray | null;
         while ((m = entryRegex.exec(content)) !== null) {
           const [, time, source, body] = m;
-          const importanceMatch = body.match(/\*importance:\s*(\d+)/);
-          const imp = importanceMatch ? parseInt(importanceMatch[1], 10) : 5;
-          const cleanBody = body.replace(/\n\*importance:.*$/m, "").trim();
+          const imp = entryImportance(body);
+          const cleanBody = stripImportanceTrailer(body).trim();
           const fingerprint = cleanBody.slice(0, 100);
 
           allEntries.push({ time: `${date} ${time}`, source, content: cleanBody, importance: imp });
@@ -1440,10 +1444,12 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
     async ({ days, min_events }) => {
       const res = buildEntityPages(MEMORIES_DIR, { days, minEvents: min_events });
       // Reindex new/changed pages and refresh the catalog so they're navigable.
+      const notIndexed = new Set<string>();
       for (const rel of res.written) {
         try {
           await reindexFile(store, resolveMemoryPath(rel));
         } catch (err) {
+          notIndexed.add(rel);
           process.stderr.write(
             `Memoria: reindex of ${rel} failed (non-fatal): ${(err as Error).message}\n`,
           );
@@ -1454,7 +1460,9 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       const lines = [
         `**Entity compilation** — scanned ${res.eventsScanned} events across ${res.sourcesSeen} source(s).`,
         `- Pages written/updated: ${res.written.length}`,
-        ...(res.written.length > 0 ? res.written.map((f) => `  - ${f}`) : []),
+        ...res.written.map(
+          (f) => `  - ${f}${notIndexed.has(f) ? " (not indexed yet; the next sweep retries)" : ""}`,
+        ),
         ...(res.skipped.length > 0
           ? [
               `- Skipped (human-owned): ${res.skipped.length}`,

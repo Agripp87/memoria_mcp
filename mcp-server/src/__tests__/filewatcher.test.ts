@@ -65,3 +65,32 @@ describe("assertWatchPathAllowed", () => {
     ).toThrow(/collector data directory/i);
   });
 });
+
+describe("assertWatchPathAllowed with a symlinked MEMORIA_DIR (2026-10 re-review F15)", () => {
+  it("blocks the data dir by its link path and its real path", () => {
+    // MEMORIA_DIR=<TMP>/store-link -> <TMP>/real-store; the registry is
+    // given the link spelling of the data dir, the watch path resolves to
+    // the real one.
+    const real = path.join(TMP, "real-store");
+    fs.mkdirSync(path.join(real, "data"), { recursive: true });
+    fs.writeFileSync(path.join(real, "data", "collector.key"), "deadbeef");
+    const link = path.join(TMP, "store-link");
+    fs.symlinkSync(real, link);
+    process.env.MEMORIA_FILE_WATCHER_ROOTS = TMP;
+    const dataDir = path.join(link, "data");
+    for (const p of [
+      path.join(link, "data", "collector.key"),
+      path.join(real, "data", "collector.key"),
+    ]) {
+      expect(() => assertWatchPathAllowed(p, { dataDir })).toThrow(/collector data directory/i);
+    }
+  });
+
+  it("blocks a copy of the key file wherever it lives", () => {
+    process.env.MEMORIA_FILE_WATCHER_ROOTS = TMP;
+    fs.writeFileSync(path.join(ALLOWED, "collector.key"), "deadbeef");
+    expect(() =>
+      assertWatchPathAllowed(path.join(ALLOWED, "collector.key"), { dataDir: DATA_DIR }),
+    ).toThrow(/collector data directory/i);
+  });
+});

@@ -379,7 +379,20 @@ export function createDashboardRouter(store: MemoryStore): Router {
   router.post("/api/sources/:id/agree", operatorOnly, async (req, res) => {
     try {
       const { registry } = await getCollector(store);
-      registry.recordAgreement(req.params.id);
+      // A custom source's consent names the definition the user was shown.
+      const shown = (req.body as { fingerprint?: unknown } | undefined)?.fingerprint;
+      if (req.params.id.startsWith("custom-") && typeof shown !== "string") {
+        res.status(400).json({ error: "Consent to a custom source must name its fingerprint." });
+        return;
+      }
+      const result = registry.recordAgreement(
+        req.params.id,
+        typeof shown === "string" ? shown : undefined,
+      );
+      if (!result.success) {
+        res.status(409).json({ error: result.message });
+        return;
+      }
       res.json({ success: true });
     } catch (err: any) {
       sendServerError(res, err);
@@ -1306,7 +1319,10 @@ async function enableSourceSteps(id) {
   );
   if (!agreed) return;
 
-  const agreement = await api('/sources/' + id + '/agree', { method: 'POST' });
+  const agreement = await api('/sources/' + id + '/agree', {
+    method: 'POST',
+    body: JSON.stringify(source.consentFingerprint ? { fingerprint: source.consentFingerprint } : {}),
+  });
   if (agreement && agreement.error) throw new Error(agreement.error);
 
   // Check if it needs config (Google adapters, email)

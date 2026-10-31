@@ -10,6 +10,7 @@
  */
 
 import * as fs from "node:fs";
+import { createHash } from "node:crypto";
 import { writeFileAtomic } from "../atomic-fs.js";
 import * as path from "node:path";
 import { installDependencies, isDependencyAvailable, setAdapterModulesDir } from "./deps.js";
@@ -48,12 +49,24 @@ export interface SourceStatus {
    * are free text chosen by whoever added the source, possibly an agent.
    */
   detail: string | null;
+  /**
+   * For a custom source, a fingerprint of what it runs or reads. The
+   * dashboard sends back the one it showed, so consent given for one
+   * definition cannot land on another swapped in while the dialog was open.
+   */
+  consentFingerprint: string | null;
 }
 
 export interface UserAgreement {
   agreedAt: string;
   sources: string[];
   version: number;
+  /**
+   * Custom source id → fingerprint of the definition consented to. A
+   * custom source's consent holds only while its definition still matches;
+   * a consent without one (recorded before 0.3.1) must be given again.
+   */
+  definitions?: Record<string, string>;
 }
 
 interface RegistryState {
@@ -70,6 +83,30 @@ interface RegistryState {
  * prompt-injected instructions, so it is held to scheduling changes only.
  */
 export type ChangeOrigin = "user" | "agent";
+
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const HIDDEN_TEXT_RE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/;
+
+/** What a custom source runs or reads, as a stable hash (see recordAgreement). */
+export function consentFingerprint(def: CustomSourceDefinition): string {
+  const canonical = (v: unknown): unknown =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(
+          Object.keys(v)
+            .sort()
+            .map((k) => [k, canonical((v as Record<string, unknown>)[k])]),
+        )
+      : v;
+  const shown = {
+    mode: def.mode,
+    command: def.command ?? null,
+    watchPath: def.watchPath ?? null,
+    fileFormat: def.fileFormat ?? null,
+    jsonPath: def.jsonPath ?? null,
+    fieldMap: canonical(def.fieldMap ?? null),
+  };
+  return createHash("sha256").update(JSON.stringify(shown)).digest("hex").slice(0, 32);
+}
 
 const MIN_POLL_SEC = 10;
 /** One day. Larger values overflow setInterval (2^31-1 ms) into a 1ms loop. */
@@ -178,7 +215,7 @@ export class SourceRegistry {
 
     // Register built-in adapters
     this.registerBuiltIn(new IMessageAdapter());
-    this.registerBuiltIn(new CalendarAdapter());
+    this.registerBuiltIn(new CalendarAdapter({ dataDir }));
     this.registerBuiltIn(new EmailAdapter());
     this.registerBuiltIn(new GoogleGmailAdapter());
     this.registerBuiltIn(new GoogleCalendarAdapter());
@@ -224,10 +261,16 @@ export class SourceRegistry {
         lastPoll: this.lastPolled.get(id) ?? null,
         error: this.errors.get(id) ?? null,
         detail: this.customDetail(id),
+        consentFingerprint: this.customFingerprint(id),
       });
     }
 
     return statuses;
+  }
+
+  private customFingerprint(sourceId: string): string | null {
+    const def = this.state.customSources.find((d) => `custom-${d.id}` === sourceId);
+    return def ? consentFingerprint(def) : null;
   }
 
   private customDetail(sourceId: string): string | null {
@@ -417,13 +460,22 @@ export class SourceRegistry {
   ): Promise<{ success: boolean; message: string }> {
     // The live cursor is not saved here (see enableSourceUnlocked): the
     // daemon persists it once a poll's events are buffered.
+    // An unknown id used to report "disabled" while the source the caller
+    // meant kept collecting, and "__proto__" reached Object.prototype.
+    const hasConfig = Object.prototype.hasOwnProperty.call(this.state.configs, sourceId);
+    if (!this.adapters.has(sourceId) && !hasConfig) {
+      return {
+        success: false,
+        message: `Unknown source: ${sourceId}. Use action "list" to see valid ids.`,
+      };
+    }
     const adapter = this.activeAdapters.get(sourceId);
     if (adapter) {
       this.activeAdapters.delete(sourceId);
       await adapter.destroy();
     }
 
-    if (this.state.configs[sourceId]) {
+    if (hasConfig) {
       this.state.configs[sourceId].enabled = false;
     }
     if (origin === "user") this.revokeAgreement(sourceId);
@@ -486,6 +538,19 @@ export class SourceRegistry {
       name: oneLine(input.name, 80),
       description: oneLine(input.description, 300),
     };
+    // What the source runs or reads is shown verbatim in the consent dialog.
+    // A line break or a bidi/invisible character could hide its tail, so the
+    // user would consent to a command they never saw. Refused, not stripped:
+    // a silently edited command would run something else.
+    for (const field of ["command", "watchPath"] as const) {
+      const v = definition[field];
+      if (v !== undefined && (typeof v !== "string" || HIDDEN_TEXT_RE.test(v))) {
+        return {
+          success: false,
+          message: `${field} must be a single line of visible text (no control, line-break or bidi characters).`,
+        };
+      }
+    }
     // Validate
     if (!definition.id || !/^[a-z0-9_-]+$/.test(definition.id)) {
       return {
@@ -604,7 +669,23 @@ export class SourceRegistry {
   /**
    * Record user consent for a source.
    */
-  recordAgreement(sourceId: string): void {
+  /**
+   * Record user consent for a source. A custom source's consent is bound to
+   * its current definition; `expectedFingerprint`, when given, is the one
+   * the user was shown, and a mismatch (the definition changed since) is
+   * refused.
+   */
+  recordAgreement(
+    sourceId: string,
+    expectedFingerprint?: string,
+  ): { success: boolean; message: string } {
+    const fingerprint = this.customFingerprint(sourceId);
+    if (expectedFingerprint !== undefined && expectedFingerprint !== fingerprint) {
+      return {
+        success: false,
+        message: `The definition of "${sourceId}" changed since it was shown. Reload and review it again.`,
+      };
+    }
     if (!this.state.agreement) {
       this.state.agreement = {
         agreedAt: new Date().toISOString(),
@@ -617,19 +698,34 @@ export class SourceRegistry {
       this.state.agreement.sources.push(sourceId);
       this.state.agreement.agreedAt = new Date().toISOString();
     }
+    if (fingerprint !== null) {
+      this.state.agreement.definitions = {
+        ...this.state.agreement.definitions,
+        [sourceId]: fingerprint,
+      };
+    }
 
     this.saveState();
+    return { success: true, message: `Consent recorded for "${sourceId}".` };
   }
 
   revokeAgreement(sourceId: string): void {
     if (!this.state.agreement) return;
     const before = this.state.agreement.sources.length;
     this.state.agreement.sources = this.state.agreement.sources.filter((s) => s !== sourceId);
+    const definitions = this.state.agreement.definitions;
+    if (definitions && Object.prototype.hasOwnProperty.call(definitions, sourceId)) {
+      const { [sourceId]: _dropped, ...rest } = definitions;
+      this.state.agreement.definitions = rest;
+    }
     if (this.state.agreement.sources.length !== before) this.saveState();
   }
 
   hasAgreement(sourceId: string): boolean {
-    return this.state.agreement?.sources.includes(sourceId) ?? false;
+    if (!this.state.agreement?.sources.includes(sourceId)) return false;
+    // A custom source: only for the definition the user saw.
+    const fingerprint = this.customFingerprint(sourceId);
+    return fingerprint === null || this.state.agreement.definitions?.[sourceId] === fingerprint;
   }
 
   // ── Polling (used by the daemon) ─────────────────────────

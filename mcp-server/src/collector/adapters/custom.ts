@@ -138,7 +138,15 @@ export function assertWatchPathAllowed(watchPath: string, opts: { dataDir?: stri
   if (!watchPath) return;
   const real = resolveWatchRealPath(watchPath);
 
-  if (opts.dataDir && isInside(real, opts.dataDir)) {
+  // Compared both as given and resolved: the watch path is resolved through
+  // symlinks, so a data dir reached through a symlinked MEMORIA_DIR must be
+  // too, or its real path would not look "inside" the configured one.
+  const keyFiles = new Set(["collector.key", "collector-config.enc"]);
+  if (
+    keyFiles.has(path.basename(real)) ||
+    (opts.dataDir &&
+      (isInside(real, opts.dataDir) || isInside(real, resolveWatchRealPath(opts.dataDir))))
+  ) {
     throw new Error(
       `Watch path not allowed: "${watchPath}" resolves inside the collector data ` +
         `directory, which holds the encryption key and credentials.`,

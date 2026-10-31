@@ -54,3 +54,38 @@ export function collectorDailyHeader(date: string, importance = 5): string {
  * that parsed then still parses.
  */
 export const TIME_LABEL_SRC = String.raw`[\d:APM ]+(?:UTC)?`;
+
+/**
+ * Event text made safe to embed in a daily log. The readers split a log at
+ * line-leading "## " headings and read each entry's importance from its
+ * "*importance: N*" trailer, so collected text (a calendar invite's
+ * description, a message, a document) that holds either could forge an
+ * entry for another source or override the real entry's importance. Both are
+ * escaped at line start; Markdown renders the escaped text unchanged.
+ */
+export function neutralizeEntryContent(text: string): string {
+  return text.replace(/^([ \t]*)(#|\*importance:)/gm, "$1\\$2");
+}
+
+/** A single-line heading label: no line breaks, no entry separator. */
+export function neutralizeHeadingLabel(text: string): string {
+  return text.replace(/\s+/g, " ").replace(/ — /g, " - ").trim();
+}
+
+/**
+ * The importance an entry body records: its LAST line-anchored trailer. The
+ * writer escapes any trailer-like line in the content, so the real trailer
+ * is the only unescaped one and always the last.
+ */
+export function entryImportance(body: string, fallback = 5): number {
+  const all = [...body.matchAll(/^\*importance:\s*(\d+)/gm)];
+  return all.length ? parseInt(all[all.length - 1][1], 10) : fallback;
+}
+
+/** An entry body without its importance trailer line. */
+export function stripImportanceTrailer(body: string): string {
+  const all = [...body.matchAll(/^\*importance:.*$/gm)];
+  if (!all.length) return body;
+  const last = all[all.length - 1];
+  return body.slice(0, last.index) + body.slice(last.index! + last[0].length);
+}

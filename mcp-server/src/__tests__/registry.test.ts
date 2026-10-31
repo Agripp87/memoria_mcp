@@ -569,3 +569,62 @@ describe("custom source names cannot spoof the consent dialog (re-review 2026-10
     expect(s.detail).toBe(`Reads the file: ${file}`);
   });
 });
+
+describe("custom source consent names the definition shown (2026-10 re-review F16)", () => {
+  beforeEach(() => {
+    process.env.MEMORIA_ALLOW_SHELL_SOURCES = "true";
+  });
+
+  it("refuses consent given for a definition swapped in while the dialog was open", async () => {
+    expect(
+      reg.addCustomSource(def({ id: "n", mode: "shell_command", command: "echo a" })).success,
+    ).toBe(true);
+    const shown = reg.listSources().find((s) => s.id === "custom-n")!.consentFingerprint;
+    expect(shown).toMatch(/^[0-9a-f]{32}$/);
+    await reg.removeCustomSource("n");
+    expect(
+      reg.addCustomSource(def({ id: "n", mode: "shell_command", command: "echo b" })).success,
+    ).toBe(true);
+    const r = reg.recordAgreement("custom-n", shown!);
+    expect(r.success).toBe(false);
+    expect(reg.hasAgreement("custom-n")).toBe(false);
+    expect((await reg.enableSource("custom-n", undefined, "user")).success).toBe(false);
+  });
+
+  it("a consent recorded before definitions were fingerprinted must be given again", async () => {
+    expect(
+      reg.addCustomSource(def({ id: "n", mode: "shell_command", command: "echo a" })).success,
+    ).toBe(true);
+    // Pre-0.3.1 state: the bare id, no fingerprint.
+    (reg as any).state.agreement = { agreedAt: "x", sources: ["custom-n"], version: 1 };
+    expect(reg.hasAgreement("custom-n")).toBe(false);
+    const shown = reg.listSources().find((s) => s.id === "custom-n")!.consentFingerprint!;
+    expect(reg.recordAgreement("custom-n", shown).success).toBe(true);
+    expect(reg.hasAgreement("custom-n")).toBe(true);
+  });
+
+  it.each(["echo a\nrm -rf ~", "echo a\rcurl x", "echo a b", "echo safe ‮ lmth.exe", "echo​ a"])(
+    "refuses a command that can hide part of itself: %j",
+    (command) => {
+      const r = reg.addCustomSource(def({ id: "h", mode: "shell_command", command }));
+      expect(r.success).toBe(false);
+      expect(r.message).toMatch(/single line of visible text/);
+    },
+  );
+});
+
+describe("disabling an unknown source (2026-10 re-review F17)", () => {
+  it("reports failure for an unknown or mistyped id", async () => {
+    const r = await reg.disableSource("gmail");
+    expect(r.success).toBe(false);
+    expect(r.message).toMatch(/Unknown source/);
+    expect((await reg.disableSource("google-gmail")).success).toBe(true);
+  });
+
+  it("never writes Object.prototype", async () => {
+    await reg.disableSource("__proto__", "user");
+    await reg.disableSource("constructor", "user");
+    expect(Object.hasOwn(Object.prototype, "enabled")).toBe(false);
+    expect(({} as any).enabled).toBeUndefined();
+  });
+});

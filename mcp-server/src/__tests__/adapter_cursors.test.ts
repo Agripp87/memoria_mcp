@@ -6,6 +6,9 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Database from "better-sqlite3";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 // ── IMAP ────────────────────────────────────────────────────
 
@@ -329,8 +332,11 @@ function addEvent(
   );
 }
 
+// The adapter keys its event ids with the collector key in this directory.
+const CAL_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "memoria-cal-data-"));
+
 function calendarAdapter(db: Database.Database, lookAheadDays = 7) {
-  const a = new CalendarAdapter();
+  const a = new CalendarAdapter({ dataDir: CAL_DATA });
   (a as any).db = db;
   (a as any).config = {
     enabled: true,
@@ -352,6 +358,23 @@ describe("CalendarAdapter collection", () => {
       "Planning meeting A",
       "Planning meeting B",
     ]);
+  });
+
+  it("event ids carry no title text, and change when the event is edited (F2)", async () => {
+    // Ids reach the synced daily log (its ref) even for local-only events.
+    const db = calendarDb();
+    const id = addEvent(db, "Zoom passcode 123456", 2, nowCore() - 600);
+    const a = calendarAdapter(db);
+    const [first] = await a.poll();
+    expect(first.id).toMatch(/^cal-\d+-\d+-[0-9a-f]{16}$/);
+    expect(first.id).not.toMatch(/passcode|123456|Zoom/);
+    db.prepare("UPDATE ZCALENDARITEM SET ZSUMMARY = ? WHERE Z_PK = ?").run(
+      "Zoom passcode 654321",
+      id,
+    );
+    const [edited] = await a.poll();
+    expect(edited.id).not.toBe(first.id);
+    expect(edited.id).not.toMatch(/passcode|654321/);
   });
 
   it("collects each event once, and again when it is edited", async () => {
