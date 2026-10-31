@@ -252,6 +252,17 @@ function fakeGmail(pages: Array<{ history: any[]; nextPageToken?: string }>, cur
         }),
       },
       getProfile: vi.fn(async () => ({ data: { historyId: current } })),
+      labels: {
+        list: vi.fn(async () => ({
+          data: {
+            labels: [
+              { id: "INBOX", name: "INBOX" },
+              { id: "STARRED", name: "STARRED" },
+              { id: "Label_12", name: "Work" },
+            ],
+          },
+        })),
+      },
     },
   };
   return { gmail, fetched };
@@ -362,6 +373,25 @@ describe("GoogleGmailAdapter history cursor", () => {
       await a.poll();
       expect(fetched, JSON.stringify(excludeLabels)).toEqual(["real"]);
     }
+  });
+
+  it("with several labels, takes messages carrying any of them, by name or id", async () => {
+    const history = [
+      { id: "101", messagesAdded: [{ message: { id: "work", labelIds: ["Label_12"] } }] },
+      { id: "102", messagesAdded: [{ message: { id: "starred", labelIds: ["STARRED"] } }] },
+      { id: "103", messagesAdded: [{ message: { id: "other", labelIds: ["Label_99"] } }] },
+    ];
+    const { gmail, fetched } = fakeGmail([{ history }]);
+    const a = gmailAdapter(gmail, 50);
+    (a as any).config.settings.labels = ["work", "STARRED"];
+    await a.poll();
+    expect(fetched).toEqual(["work", "starred"]);
+    // A single label goes to the API's own filter, as its id.
+    const single = fakeGmail([{ history: [] }]);
+    const b = gmailAdapter(single.gmail, 50);
+    (b as any).config.settings.labels = ["Work"];
+    await b.poll();
+    expect((single.gmail.users.history.list.mock.calls[0] as any)[0].labelId).toBe("Label_12");
   });
 
   it("list mode excludes the tab as a category (F20)", async () => {
