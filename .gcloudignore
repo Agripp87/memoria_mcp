@@ -1,0 +1,12 @@
+# What `gcloud builds submit .` (deploy/gcp) leaves out of the uploaded
+# source. With this file present gcloud no longer applies its default rules,
+# so they are restated here: no .git, and nothing .gitignore excludes.
+.gcloudignore
+.git
+.gitignore
+#!include:.gitignore
+
+# google-github-actions/auth writes its credentials file into the workspace,
+# and the example deploy workflow submits the workspace. Uploaded, it is
+# readable by every build step: with GCP_SA_KEY that is a long-lived key.
+gha-creds-*.json

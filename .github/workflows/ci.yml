@@ -82,6 +82,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: bash scripts/tests/sync_scripts_test.sh
+      # The deploy example's fork/tip/rollback guards, should-deploy.sh, and
+      # the environment docker compose actually hands the container.
+      - run: bash scripts/tests/deploy_config_test.sh
       - run: shellcheck --severity=warning scripts/*.sh scripts/sync/*.sh deploy/gcp/*.sh
 
   docker:

@@ -3,6 +3,16 @@
 # GCP_PROJECT_ID / MEMORIA_SERVICE_URL / MEMORIA_BUCKET, and add either
 # GCP_WIF_PROVIDER + GCP_DEPLOY_SA (preferred) or GCP_SA_KEY as secrets.
 # Shipped with a .example suffix so it does not run on forks by default.
+#
+# A workflow_run job runs in THIS repository with its secrets and an OIDC
+# token, whatever triggered the CI run, and `branches: [main]` below only
+# matches the triggering run's branch NAME. A pull request from a fork's own
+# `main` branch matches it too, and its CI run uses the fork's workflow files,
+# so passing CI costs the fork nothing. The check-secrets gate therefore
+# deploys only CI runs for a push to main of this repository. With WIF, also
+# restrict the provider to this repository (see deploy/gcp/README.md); a
+# condition on `ref` does not help, since a workflow_run token always carries
+# the default branch.
 name: Deploy
 
 on:
@@ -23,8 +33,14 @@ jobs:
   # Gate so we don't email-spam failures when no GCP auth is configured.
   # Drop GCP_SA_KEY (or GCP_WIF_PROVIDER + GCP_DEPLOY_SA) into repo secrets and
   # the deploy job will start firing on the next merge — no workflow change.
+  # Only a successful CI run for a push to main of this repository (not a
+  # pull request, not a fork) gets this far; see the header.
   check-secrets:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     outputs:
       enabled: ${{ steps.check.outputs.enabled }}
@@ -57,8 +73,31 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+          # Full history, for the ancestry check in the next step.
+          fetch-depth: 0
+
+      - name: Skip unless this commit is still the tip of main
+        # CI runs for back-to-back pushes finish in any order, the concurrency
+        # group above queues deploys in arrival order, and re-running an old
+        # CI run fires this workflow again: each could deploy an older commit
+        # over a newer one. Only the tip is deployed; a newer push's own CI
+        # run deploys it when it finishes.
+        id: tip
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          git fetch --quiet origin main
+          rc=0
+          deploy/gcp/should-deploy.sh "$HEAD_SHA" "$(git rev-parse origin/main)" || rc=$?
+          case "$rc" in
+            0) echo "deploy=true" >> "$GITHUB_OUTPUT" ;;
+            1) echo "::notice::${HEAD_SHA::7} is no longer the tip of main; not deploying it."
+               echo "deploy=false" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$rc" ;;
+          esac
 
       - name: Auth to GCP
+        if: steps.tip.outputs.deploy == 'true'
         # Prefers Workload Identity Federation; falls back to JSON SA key.
         # To switch: set GCP_WIF_PROVIDER + GCP_DEPLOY_SA in repo secrets and
         # remove GCP_SA_KEY.
@@ -69,6 +108,7 @@ jobs:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: Set up gcloud
+        if: steps.tip.outputs.deploy == 'true'
         uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
         with:
           project_id: ${{ env.PROJECT_ID }}
@@ -79,6 +119,7 @@ jobs:
         # used deliberately: a second live revision would mount the same
         # GCS-FUSE volume and violate the single-writer SQLite constraint —
         # the exact WAL corruption max-instances=1 exists to prevent.)
+        if: steps.tip.outputs.deploy == 'true'
         id: prev
         run: |
           PREV=$(gcloud run services describe memoria \
@@ -91,6 +132,9 @@ jobs:
         # Tag with the SAME commit we checked out (workflow_run's head_sha).
         # GITHUB_SHA on a workflow_run event is the default-branch HEAD at event
         # time, which can differ from the commit CI actually passed for.
+        # cloudbuild.yaml ends by routing 100% of traffic to the new revision
+        # (--to-latest), which also undoes the pin a past rollback left.
+        if: steps.tip.outputs.deploy == 'true'
         env:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
@@ -101,8 +145,24 @@ jobs:
             --substitutions "SHORT_SHA=$SHORT_SHA,_BUCKET=$BUCKET,_PUBLIC_URL=$SERVICE_URL" \
             --timeout=20m
 
-      - name: Smoke test (health + dashboard + auth gate)
+      - name: Smoke test (serving revision + health + dashboard + auth gate)
+        if: steps.tip.outputs.deploy == 'true'
+        id: smoke
         run: |
+          fail() { echo "FAIL: $1"; exit 1; }
+
+          # The checks below go through the service URL, so they test whatever
+          # revision serves it. After a rollback had pinned traffic, a new
+          # deploy served 0% and these checks passed against the OLD revision.
+          # First make sure the newest revision is the one serving, all of it.
+          read -r LATEST SERVING PERCENT < <(gcloud run services describe memoria \
+            --project "$PROJECT_ID" --region us-central1 \
+            --format 'value[separator=" "](status.latestReadyRevisionName,status.traffic[0].revisionName,status.traffic[0].percent)') \
+            || true # no output fails the check below, with its message
+          echo "latest ready: $LATEST, serving: $SERVING at ${PERCENT:-?}%"
+          [ -n "$LATEST" ] && [ "$SERVING" = "$LATEST" ] && [ "$PERCENT" = "100" ] \
+            || fail "the new revision $LATEST is not serving 100% of traffic"
+
           # Wait for the new revision to answer /health. Generous window: a
           # provider change (e.g. hash -> minilm) re-embeds the store on first
           # startup, which can take a few minutes on GCS FUSE.
@@ -113,13 +173,12 @@ jobs:
             [ "$CODE" = "200" ] && { ok=1; break; }
             sleep 5
           done
-          [ "$ok" = "1" ] || { echo "FAIL: /health never returned 200"; exit 1; }
+          [ "$ok" = "1" ] || fail "/health never returned 200"
 
           # The dashboard shipped broken to prod twice when only /health was
           # checked. Assert the page renders, root redirects, and the auth gate
           # rejects unauthenticated callers. (The client script's syntax is
           # gated separately by dashboard.test.ts in CI before this runs.)
-          fail() { echo "FAIL: $1"; exit 1; }
           ROOT=$(curl -s -o /dev/null -w '%{http_code}' "$SERVICE_URL/")
           { [ "$ROOT" = "302" ] || [ "$ROOT" = "301" ]; } || fail "/ did not redirect (got $ROOT)"
           curl -s "$SERVICE_URL/dashboard" | grep -q 'data-tab="wiki"' || fail "/dashboard missing expected markup"
@@ -128,10 +187,13 @@ jobs:
           echo "Smoke checks passed."
 
       - name: Auto-rollback on smoke failure
-        # A bad deploy is now REVERTED, not just detected: shift traffic back
-        # to the revision that was serving before this deploy. Runs only when
-        # the smoke step failed and a previous revision exists.
-        if: failure() && steps.prev.outputs.revision != ''
+        # A bad deploy is REVERTED, not just detected: shift traffic back to
+        # the revision that was serving before this deploy. Runs only when the
+        # smoke step itself failed, not on any earlier failure (a broken build
+        # never moved traffic, and pinning it then kept every later deploy at
+        # 0%), and only when a previous revision exists. The pin this leaves
+        # is undone by the next deploy's --to-latest step in cloudbuild.yaml.
+        if: failure() && steps.smoke.outcome == 'failure' && steps.prev.outputs.revision != ''
         run: |
           echo "Smoke failed — rolling traffic back to ${{ steps.prev.outputs.revision }}"
           gcloud run services update-traffic memoria \

@@ -26,8 +26,9 @@ Cloud Run (gen2, max 1 instance)
 
 | File | What it is |
 |------|------------|
-| `cloudbuild.yaml` | Cloud Build: build image → push to Artifact Registry → `gcloud run deploy`. Single source of truth for the deployed config (memory, volume, secrets, scaling, SA). Takes `_BUCKET` and `_PUBLIC_URL` substitutions. |
-| `github-deploy.yml.example` | GitHub Actions workflow: after CI passes on `main`, run Cloud Build, smoke-test the live revision (health + dashboard + auth gate = 401), auto-rollback traffic on failure. Copy to `.github/workflows/deploy.yml` to enable. |
+| `cloudbuild.yaml` | Cloud Build: build image → push to Artifact Registry → `gcloud run deploy` → route all traffic to the new revision. Single source of truth for the deployed config (memory, volume, secrets, scaling, SA). Takes `_BUCKET` and `_PUBLIC_URL` substitutions. |
+| `github-deploy.yml.example` | GitHub Actions workflow: after CI passes for a push to `main`, run Cloud Build, smoke-test the live revision (serving revision + health + dashboard + auth gate = 401), auto-rollback traffic on smoke failure. Copy to `.github/workflows/deploy.yml` to enable. |
+| `should-deploy.sh` | Used by the workflow: deploys a commit only if it is still the tip of `main`. |
 | `deploy-demo.sh` | Deploys a **public demo** service with throwaway generated data under a zero-privilege service account, so a demo compromise cannot reach real secrets or memories. |
 
 ## One-time setup
@@ -104,6 +105,41 @@ repository **variables** `GCP_PROJECT_ID`, `MEMORIA_SERVICE_URL`,
 `GCP_DEPLOY_SA` (Workload Identity Federation, preferred) or `GCP_SA_KEY`.
 The workflow is gated on those secrets: with none set it skips silently, so a
 fork never emails deploy failures.
+
+What the workflow deploys, and when:
+
+* **Only a push to `main` of your own repository.** A `workflow_run` job runs
+  with your secrets whatever triggered CI, and its `branches: [main]` filter
+  matches a pull request from a fork's own `main` branch too. The gate also
+  checks the triggering event (`push`) and repository
+  (`head_repository.full_name == github.repository`).
+* **Only the tip of `main`.** CI runs finish in any order, and re-running an
+  old one fires the deploy again. `should-deploy.sh` skips a commit that is no
+  longer the tip; the newer commit's own CI run deploys it.
+* **A rollback is undone by the next deploy.** A failed smoke test shifts
+  traffic back to the previous revision. `cloudbuild.yaml` ends with
+  `update-traffic --to-latest`, and the smoke test first checks that the new
+  revision serves 100% of traffic.
+* **`.gcloudignore`** keeps the auth action's `gha-creds-*.json` out of the
+  source uploaded to Cloud Build.
+
+With Workload Identity Federation, restrict the provider to your repository.
+Without a condition, any GitHub repository's workflow can present a token to
+it. A condition on `ref` gives no protection here: a `workflow_run` token
+always carries the default branch.
+
+```bash
+gcloud iam workload-identity-pools providers create-oidc github \
+  --location=global --workload-identity-pool=github \
+  --issuer-uri="https://token.actions.githubusercontent.com" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.event_name=assertion.event_name" \
+  --attribute-condition="assertion.repository == 'you/memoria_mcp' && assertion.event_name == 'workflow_run'"
+
+# Only that repository may act as the deploy service account (GCP_DEPLOY_SA).
+gcloud iam service-accounts add-iam-policy-binding "your-deployer@${PROJECT_ID}.iam.gserviceaccount.com" \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUM}/locations/global/workloadIdentityPools/github/attribute.repository/you/memoria_mcp"
+```
 
 ## Security notes
 
