@@ -92,6 +92,16 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * is where hosts, TLS, credentials, watch paths and labels live, i.e. what is
  * collected and where credentials are sent, so only the user may change it.
  */
+/** Settings a blank form field must never overwrite. */
+const CREDENTIAL_KEYS = new Set([
+  "host",
+  "user",
+  "password",
+  "google_client_id",
+  "google_client_secret",
+  "google_refresh_token",
+]);
+
 export function applyConfigChange(
   base: AdapterConfig,
   change: Record<string, unknown> | undefined,
@@ -101,6 +111,9 @@ export function applyConfigChange(
   let settingsChanged = false;
   const setSetting = (key: string, value: unknown) => {
     if (UNSAFE_KEYS.has(key)) return;
+    // A blank credential field means "keep what is stored": the dashboard
+    // cannot show stored secrets, so its form posts them empty.
+    if (value === "" && CREDENTIAL_KEYS.has(key) && settings[key]) return;
     if (JSON.stringify(settings[key]) !== JSON.stringify(value)) settingsChanged = true;
     settings[key] = value;
   };

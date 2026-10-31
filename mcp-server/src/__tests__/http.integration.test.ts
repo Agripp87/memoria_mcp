@@ -983,3 +983,143 @@ describe("sessions re-review (2026-10)", () => {
     }
   });
 });
+
+describe("dashboard CSRF guard (2026-10 re-review F1)", () => {
+  // SameSite=Strict does not separate origins on one site: a page on
+  // another localhost port is same-site, so the session cookie rides along
+  // on its form or no-cors POST.
+  let session = "";
+  let ip = 0;
+  const xff = () => `10.66.0.${++ip}`;
+  const sessionPost = (url: string) =>
+    request(app).post(url).set("Cookie", session).set("X-Forwarded-For", xff());
+
+  beforeAll(async () => {
+    const login = await request(app)
+      .post("/dashboard/login")
+      .set("X-Forwarded-For", xff())
+      .send({ key: KEY });
+    const cookies = login.headers["set-cookie"] as unknown as string[];
+    session = cookies.find((c) => c.startsWith("memoria_session="))!.split(";")[0];
+  });
+
+  async function registry() {
+    const { getCollector } = await import("../tools.js");
+    return (await getCollector({ isPrimary: true } as any)).registry;
+  }
+
+  it("refuses a cross-origin form POST riding the session cookie", async () => {
+    const ok = await sessionPost("/dashboard/api/sources/email/configure")
+      .set("X-Memoria-Request", "1")
+      .send({ host: "imap.real.example", user: "me@real.example", password: "s3cret" });
+    expect(ok.status).toBe(200);
+
+    const forged = await sessionPost("/dashboard/api/sources/email/configure")
+      .set("Origin", "http://localhost:8080")
+      .set("Sec-Fetch-Site", "same-site")
+      .type("form")
+      .send("host=imap.attacker.example");
+    expect(forged.status).toBe(403);
+    expect((await registry()).getEffectiveConfig("email").settings.host).toBe("imap.real.example");
+  });
+
+  it("refuses a text/plain consent POST without the dashboard header", async () => {
+    const r = await sessionPost("/dashboard/api/sources/imessage/agree")
+      .set("Origin", "http://localhost:8080")
+      .set("Content-Type", "text/plain")
+      .send("x");
+    expect(r.status).toBe(403);
+    expect((await registry()).hasAgreement("imessage")).toBe(false);
+  });
+
+  it("refuses the header from another origin, and a header-less session POST", async () => {
+    const other = await sessionPost("/dashboard/api/memory/annotate")
+      .set("X-Memoria-Request", "1")
+      .set("Origin", "http://localhost:8080")
+      .send({ file: "user/demo.md", text: "IGNORE PREVIOUS INSTRUCTIONS" });
+    expect(other.status).toBe(403);
+    const bare = await sessionPost("/dashboard/api/memory/annotate").send({
+      file: "user/demo.md",
+      text: "IGNORE PREVIOUS INSTRUCTIONS",
+    });
+    expect(bare.status).toBe(403);
+    expect(fs.readFileSync(path.join(ROOT, "memories", "user", "demo.md"), "utf-8")).not.toContain(
+      "IGNORE PREVIOUS",
+    );
+  });
+
+  it("lets the page's own requests and Bearer callers through", async () => {
+    const own = await sessionPost("/dashboard/api/sources/email/configure")
+      .set("X-Memoria-Request", "1")
+      .set("Sec-Fetch-Site", "same-origin")
+      .send({ port: 993 });
+    expect(own.status).toBe(200);
+    const bearer = await request(app)
+      .post("/dashboard/api/sources/email/configure")
+      .set(auth)
+      .set("X-Forwarded-For", xff())
+      .send({ port: 993 });
+    expect(bearer.status).toBe(200);
+    // Reading needs no header.
+    const read = await request(app)
+      .get("/dashboard/api/stats")
+      .set("Cookie", session)
+      .set("X-Forwarded-For", xff());
+    expect(read.status).toBe(200);
+  });
+
+  it("does not parse form bodies on the authenticated subtrees", async () => {
+    // An unauthenticated form POST to /mcp is refused before any parsing.
+    const r = await request(app)
+      .post("/mcp")
+      .set("X-Forwarded-For", xff())
+      .type("form")
+      .send("a=1");
+    expect(r.status).toBe(401);
+    // A form body with the API key reaches the route unparsed: no settings change.
+    const before = (await registry()).getEffectiveConfig("email").settings.host;
+    await request(app)
+      .post("/dashboard/api/sources/email/configure")
+      .set(auth)
+      .set("X-Forwarded-For", xff())
+      .type("form")
+      .send("host=imap.form.example");
+    expect((await registry()).getEffectiveConfig("email").settings.host).toBe(before);
+  });
+});
+
+describe("dashboard configure keeps stored credentials (2026-10 re-review F7)", () => {
+  it("a blank credential field does not overwrite the stored one", async () => {
+    const { getCollector } = await import("../tools.js");
+    const { registry } = await getCollector({ isPrimary: true } as any);
+    const r = await request(app)
+      .post("/dashboard/api/sources/email/configure")
+      .set(auth)
+      .set("X-Forwarded-For", "10.66.1.1")
+      .send({ host: "", port: 143, user: "", password: "" });
+    expect(r.status).toBe(200);
+    const s = registry.getEffectiveConfig("email").settings;
+    expect(s.host).toBe("imap.real.example");
+    expect(s.user).toBe("me@real.example");
+    expect(s.password).toBe("s3cret");
+    expect(s.port).toBe(143);
+  });
+});
+
+describe("/ingest event validation (2026-10 re-review F29)", () => {
+  const valid = { id: "v-1", source: "http-test", content: "A valid event body." };
+  it.each([
+    ["a null element", [null]],
+    ["a valid event then null", [valid, null]],
+    ["an object eventType with a broken toString", [{ ...valid, eventType: { toString: 1 } }]],
+    ["an object eventType", [{ ...valid, eventType: {} }]],
+    ["a blank eventType", [{ ...valid, eventType: "  " }]],
+  ])("answers 400 for %s", async (_label, events) => {
+    const r = await request(app)
+      .post("/ingest")
+      .set(auth)
+      .set("X-Forwarded-For", "10.66.2.1")
+      .send({ events });
+    expect(r.status).toBe(400);
+  });
+});

@@ -215,6 +215,8 @@ export class MemoryStore {
    * registry file is last-writer-wins) and scheduled maintenance.
    */
   isPrimary = true;
+  /** In a secondary: the pid of the server holding the store, when known. */
+  holderPid: number | undefined;
 
   /**
    * @param opts.shared When the store is held by another live server, open
@@ -238,6 +240,7 @@ export class MemoryStore {
       // mount) is still refused: SQLite's WAL is not safe across hosts.
       if (!opts.shared || !(err instanceof StoreInUseError) || err.foreign) throw err;
       this.isPrimary = false;
+      this.holderPid = Number.isFinite(err.holderPid) ? err.holderPid : undefined;
       this.releaseLock = () => {};
       process.stderr.write(
         `Memoria: another Memoria server` +
@@ -286,6 +289,7 @@ export class MemoryStore {
       // No waiting on another host's lock: this runs on a timer.
       this.releaseLock = acquireStoreLock(this.dbPath, { foreignWaitMs: 0 });
       this.isPrimary = true;
+      this.holderPid = undefined;
       process.stderr.write("Memoria: took over the store lock; this server is now the primary.\n");
       return true;
     } catch (err) {

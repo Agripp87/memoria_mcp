@@ -44,7 +44,7 @@ import {
   getCollectorPipeline,
   resumeCollectorIfConfigured,
   setupPrimaryTakeover,
-  COLLECTOR_IN_PRIMARY,
+  collectorInPrimaryMessage,
   SERVER_DESCRIPTION,
 } from "./tools.js";
 import { createDashboardRouter } from "./dashboard.js";
@@ -370,7 +370,16 @@ app.use((req, res, next) => {
   }
   smallJson(req, res, next);
 });
-app.use(express.urlencoded({ extended: false, limit: "64kb" }));
+// Form bodies only where a form posts (login, consent, token); never on the
+// authenticated subtrees, which take JSON only.
+const formBody = express.urlencoded({ extended: false, limit: "64kb" });
+app.use((req, res, next) => {
+  if (AUTHED_BODY_ROUTES.some((r) => req.path === r || req.path.startsWith(`${r}/`))) {
+    next();
+    return;
+  }
+  formBody(req, res, next);
+});
 
 // Rate limiting: 30 requests per minute per IP
 app.use(
@@ -550,6 +559,27 @@ function getBaseUrl(req: express.Request): string {
   const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
   const host = req.headers["x-forwarded-host"] || req.headers.host || `127.0.0.1:${PORT}`;
   return `${proto}://${host}`;
+}
+
+/**
+ * Whether a browser request comes from this server's own pages. The origins
+ * accepted are the configured public URL and the host the browser actually
+ * used (an operator may reach the server under a second name). Requests
+ * without Origin or Sec-Fetch-Site (curl, scripts, older browsers on
+ * same-origin GETs) pass; callers that need more add a non-simple header
+ * requirement on top.
+ */
+function isSameOriginRequest(req: express.Request): boolean {
+  const site = req.headers["sec-fetch-site"];
+  if (site !== undefined && site !== "same-origin" && site !== "none") return false;
+  const origin = req.headers.origin;
+  if (origin === undefined) return true;
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  const sameOrigins = new Set([
+    new URL(getBaseUrl(req)).origin,
+    req.headers.host ? `${proto}://${req.headers.host}` : "",
+  ]);
+  return sameOrigins.has(origin);
 }
 
 // ─── OAuth / MCP metadata endpoints ────────────────────────
@@ -781,15 +811,7 @@ app.post("/authorize", (req, res) => {
     res.status(405).json({ error: "invalid_request" });
     return;
   }
-  // The origin the browser is on: the configured public URL, or the host it
-  // actually used (an operator may reach the server under a second name).
-  const origin = req.headers.origin;
-  const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
-  const sameOrigins = new Set([
-    new URL(getBaseUrl(req)).origin,
-    req.headers.host ? `${proto}://${req.headers.host}` : "",
-  ]);
-  if (origin !== undefined && !sameOrigins.has(origin)) {
+  if (!isSameOriginRequest(req)) {
     res.status(403).json({ error: "access_denied", error_description: "cross-origin approval" });
     return;
   }
@@ -1172,8 +1194,42 @@ app.post("/dashboard/login", authLimiter, express.json(), (req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * CSRF guard for the dashboard API. A browser session is a cookie, and
+ * SameSite does not separate origins on one site: a page on another
+ * localhost port (or a sibling subdomain) is same-site, so the Strict
+ * cookie rides along on its form or no-cors POST. A state-changing request
+ * on a session must therefore come from this origin AND carry
+ * X-Memoria-Request, a header no cross-origin page can add without a CORS
+ * preflight this server never grants. Bearer callers (API key, OAuth) send
+ * no ambient credential and are unaffected.
+ */
+const DASHBOARD_REQUEST_HEADER = "x-memoria-request";
+function dashboardCsrfGuard(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+): void {
+  const safeMethod = req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS";
+  if (
+    res.locals.authKind === "session" &&
+    !safeMethod &&
+    (req.headers[DASHBOARD_REQUEST_HEADER] !== "1" || !isSameOriginRequest(req))
+  ) {
+    res.status(403).json({ error: "Cross-origin dashboard request refused" });
+    return;
+  }
+  next();
+}
+
 // gate API subtree only; its bodies are parsed after authentication
-app.use("/dashboard/api", writeLimiter, authenticate, express.json({ limit: "1mb" }));
+app.use(
+  "/dashboard/api",
+  writeLimiter,
+  authenticate,
+  dashboardCsrfGuard,
+  express.json({ limit: "1mb" }),
+);
 app.use("/dashboard", dashboardRouter); // page "/" + API "/api/*"
 
 // Root convenience redirect → the human-facing dashboard. (MCP clients use
@@ -1243,7 +1299,7 @@ app.post(
   async (req, res) => {
     if (!store.isPrimary) {
       // Ingestion goes through the collector, which only the primary runs.
-      res.status(503).json({ error: COLLECTOR_IN_PRIMARY });
+      res.status(503).json({ error: collectorInPrimaryMessage(store) });
       return;
     }
     const events = req.body?.events;
@@ -1254,6 +1310,17 @@ app.post(
 
     // Validate event shape — all three must be non-empty strings
     for (const event of events) {
+      if (!event || typeof event !== "object" || Array.isArray(event)) {
+        res.status(400).json({ error: "Each event must be an object" });
+        return;
+      }
+      if (
+        event.eventType != null &&
+        (typeof event.eventType !== "string" || !event.eventType.trim())
+      ) {
+        res.status(400).json({ error: "eventType, when given, must be a non-empty string" });
+        return;
+      }
       const id = typeof event.id === "string" ? event.id.trim() : "";
       const source = typeof event.source === "string" ? event.source.trim() : "";
       const content = typeof event.content === "string" ? event.content.trim() : "";
@@ -1284,7 +1351,7 @@ app.post(
       const normalized = events.map((e: any) => ({
         id: String(e.id),
         source: String(e.source),
-        eventType: String(e.eventType || "external"),
+        eventType: typeof e.eventType === "string" ? e.eventType.trim() : "external",
         content: String(e.content),
         timestamp: normalizeTimestamp(e.timestamp),
         meta: sanitizeIngestMeta(e.meta),

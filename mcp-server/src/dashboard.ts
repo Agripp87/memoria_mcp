@@ -29,6 +29,7 @@ import {
   isValidMemoryFilename,
   reindexFile,
   getCollector,
+  collectorInPrimaryMessage,
 } from "./tools.js";
 import {
   renderMemoryHtml,
@@ -351,6 +352,19 @@ export function createDashboardRouter(store: MemoryStore): Router {
     }
     next();
   };
+
+  // Sources and the collector live in the primary only. In a secondary every
+  // one of these routes would fail; say why, instead of a bare 500 that the
+  // page used to render as "No sources registered".
+  router.use(["/api/sources", "/api/collector"], (_req, res, next) => {
+    if (!store.isPrimary) {
+      res
+        .status(503)
+        .json({ error: collectorInPrimaryMessage(store, "dashboard"), secondary: true });
+      return;
+    }
+    next();
+  });
 
   router.get("/api/sources", async (_req, res) => {
     try {
@@ -1154,9 +1168,16 @@ async function ensureSession() {
 }
 
 async function api(endpoint, options = {}, retried = false) {
+  // X-Memoria-Request marks the call as this page's own: the server refuses
+  // state-changing session requests without it (CSRF). It goes last so a
+  // caller's headers cannot drop it.
   const res = await fetch(API + endpoint, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+      'X-Memoria-Request': '1',
+    },
   });
   if (res.status === 401) {
     // Re-auth at most ONCE: a wrong key must not trap the user in an infinite
@@ -1165,6 +1186,13 @@ async function api(endpoint, options = {}, retried = false) {
       return api(endpoint, options, true);
     }
     throw new Error('Unauthorized — check your API key');
+  }
+  // 4xx bodies carry a result the callers read ({ success, message } or
+  // { error }); a server failure is an error, not data to render.
+  if (res.status >= 500) {
+    let message = 'Server error (' + res.status + ')';
+    try { const body = await res.json(); if (body && body.error) message = body.error; } catch {}
+    throw new Error(message);
   }
   return res.json();
 }
@@ -1198,7 +1226,10 @@ async function loadOverview() {
       '</div>'
     ).join('');
     el.innerHTML = running + ' &middot; ' + escapeHtml(String(status.activeSources)) + ' active source(s)' + timers;
-  } catch { document.getElementById('collector-status').innerHTML = '<span class="badge badge-off">Not running</span>'; }
+  } catch (err) {
+    document.getElementById('collector-status').innerHTML = '<span class="badge badge-off">Not running</span>' +
+      (err && err.message ? '<div style="font-size:12px;margin-top:4px;color:var(--text2)">' + escapeHtml(err.message) + '</div>' : '');
+  }
 
   try {
     const logs = await api('/journal');
@@ -1216,6 +1247,7 @@ async function loadSources() {
   try {
     const sources = await api('/sources');
     const el = document.getElementById('sources-list');
+    if (!Array.isArray(sources)) throw new Error((sources && sources.error) || 'unexpected response');
     if (!sources.length) { el.innerHTML = '<span style="color:var(--text2)">No sources registered.</span>'; return; }
     el.innerHTML = sources.map(s => {
       const badge = s.error ? '<span class="badge badge-err">Error</span>' :
@@ -1248,8 +1280,17 @@ async function loadSources() {
 }
 
 async function enableSource(id) {
+  try {
+    await enableSourceSteps(id);
+  } catch (err) {
+    toast((err && err.message) || 'Enable failed', 'error');
+  }
+}
+
+async function enableSourceSteps(id) {
   // First check agreement
   const sources = await api('/sources');
+  if (!Array.isArray(sources)) throw new Error((sources && sources.error) || 'Could not load sources');
   const source = sources.find(s => s.id === id);
   if (!source) return;
 
@@ -1265,7 +1306,8 @@ async function enableSource(id) {
   );
   if (!agreed) return;
 
-  await api('/sources/' + id + '/agree', { method: 'POST' });
+  const agreement = await api('/sources/' + id + '/agree', { method: 'POST' });
+  if (agreement && agreement.error) throw new Error(agreement.error);
 
   // Check if it needs config (Google adapters, email)
   if (id.startsWith('google-') || id === 'email') {
@@ -1280,8 +1322,12 @@ async function enableSource(id) {
 
 async function toggleSource(id, enable) {
   const endpoint = enable ? '/enable' : '/disable';
-  const result = await api('/sources/' + id + endpoint, { method: 'POST' });
-  toast(result.message, result.success ? 'success' : 'error');
+  try {
+    const result = await api('/sources/' + id + endpoint, { method: 'POST' });
+    toast(result.message || result.error, result.success ? 'success' : 'error');
+  } catch (err) {
+    toast((err && err.message) || 'Request failed', 'error');
+  }
   loadSources();
 }
 
@@ -1292,9 +1338,9 @@ function configureSource(id, enableAfter = false) {
   let fields = '';
   if (isGoogle) {
     fields = \`
-      <div class="field"><label>Google Client ID</label><input id="cfg-client-id" placeholder="xxx.apps.googleusercontent.com"></div>
-      <div class="field"><label>Google Client Secret</label><input id="cfg-client-secret" type="password"></div>
-      <div class="field"><label>Google Refresh Token</label><input id="cfg-refresh-token" type="password"></div>
+      <div class="field"><label>Google Client ID</label><input id="cfg-client-id" placeholder="xxx.apps.googleusercontent.com (blank keeps the stored one)"></div>
+      <div class="field"><label>Google Client Secret</label><input id="cfg-client-secret" type="password" placeholder="blank keeps the stored secret"></div>
+      <div class="field"><label>Google Refresh Token</label><input id="cfg-refresh-token" type="password" placeholder="blank keeps the stored token"></div>
     \`;
     if (id === 'google-gmail') {
       fields += '<div class="field"><label>Labels (comma-separated)</label><input id="cfg-labels" value="INBOX"></div>';
@@ -1308,10 +1354,10 @@ function configureSource(id, enableAfter = false) {
     }
   } else if (isEmail) {
     fields = \`
-      <div class="field"><label>IMAP Host</label><input id="cfg-host" placeholder="imap.gmail.com"></div>
+      <div class="field"><label>IMAP Host</label><input id="cfg-host" placeholder="imap.gmail.com (blank keeps the stored host)"></div>
       <div class="field"><label>Port</label><input id="cfg-port" type="number" value="993"></div>
-      <div class="field"><label>Username / Email</label><input id="cfg-user"></div>
-      <div class="field"><label>App Password</label><input id="cfg-pass" type="password"></div>
+      <div class="field"><label>Username / Email</label><input id="cfg-user" placeholder="blank keeps the stored user"></div>
+      <div class="field"><label>App Password</label><input id="cfg-pass" type="password" placeholder="blank keeps the stored password"></div>
     \`;
   } else {
     fields = '<div class="field"><label>Poll Interval (seconds)</label><input id="cfg-interval" type="number" value="60"></div>';
@@ -1332,28 +1378,46 @@ function configureSource(id, enableAfter = false) {
 async function saveConfig(id, enableAfter) {
   const config = {};
   const isGoogle = id.startsWith('google-');
+  // The form cannot show what is stored (secrets never leave the server),
+  // so it sends only what the user typed or changed: a blank credential
+  // keeps the stored one, and an untouched field keeps the stored setting
+  // instead of resetting it to the form's default.
+  const typed = (elId) => (document.getElementById(elId)?.value || '').trim();
+  const changed = (elId) => {
+    const el = document.getElementById(elId);
+    return !!el && el.value !== el.defaultValue;
+  };
+  const list = (elId) => typed(elId).split(',').map(s => s.trim()).filter(Boolean);
+  const setIfTyped = (key, elId) => { const v = typed(elId); if (v) config[key] = v; };
 
   if (isGoogle) {
-    config.google_client_id = document.getElementById('cfg-client-id')?.value || '';
-    config.google_client_secret = document.getElementById('cfg-client-secret')?.value || '';
-    config.google_refresh_token = document.getElementById('cfg-refresh-token')?.value || '';
+    setIfTyped('google_client_id', 'cfg-client-id');
+    setIfTyped('google_client_secret', 'cfg-client-secret');
+    setIfTyped('google_refresh_token', 'cfg-refresh-token');
 
     if (id === 'google-gmail') {
-      config.labels = (document.getElementById('cfg-labels')?.value || 'INBOX').split(',').map(s => s.trim());
-      config.excludeLabels = (document.getElementById('cfg-exclude')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (changed('cfg-labels')) config.labels = list('cfg-labels').length ? list('cfg-labels') : ['INBOX'];
+      if (changed('cfg-exclude')) config.excludeLabels = list('cfg-exclude');
     } else if (id === 'google-calendar') {
-      config.calendarIds = (document.getElementById('cfg-cal-ids')?.value || 'primary').split(',').map(s => s.trim());
-      config.lookAheadDays = parseInt(document.getElementById('cfg-ahead')?.value || '7');
+      if (changed('cfg-cal-ids')) config.calendarIds = list('cfg-cal-ids').length ? list('cfg-cal-ids') : ['primary'];
+      if (changed('cfg-ahead')) {
+        const ahead = parseInt(typed('cfg-ahead'), 10);
+        if (Number.isFinite(ahead) && ahead > 0) config.lookAheadDays = ahead;
+      }
     } else if (id === 'google-drive') {
-      const ids = document.getElementById('cfg-folder-ids')?.value || '';
-      config.folderIds = ids ? ids.split(',').map(s => s.trim()) : [];
-      config.includeContent = document.getElementById('cfg-content')?.value === 'true';
+      if (changed('cfg-folder-ids')) config.folderIds = list('cfg-folder-ids');
+      const content = document.getElementById('cfg-content');
+      const shown = content && Array.from(content.options).find(o => o.defaultSelected);
+      if (content && content.value !== (shown ? shown.value : 'true')) config.includeContent = content.value === 'true';
     }
   } else if (id === 'email') {
-    config.host = document.getElementById('cfg-host')?.value || '';
-    config.port = parseInt(document.getElementById('cfg-port')?.value || '993');
-    config.user = document.getElementById('cfg-user')?.value || '';
-    config.password = document.getElementById('cfg-pass')?.value || '';
+    setIfTyped('host', 'cfg-host');
+    setIfTyped('user', 'cfg-user');
+    setIfTyped('password', 'cfg-pass');
+    if (changed('cfg-port') || enableAfter) {
+      const port = parseInt(typed('cfg-port'), 10);
+      if (Number.isFinite(port) && port > 0 && port < 65536) config.port = port;
+    }
   } else {
     const interval = parseInt(document.getElementById('cfg-interval')?.value, 10);
     const threshold = parseInt(document.getElementById('cfg-threshold')?.value, 10);
@@ -1363,18 +1427,14 @@ async function saveConfig(id, enableAfter) {
 
   closeModal();
 
-  if (enableAfter) {
-    const result = await api('/sources/' + id + '/enable', {
+  try {
+    const result = await api('/sources/' + id + (enableAfter ? '/enable' : '/configure'), {
       method: 'POST',
       body: JSON.stringify(config),
     });
-    toast(result.message, result.success ? 'success' : 'error');
-  } else {
-    const result = await api('/sources/' + id + '/configure', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    });
-    toast(result.message, result.success ? 'success' : 'error');
+    toast(result.message || result.error, result.success ? 'success' : 'error');
+  } catch (err) {
+    toast((err && err.message) || 'Save failed', 'error');
   }
   loadSources();
 }

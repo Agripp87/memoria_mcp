@@ -1777,14 +1777,32 @@ const RESUME_RETRY_MS = 10 * 60 * 1000;
 
 /** Thrown when a secondary server is asked for the collector. */
 export const COLLECTOR_IN_PRIMARY =
-  "The collector runs in the Memoria server that opened this store first; this " +
-  "session's server shares its memories but not its collector. Use the dashboard, or " +
-  "retry after that server exits (this one then takes over).";
+  "The collector runs in the Memoria server that opened this store first";
+
+/**
+ * Why this server cannot reach the collector, and the ways out. The
+ * dashboard variant must not send the user to "the dashboard": in a
+ * secondary it IS the dashboard that cannot help.
+ */
+export function collectorInPrimaryMessage(
+  store: MemoryStore,
+  surface: "mcp" | "dashboard" = "mcp",
+): string {
+  const holder = store.holderPid !== undefined ? ` (pid ${store.holderPid})` : "";
+  const ways =
+    "Close the other Memoria sessions on this store (this server takes over within 30 s), " +
+    "or start memoria-mcp-http before any Claude session so the dashboard is the first server.";
+  return surface === "dashboard"
+    ? `${COLLECTOR_IN_PRIMARY}${holder}, for example a Claude Code or Claude Desktop ` +
+        `session. Source consent and settings are only available from that server. ${ways}`
+    : `${COLLECTOR_IN_PRIMARY}${holder}; this session's server shares its memories but ` +
+        `not its collector. Use that server's dashboard if it is the HTTP server. ${ways}`;
+}
 
 async function ensureCollector(store: MemoryStore): Promise<void> {
   // One collector per store: its registry state file is last-writer-wins
   // and two daemons would poll every source twice.
-  if (!store.isPrimary) throw new Error(COLLECTOR_IN_PRIMARY);
+  if (!store.isPrimary) throw new Error(collectorInPrimaryMessage(store));
   // The fast path keys on completion, not on `registry` being set: the
   // registry is assigned before init's first await, so callers used to
   // proceed against a half-built collector (no ingestion yet, buffer not

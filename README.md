@@ -448,11 +448,17 @@ All events are classified into privacy tiers before leaving the device:
 
 ```
 1. memory_sources action="list"                    # See available sources
-2. In the Memoria dashboard (Sources tab), grant consent for "imessage"
+2. In the Memoria dashboard (Sources tab), click Enable on "imessage"
    # Consent is dashboard-only by design: an MCP caller cannot grant it.
-3. memory_sources action="enable" source="imessage" # Enable + auto-install deps
-4. memory_priority action="status"                 # Verify it's collecting
+3. memory_priority action="status"                 # Verify it's collecting
 ```
+
+Sources, consent and the collector belong to the server that opened the
+store first. The dashboard only exists in the HTTP server
+(`memoria-mcp-http`), so start it **before** any Claude Code or Claude
+Desktop session on the same store; a dashboard that started second shows
+which process holds the store and takes over within 30 seconds of that
+process exiting.
 
 ### Adding a Custom Source
 
@@ -762,6 +768,7 @@ See [SECURITY.md](SECURITY.md) for the trust model (single-tenant, one static ke
 | **Encryption at rest** | AES-256-GCM for all collector data, configs, and the ring buffer |
 | **Rate limiting** | Per client IP: `/mcp` 30/min, `/token`+`/authorize`+`/register` 20/min, `/ingest`+`/dashboard/api` 120/min (trusts `MEMORIA_TRUST_PROXY` proxy hops, default 1, for the real client IP) |
 | **Body size limit** | 64 KB for unauthenticated routes; 1 MB on `/mcp` and `/dashboard/api` and 5 MB on `/ingest`, parsed only after authentication |
+| **Dashboard CSRF guard** | A state-changing dashboard request on a browser session must come from the dashboard's own origin and carry its `X-Memoria-Request` header; SameSite alone does not stop a page on another localhost port. Bearer callers are unaffected |
 | **Session management** | Max 10 concurrent sessions, 30-minute idle TTL |
 | **Localhost binding** | HTTP server binds to `127.0.0.1` by default; set `BIND_ALL=true` for Docker/cloud. NOTE: every shipped Docker/Cloud Run config sets `BIND_ALL=true`, so in production the network is open and Bearer auth is the only access control. |
 | **Non-root container** | Docker image runs as unprivileged `memoria` user (UID 1001), which owns only its data and the model cache; the application code is root-owned |
@@ -874,6 +881,7 @@ Honest accounting of what is *not* hardened or covered yet — tracked for follo
 
 - **Verified against fakes, not the real services.** The 0.3.0 fixes to the IMAP, Gmail and macOS Calendar adapters (cursors, reconnects, collection by fingerprint) are tested against fakes that follow the documented behaviour of imapflow, the Gmail API and the Calendar Cache schema, not against live accounts or a real Calendar database. Report anything they miss.
 - **Ranking defaults measured on the lexical provider.** The 0.3.0 weights (0.8 / 0.1 / 0.1) and OR keyword matching were measured with `npm run eval:hash`; the default MiniLM provider has not been re-measured since (`npm run eval` needs the one-time model download).
+- **Source consent needs the dashboard in the primary.** Only the server that opened the store first runs the collector, and only the HTTP server has a dashboard. While a Claude Code or Claude Desktop session holds the store, the dashboard's Sources tab says so (503) instead of offering consent; close those sessions or start `memoria-mcp-http` first.
 - **iMessage bodies stored only in `attributedBody`.** Recent macOS versions often leave the `text` column empty and keep the message in `attributedBody`; such messages are skipped.
 
 These are the known open items after the October 2026 review; [issues](https://github.com/Agripp87/memoria_mcp/issues) are welcome for anything missing here.
