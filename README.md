@@ -187,6 +187,8 @@ npm run demo
 
 ### Register with Claude Code (manual install)
 
+Other MCP clients (e.g. **Cursor**) use the same stdio command and `MEMORIA_DIR` env var; see [docs/clients.md](docs/clients.md) for tested snippets.
+
 ```bash
 claude mcp add memoria -s user -- node /absolute/path/to/memoria_mcp/mcp-server/scripts/mcp-start.mjs
 ```
