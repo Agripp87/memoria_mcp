@@ -478,10 +478,14 @@ describe("re-review 2026-10: duplicate check and version-3 migration", () => {
     expect(hits[0].similarity).toBeGreaterThan(0.95);
   });
 
-  it("version 3 rebuilds only what it changed (hash vectors) and every older index", async () => {
+  it("each index version rebuilds only the provider it changed, and every older index", async () => {
     const { indexVersionOutdated } = await import("../store.js");
-    expect(indexVersionOutdated("3", "minilm")).toBe(false);
-    expect(indexVersionOutdated("2", "minilm")).toBe(false);
+    expect(indexVersionOutdated("4", "minilm")).toBe(false);
+    expect(indexVersionOutdated("3", "local")).toBe(false);
+    expect(indexVersionOutdated("3", "openai")).toBe(false);
+    // transformers 4 changed the MiniLM vectors: those indexes are rebuilt.
+    expect(indexVersionOutdated("3", "minilm")).toBe(true);
+    expect(indexVersionOutdated("2", "minilm")).toBe(true);
     expect(indexVersionOutdated("2", "openai")).toBe(false);
     expect(indexVersionOutdated("2", "local")).toBe(true);
     expect(indexVersionOutdated(undefined, "minilm")).toBe(true); // 0.2.x: v1

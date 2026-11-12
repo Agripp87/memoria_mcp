@@ -35,6 +35,36 @@ carry the answer). A separate **unanswerable** set has no correct answer.
 
 ## Current results
 
+### 2026-11: the 0.3.x default measured with MiniLM
+
+The 2026-10 changes below were measured on the hash provider only. With
+the real model (local MiniLM, same corpus), on @huggingface/transformers
+3.8.1 and again on 4.3.2, which scored identically:
+
+```
+  configuration        nDCG@10   R@20    MRR  stale
+  shipped default         91.0  100.0   87.8      1
+  keyword only            68.0   96.2   60.9      3
+  vector only             96.2  100.0   95.0      1
+  hybrid, no priors       89.9  100.0   86.5      2
+  priors only             15.8   50.0   11.3      2
+
+  nDCG@10 by query kind      temporal  hard-negative  paraphrase
+  shipped default                87.7           82.6        93.8
+  vector only                   100.0           80.4       100.0
+  hybrid, no priors              75.4           77.2        95.9
+```
+
+The re-weighting holds up: the shipped default went from 71.7 (the old
+weights, last MiniLM run below) to 91.0. On this corpus vector-only search
+still scores higher (96.2); keyword matching costs more than it adds here,
+so the keyword share (vector mix 0.7) is the next weight worth measuring,
+on a corpus with more exact-term queries before changing it.
+
+Transformers 4 gives the same model slightly different vectors (cosine
+0.98 to 0.997 against 3.x, per sentence), which is why the upgrade re-embeds
+MiniLM stores once (index version 4) instead of mixing the two.
+
 ### 2026-10: recency made real, default re-weighted
 
 Until 2026-10 the index dated every memory by the time it was indexed, not
