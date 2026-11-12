@@ -11,6 +11,18 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
+### Changed
+
+- **MiniLM stores re-embed once on upgrade.** The local embedding model now
+  runs on `@huggingface/transformers` 4.3 (was 3.8). The model is the same,
+  but 4.x gives it slightly different vectors, so an index built with 3.x is
+  rebuilt at first start (index version 4); hash and OpenAI indexes are not
+  touched. The retrieval eval scores 4.3 the same as 3.8 (91.0 nDCG@10 for
+  the shipped default with MiniLM).
+- Development tooling refreshed (eslint, typescript-eslint, vitest,
+  prettier, supertest); `npm audit` is clean again, including dev
+  dependencies (minimatch is overridden to 11 until eslint moves to it).
+
 ### Fixed
 
 - **Gmail with several labels collected the whole mailbox.** The history

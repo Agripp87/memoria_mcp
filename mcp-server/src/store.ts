@@ -160,19 +160,24 @@ export function toFtsQuery(text: string, maxTerms = FTS_MAX_TERMS): string {
  * come from the memory (frontmatter `updated`/`created`, else file mtime)
  * instead of the time it was indexed, so every row indexed by version 1
  * carries an index-time date. 3: the lexical (hash) embedding keeps
- * non-ASCII words instead of mapping them to nothing.
+ * non-ASCII words instead of mapping them to nothing. 4: MiniLM runs on
+ * @huggingface/transformers 4, whose int8 model gives slightly different
+ * vectors (cosine 0.98-0.997 to the 3.x ones): queries embedded by 4.x
+ * against documents embedded by 3.x would rank on mixed vectors.
  */
-const INDEX_VERSION = "3";
+const INDEX_VERSION = "4";
 
 /**
- * Whether an index written at `stored` version must be rebuilt. Version 3
- * changed only the lexical (hash, provider "local") vectors, so a version 2
- * index from another provider is current and is not re-embedded (a full
- * re-embed costs OpenAI users money and leaves search empty meanwhile).
+ * Whether an index written at `stored` version must be rebuilt. Each
+ * version since 2 changed one provider's vectors only, so an index from
+ * another provider is current and is not re-embedded (a full re-embed
+ * costs OpenAI users money and leaves search empty meanwhile): 3 changed
+ * the lexical (hash, provider "local") vectors, 4 the MiniLM ones.
  */
 export function indexVersionOutdated(stored: string | undefined, provider: string): boolean {
   if (stored === INDEX_VERSION) return false;
-  if (stored === "2" && provider !== "local") return false;
+  if (stored === "3") return provider === "minilm";
+  if (stored === "2") return provider === "local" || provider === "minilm";
   return true;
 }
 
