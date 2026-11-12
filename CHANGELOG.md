@@ -11,36 +11,15 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
-### Changed
+## [0.3.1] — 2026-11-12
 
-- **MiniLM stores re-embed once on upgrade.** The local embedding model now
-  runs on `@huggingface/transformers` 4.3 (was 3.8). The model is the same,
-  but 4.x gives it slightly different vectors, so an index built with 3.x is
-  rebuilt at first start (index version 4); hash and OpenAI indexes are not
-  touched. The retrieval eval scores 4.3 the same as 3.8 (91.0 nDCG@10 for
-  the shipped default with MiniLM).
-- Development tooling refreshed (eslint, typescript-eslint, vitest,
-  prettier, supertest); `npm audit` is clean again, including dev
-  dependencies (minimatch is overridden to 11 until eslint moves to it).
+The first npm release since 0.2.1. It includes 0.3.0, which was never
+published on its own: upgrading from 0.2.x, read the 0.3.0 notes below
+too (that version rebuilds the index once).
 
-### Fixed
-
-- **Gmail with several labels collected the whole mailbox.** The history
-  API filters by one label at most, and with more than one configured no
-  filter was applied. Messages are now kept when they carry any of the
-  labels. Label names (`Work`) are resolved to Gmail's label ids
-  (`Label_12`) once per server start, so user labels match too; before,
-  only system labels such as `INBOX` did.
-- Custom collector sources now normalize implausible timestamps (unparsable,
-  or epoch microseconds sent as milliseconds) as HTTP ingest does.
-- Journal entries saved with a mood (`## … — Journal (good)`) were skipped
-  by `memory_stats`, `memory_compact` and the entity pages; they are
-  parsed now.
-
-## [0.3.1] — 2026-10-31
-
-Fixes from a second whole-repo review of 0.3.0 (50 verified findings). The
-memory file format is unchanged and the index is not rebuilt.
+Fixes from a second whole-repo review of 0.3.0 (50 verified findings),
+plus the contributed fixes merged since. The memory file format is
+unchanged, and a 0.3.0 index is not rebuilt.
 
 **Changes you will notice:**
 
@@ -70,6 +49,17 @@ memory file format is unchanged and the index is not rebuilt.
   versioning if you use the mirror.
 - The plugin reinstalls its dependencies once (it now records a completed
   install).
+
+### Changed
+
+- The local embedding model runs on `@huggingface/transformers` 4.3 (was
+  3.8). Its vectors are identical to 3.8's, so existing indexes are kept.
+- With MiniLM, the 0.3.x search default scores 91.0 nDCG@10 on the
+  retrieval eval (71.7 with the 0.2.x weights); see
+  `mcp-server/eval/README.md`.
+- Development tooling refreshed (eslint, typescript-eslint, vitest,
+  prettier, supertest); `npm audit` is clean again, including dev
+  dependencies (minimatch is overridden to 11 until eslint moves to it).
 
 ### Security
 
@@ -105,6 +95,17 @@ memory file format is unchanged and the index is not rebuilt.
 
 ### Fixed
 
+- **Gmail with several labels collected the whole mailbox.** The history
+  API filters by one label at most, and with more than one configured no
+  filter was applied. Messages are now kept when they carry any of the
+  labels. Label names (`Work`) are resolved to Gmail's label ids
+  (`Label_12`) once per server start, so user labels match too; before,
+  only system labels such as `INBOX` did.
+- Custom collector sources now normalize implausible timestamps (unparsable,
+  or epoch microseconds sent as milliseconds) as HTTP ingest does.
+- Journal entries saved with a mood (`## … — Journal (good)`) were skipped
+  by `memory_stats`, `memory_compact` and the entity pages; they are
+  parsed now.
 - **Collection stalled for good on one bad email.** An unparseable `Date`
   header threw, and since 0.3.0 that failed every poll on the same message
   (IMAP and Gmail). The receive time is used instead, and a malformed
@@ -737,8 +738,8 @@ so the public history starts here.
   [README](README.md#known-limitations) rather than glossed over.
 
 [Unreleased]: https://github.com/Agripp87/memoria_mcp/compare/v0.3.1...HEAD
-[0.3.1]: https://github.com/Agripp87/memoria_mcp/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/Agripp87/memoria_mcp/compare/v0.2.1...v0.3.0
+[0.3.1]: https://github.com/Agripp87/memoria_mcp/compare/v0.2.1...v0.3.1
+[0.3.0]: https://github.com/Agripp87/memoria_mcp/compare/v0.2.1...344fab6
 [0.2.1]: https://github.com/Agripp87/memoria_mcp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Agripp87/memoria_mcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Agripp87/memoria_mcp/releases/tag/v0.1.0

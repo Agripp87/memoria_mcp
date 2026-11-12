@@ -61,9 +61,14 @@ still scores higher (96.2); keyword matching costs more than it adds here,
 so the keyword share (vector mix 0.7) is the next weight worth measuring,
 on a corpus with more exact-term queries before changing it.
 
-Transformers 4 gives the same model slightly different vectors (cosine
-0.98 to 0.997 against 3.x, per sentence), which is why the upgrade re-embeds
-MiniLM stores once (index version 4) instead of mixing the two.
+The two versions give byte-for-byte the same vectors (cosine 1.0 on every
+text and batch tried; `npm run verify:vectors` passes on both), so the
+upgrade keeps existing indexes.
+
+One thing this did turn up: the same text embedded alone and in a batch
+gets slightly different vectors (cosine 0.97 to 0.99), on both versions.
+Queries are embedded alone and chunks in batches of up to 32, so some of
+that noise is in every number above. Not yet measured as a ranking effect.
 
 ### 2026-10: recency made real, default re-weighted
 
