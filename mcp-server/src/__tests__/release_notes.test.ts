@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "child_process";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 
@@ -107,5 +108,30 @@ describe("release notes from CHANGELOG.md", () => {
     expect(out).toContain(`@${version}`);
     expect(out.split("\n").length).toBeGreaterThan(5);
     expect(() => execFileSync(process.execPath, [SCRIPT, "0.0.0"], { stdio: "pipe" })).toThrow();
+  });
+
+  // The workflow runs the script from main against the files at the tag,
+  // because a tag can predate the script (v0.3.1 did, and the first run
+  // failed on it).
+  it("reads CHANGELOG.md and package.json from --from, wherever it comes in the args", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "release-notes-"));
+    try {
+      fs.mkdirSync(path.join(dir, "mcp-server"));
+      fs.writeFileSync(path.join(dir, "CHANGELOG.md"), CHANGELOG);
+      fs.writeFileSync(path.join(dir, "mcp-server", "package.json"), '{"name":"@s/tagged"}');
+      for (const args of [
+        ["1.2.0", "--from", dir],
+        ["--from", dir, "1.2.0", "--published"],
+      ]) {
+        const out = execFileSync(process.execPath, [SCRIPT, ...args], { encoding: "utf-8" });
+        expect(out).toContain("@s/tagged@1.2.0");
+        expect(out).toContain("Intro that is wrapped twice.");
+      }
+      expect(() =>
+        execFileSync(process.execPath, [SCRIPT, "1.2.0", "--from"], { stdio: "pipe" }),
+      ).toThrow();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

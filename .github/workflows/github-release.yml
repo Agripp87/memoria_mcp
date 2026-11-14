@@ -57,10 +57,11 @@ jobs:
             exit 1
           fi
 
-      # The notes come from the CHANGELOG at the tagged commit, not from main.
+      # The script runs from the workflow's own commit (main); the notes come
+      # from CHANGELOG.md as it is at the tag. A tag can predate the script.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: refs/tags/${{ env.TAG }}
+          fetch-depth: 0 # the tags too
           persist-credentials: false
 
       - name: Write or update the release
@@ -70,19 +71,23 @@ jobs:
         run: |
           set -euo pipefail
           version="${TAG#v}"
-          pkg="$(node -p "require('./mcp-server/package.json').name")"
-          if [ "$(node -p "require('./mcp-server/package.json').version")" != "$version" ]; then
-            echo "::error::$TAG does not match mcp-server/package.json."
+          tagged="$RUNNER_TEMP/tagged"
+          mkdir -p "$tagged/mcp-server"
+          git show "refs/tags/$TAG:CHANGELOG.md" > "$tagged/CHANGELOG.md"
+          git show "refs/tags/$TAG:mcp-server/package.json" > "$tagged/mcp-server/package.json"
+          pkg="$(node -p "require(process.argv[1]).name" "$tagged/mcp-server/package.json")"
+          if [ "$(node -p "require(process.argv[1]).version" "$tagged/mcp-server/package.json")" != "$version" ]; then
+            echo "::error::$TAG does not match mcp-server/package.json at that tag."
             exit 1
           fi
 
           # Public on npm yet? Staged versions are not listed.
           if [ "$(npm view "$pkg@$version" version 2>/dev/null || true)" = "$version" ]; then
             published=true
-            node scripts/release-notes.mjs "$version" --published > notes.md
+            node scripts/release-notes.mjs "$version" --published --from "$tagged" > notes.md
           else
             published=false
-            node scripts/release-notes.mjs "$version" > notes.md
+            node scripts/release-notes.mjs "$version" --from "$tagged" > notes.md
           fi
 
           title="Memoria $version"
