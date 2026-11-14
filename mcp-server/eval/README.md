@@ -67,8 +67,32 @@ upgrade keeps existing indexes.
 
 One thing this did turn up: the same text embedded alone and in a batch
 gets slightly different vectors (cosine 0.97 to 0.99), on both versions.
-Queries are embedded alone and chunks in batches of up to 32, so some of
-that noise is in every number above. Not yet measured as a ranking effect.
+Queries are embedded alone, and a file's chunks are embedded together, so
+in a file long enough to make several chunks (about 1,600 characters
+each), a chunk's vector depends a little on its neighbours. Every
+document in this corpus is a single chunk, so the numbers above do not
+include this effect.
+
+Measured by embedding each document together with K texts drawn from
+the rest of the corpus, keeping only its own vector (3 draws per K;
+K = 0 reproduces the table above):
+
+```
+  other chunks in the batch     0     1     3     7    15    31
+  shipped default nDCG@10    91.0  91.8  92.5  92.1  91.6  92.5
+  vector only nDCG@10        96.2  94.6  96.0  94.3  94.8  95.6
+  hybrid, no priors          89.9  89.9  90.8  90.0  90.0  89.8
+```
+
+(means of the 3 draws; each draw ranged within about 3 points). The
+shipped default never fell below its unbatched 91.0; vector only moved
+by about a point either way, which on 26 queries is a single query
+moving one rank. A batched vector sits at cosine 0.98 to 0.99 to the
+same text embedded alone whatever K is, while a document's nearest
+other document is typically at 0.41, so the drift almost never reorders
+results. Embedding every chunk on its own would remove the effect for
+about 13% more indexing time (64 chunks: 241 ms batched, 273 ms one at
+a time); with no ranking gain to show for it, chunks stay batched.
 
 ### 2026-10: recency made real, default re-weighted
 
