@@ -1,0 +1,114 @@
+name: GitHub Release
+
+# Writes the GitHub Release page for a version tag, from that version's
+# CHANGELOG.md section (scripts/release-notes.mjs).
+#
+# - After a tag push, once the Release workflow has passed and staged the
+#   package on npm, it creates the release as a DRAFT: the package is not
+#   public until the maintainer runs `npm stage approve`.
+# - Run it by hand (Actions → GitHub Release → Run workflow, tag "vX.Y.Z")
+#   after approving: npm now has the version, so it rewrites the page with
+#   the install line and publishes it. Running it again only refreshes the
+#   notes, so it also fills in a release made before this workflow existed.
+#
+# This is a separate workflow so the npm job in release.yml keeps only the
+# permissions it needs (and its trusted-publisher entry, which names that
+# file). This one cannot publish to npm: it has no id-token, and its only
+# write permission is to the repository's releases and tags.
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag, e.g. v0.3.1"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-release
+  cancel-in-progress: false
+
+jobs:
+  notes:
+    name: Write release notes
+    # A tag push whose Release run passed, or a manual run. A manual run of
+    # Release is only a rehearsal and has no tag, so it is skipped.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create and edit releases
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }}
+    steps:
+      # The tag reaches the shell only through $TAG, and only in this shape.
+      - name: Tag must be a version tag
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$TAG' is not a version tag (vX.Y.Z)."
+            exit 1
+          fi
+
+      # The notes come from the CHANGELOG at the tagged commit, not from main.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Write or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          pkg="$(node -p "require('./mcp-server/package.json').name")"
+          if [ "$(node -p "require('./mcp-server/package.json').version")" != "$version" ]; then
+            echo "::error::$TAG does not match mcp-server/package.json."
+            exit 1
+          fi
+
+          # Public on npm yet? Staged versions are not listed.
+          if [ "$(npm view "$pkg@$version" version 2>/dev/null || true)" = "$version" ]; then
+            published=true
+            node scripts/release-notes.mjs "$version" --published > notes.md
+          else
+            published=false
+            node scripts/release-notes.mjs "$version" > notes.md
+          fi
+
+          title="Memoria $version"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$title" --notes-file notes.md
+            # Publish a draft once npm has the version; never un-publish.
+            if [ "$published" = true ]; then
+              gh release edit "$TAG" --draft=false
+            fi
+            action="updated"
+          elif [ "$published" = true ]; then
+            gh release create "$TAG" --verify-tag --title "$title" --notes-file notes.md
+            action="published"
+          else
+            gh release create "$TAG" --verify-tag --draft --title "$title" --notes-file notes.md
+            action="created as a draft"
+          fi
+
+          url="$(gh release view "$TAG" --json url --jq .url)"
+          {
+            echo "## Release $TAG $action"
+            echo
+            echo "$url"
+            if [ "$published" != true ]; then
+              echo
+              echo "$pkg@$version is not public on npm yet. After \`npm stage approve\`,"
+              echo "run this workflow for $TAG to publish the page."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

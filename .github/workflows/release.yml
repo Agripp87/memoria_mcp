@@ -23,7 +23,9 @@ name: Release
 # Release:    bump mcp-server/package.json, cut the CHANGELOG section, merge,
 #             tag:   git tag -a vX.Y.Z -m "..." && git push public vX.Y.Z
 #             then approve with the command above (the run summary prints it,
-#             id included).
+#             id included). github-release.yml drafts the GitHub Release from
+#             the CHANGELOG once this run passes; after approving, run it for
+#             the tag to publish the page.
 # Rehearsal:  run this workflow manually (Actions tab → Release → Run
 #             workflow). It runs everything and stages a throwaway pre-release
 #             version with --dry-run, so nothing is written to the registry.
