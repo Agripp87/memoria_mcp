@@ -2,7 +2,7 @@
 /**
  * Print the GitHub Release notes for one version, built from CHANGELOG.md.
  *
- *   node scripts/release-notes.mjs 0.3.1 [--published]
+ *   node scripts/release-notes.mjs 0.3.1 [--published] [--from <dir>]
  *
  * The body is that version's CHANGELOG section with its "###" headings
  * raised to "##", wrapped lines joined, and relative links made absolute
@@ -10,6 +10,11 @@
  * and above a link to the full CHANGELOG. --published says the
  * version is installable from npm and puts the install line there; without
  * it the header is a note to the maintainer on the draft.
+ *
+ * --from reads CHANGELOG.md and mcp-server/package.json under <dir>
+ * instead of this checkout: the workflow passes the files as they are at
+ * the tag, while the script itself comes from main (an older tag predates
+ * it).
  *
  * Exits 1 when the section is missing or empty, so a tag without notes
  * fails the release workflow instead of publishing a blank page.
@@ -99,14 +104,20 @@ export function releaseNotes({ changelog, version, pkgName, repoUrl, published }
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
-  const version = args.find((a) => !a.startsWith("--"));
-  if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
-    process.stderr.write("usage: release-notes.mjs <X.Y.Z> [--published]\n");
+  const fromAt = args.indexOf("--from");
+  const from = fromAt === -1 ? undefined : args[fromAt + 1];
+  const version = args.find((a, i) => !a.startsWith("--") && (fromAt === -1 || i !== fromAt + 1));
+  if (!version || !/^\d+\.\d+\.\d+$/.test(version) || (fromAt !== -1 && !from)) {
+    process.stderr.write("usage: release-notes.mjs <X.Y.Z> [--published] [--from <dir>]\n");
     process.exit(2);
   }
-  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const root = from
+    ? path.resolve(from)
+    : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const changelog = readFileSync(path.join(root, "CHANGELOG.md"), "utf-8");
-  const pkgName = JSON.parse(readFileSync(path.join(root, "mcp-server", "package.json"), "utf-8")).name;
+  const pkgName = JSON.parse(
+    readFileSync(path.join(root, "mcp-server", "package.json"), "utf-8"),
+  ).name;
   const repoUrl = `https://github.com/${process.env.GITHUB_REPOSITORY || "Agripp87/memoria_mcp"}`;
   const notes = releaseNotes({
     changelog,
