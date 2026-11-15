@@ -898,7 +898,8 @@ Near-term, roughly in order:
 
 - [x] Publish to npm as `@agrippa87/memoria-mcp` (`npx -y @agrippa87/memoria-mcp`); `memoria-mcp` reserved on PyPI
 - [x] Staged npm releases from GitHub Actions with signed provenance (first: 0.2.1)
-- [ ] `server.json` + listing in the official MCP Registry; Docker MCP Catalog
+- [x] `server.json` + listing in the [official MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.Agripp87/memoria-mcp` (first: 0.3.1)
+- [ ] Docker MCP Catalog
 - [ ] Raise tool-handler and dashboard-JS coverage
 - [ ] Per-client API keys / scoped tokens (replace the single-key perimeter)
 - [ ] Move the derived index off FUSE so hosted instances can scale past one writer
