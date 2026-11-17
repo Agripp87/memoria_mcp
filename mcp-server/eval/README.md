@@ -115,8 +115,9 @@ reads at most `MEMORIA_VECTOR_SCAN_CAP` of them per query (5,000 by
 default; a search over 5,000 chunks took 65 ms on the machine that ran
 this, 113 ms over 10,000 and 226 ms over 20,000).
 
-What it does not reach: text appended with `memory_daily` has no entry
-heading, so a log written only that way is chunked by size as before.
+What it does not reach: text that `memory_daily` appended before it wrote
+entry headings (0.3.1 and earlier) has none, so such a log is chunked by
+size as before.
 
 ### 2026-11: a larger corpus, and the keyword share measured
 
