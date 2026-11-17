@@ -18,7 +18,11 @@ Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Co
 - **Spec-complete remote transport.** OAuth 2.1 with PKCE, client credentials, dynamic client registration and metadata discovery — works as a claude.ai custom connector out of the box.
 - **Honest about search.** Three embedding providers (local MiniLM → n-gram fallback, plus OpenAI as an explicit opt-in), three-signal scoring, and every result reports its scan coverage.
 
-## Recent updates — 0.3.0 and 0.3.1: security hardening and relevance-led search
+## Recent updates — 0.3.0 to 0.3.2: security hardening and relevance-led search
+
+**0.3.2** indexes daily logs one entry per chunk, so an answer inside a long
+log is found (`memory_daily` now writes each entry under a time heading).
+Daily logs are re-embedded once, in the background, at the first start.
 
 A whole-repo review, and a critical re-review after it, hardened the
 server, the collector, and the sync scripts; 0.3.1 fixes what a second
