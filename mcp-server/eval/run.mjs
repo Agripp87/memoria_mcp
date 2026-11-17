@@ -13,6 +13,9 @@
  *   npm run build && node eval/run.mjs              # default: local MiniLM
  *   node eval/run.mjs --hash                        # no model download
  *   node eval/run.mjs --json                        # machine-readable
+ *   node eval/run.mjs --original                    # the first 51 documents only
+ *   node eval/run.mjs --split dev                   # dev or test queries only
+ *   node eval/run.mjs --sweep [--split dev]         # vector mix 0.0 to 1.0
  *
  * Notes on method, because a benchmark's credibility is its method:
  *
@@ -33,10 +36,26 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { CORPUS } from "./corpus.mjs";
-import { GOLD, ANSWERABLE, UNANSWERABLE } from "./gold.mjs";
+import { loadDataset, KINDS } from "./dataset.mjs";
 
 const AS_JSON = process.argv.includes("--json");
+const SWEEP = process.argv.includes("--sweep");
+const splitAt = process.argv.indexOf("--split");
+const SPLIT = splitAt === -1 ? null : process.argv[splitAt + 1];
+if (SPLIT !== null && SPLIT !== "dev" && SPLIT !== "test") {
+  process.stderr.write("--split takes dev or test\n");
+  process.exit(2);
+}
+
+// --original is the 51-document corpus and its 30 queries, exactly as every
+// number published before 2026-11 was measured.
+const DATA = loadDataset(process.argv.includes("--original") ? "original" : "full");
+const CORPUS = DATA.corpus;
+// A split leaves the unanswerable queries in: they are not scored for
+// ranking, only for the abstention figures.
+const GOLD = DATA.gold.filter((g) => !SPLIT || g.kind === "unanswerable" || g.split === SPLIT);
+const ANSWERABLE = GOLD.filter((g) => g.kind !== "unanswerable");
+const UNANSWERABLE = GOLD.filter((g) => g.kind === "unanswerable");
 
 // Default to the local model: deterministic, needs no API key, and unlike the
 // hash fallback it actually exercises the vector half of the formula.
@@ -178,7 +197,10 @@ async function evaluate(config) {
     const results = await store.search(g.q, K_RECALL, config.weights, config.vectorMix);
     latencies.push(performance.now() - t0);
 
-    const ranked = results.map((r) => idFromFile(r.file));
+    // Results are chunks, and a long file has several: keep each file once,
+    // at its best rank. (Every document in the original corpus is one chunk,
+    // so this changes nothing there.)
+    const ranked = [...new Set(results.map((r) => idFromFile(r.file)))];
     const topScore = results.length ? Number(results[0].score ?? 0) : 0;
 
     if (g.kind === "unanswerable") {
@@ -206,7 +228,7 @@ async function evaluate(config) {
   }
 
   const byKind = {};
-  for (const kind of ["temporal", "hard-negative", "paraphrase"]) {
+  for (const kind of KINDS) {
     const rows = perQuery.filter((r) => r.kind === kind);
     if (rows.length) byKind[kind] = mean(rows.map((r) => r.ndcg));
   }
@@ -232,11 +254,70 @@ async function evaluate(config) {
   };
 }
 
+// ─── Sweep ────────────────────────────────────────────────────────────────
+// One question: how should relevance be split between vector cosine and the
+// keyword score? Run it on --split dev, pick, then read the pick on test.
+if (SWEEP) {
+  const kinds = KINDS.filter((k) => ANSWERABLE.some((g) => g.kind === k));
+  const pct = (x) => (x == null ? "  -  " : (x * 100).toFixed(1).padStart(5));
+  const rows = [];
+  for (const priors of [true, false]) {
+    for (let step = 0; step <= 10; step++) {
+      const vectorMix = step / 10;
+      const r = await evaluate({
+        name: `mix ${vectorMix.toFixed(1)}`,
+        weights: priors
+          ? { recency: 0.1, importance: 0.1, relevance: 0.8 }
+          : { recency: 0, importance: 0, relevance: 1 },
+        vectorMix,
+      });
+      rows.push({
+        priors,
+        vectorMix,
+        ndcg: r.ndcg,
+        mrr: r.mrr,
+        recall: r.recall,
+        byKind: r.byKind,
+      });
+    }
+  }
+  if (AS_JSON) {
+    process.stdout.write(
+      JSON.stringify({ provider: getProvider(), split: SPLIT ?? "all", set: DATA.set, rows }) +
+        "\n",
+    );
+  } else {
+    process.stdout.write(
+      `\nVector-mix sweep: ${getProvider()}, ${DATA.set} corpus (${CORPUS.length} documents), ` +
+        `${ANSWERABLE.length} queries (${SPLIT ?? "all"})\n`,
+    );
+    for (const priors of [true, false]) {
+      process.stdout.write(
+        `\n  ${priors ? "priors 0.1 / 0.1 (shipped)" : "no priors"}\n` +
+          `  ${"vector mix".padEnd(10)} ${"nDCG@10".padStart(8)} ${"MRR".padStart(6)} ${"R@20".padStart(6)}` +
+          `${kinds.map((k) => k.padStart(14)).join("")}\n`,
+      );
+      for (const r of rows.filter((x) => x.priors === priors)) {
+        process.stdout.write(
+          `  ${r.vectorMix.toFixed(1).padEnd(10)} ${pct(r.ndcg).padStart(8)} ${pct(r.mrr).padStart(6)} ` +
+            `${pct(r.recall).padStart(6)}${kinds.map((k) => pct(r.byKind[k]).padStart(14)).join("")}\n`,
+        );
+      }
+    }
+    process.stdout.write("\n");
+  }
+  store.close();
+  fs.rmSync(ROOT, { recursive: true, force: true });
+  process.exit(0);
+}
+
 const results = [];
 for (const c of CONFIGS) results.push(await evaluate(c));
 
 // ─── Report ───────────────────────────────────────────────────────────────
 const meta = {
+  set: DATA.set,
+  split: SPLIT ?? "all",
   provider: getProvider(),
   dimension: getDimension(),
   documents: CORPUS.length,
@@ -253,8 +334,9 @@ if (AS_JSON) {
   process.stdout.write(
     `\nMemoria retrieval eval\n` +
       `  provider   ${meta.provider} (${meta.dimension}d)\n` +
-      `  corpus     ${meta.documents} documents (${meta.cited} cited by a query, ${meta.distractors} pure distractors)\n` +
-      `  queries    ${meta.queries} answerable, ${meta.unanswerable} unanswerable\n\n`,
+      `  corpus     ${meta.set}: ${meta.documents} documents (${meta.cited} cited by a query, ${meta.distractors} pure distractors)\n` +
+      `  queries    ${meta.queries} answerable, ${meta.unanswerable} unanswerable` +
+      `${SPLIT ? ` (${SPLIT} split)` : ""}\n\n`,
   );
   process.stdout.write(
     `  ${"configuration".padEnd(20)} ${"nDCG@10".padStart(7)} ${"R@20".padStart(6)} ${"MRR".padStart(6)} ${"p95ms".padStart(6)}  stale\n` +
@@ -272,7 +354,7 @@ if (AS_JSON) {
   // question each weight exists to answer. "temporal" is the only column that
   // tests recency: if a configuration with recency switched off also wins
   // there, the recency weight is not earning its place.
-  const kinds = ["temporal", "hard-negative", "paraphrase"];
+  const kinds = KINDS.filter((k) => ANSWERABLE.some((g) => g.kind === k));
   process.stdout.write(`\n  nDCG@10 by query kind:\n`);
   process.stdout.write(`  ${"".padEnd(20)} ${kinds.map((k) => k.padStart(14)).join("")}\n`);
   for (const r of results) {
