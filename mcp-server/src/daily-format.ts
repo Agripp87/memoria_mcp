@@ -62,6 +62,13 @@ export function collectorDailyHeader(date: string, importance = 5): string {
 }
 
 /**
+ * The source name memory_daily writes in its entry headings
+ * ("## 14:05 UTC — note"). Text the agent or the user appended, as opposed
+ * to an event a collector source produced.
+ */
+export const NOTE_SOURCE = "note";
+
+/**
  * Regex source matching an entry heading's time label, current and legacy:
  * "14:05 UTC", and the server-local "02:05 PM" that older logs hold. A strict
  * superset of the `[\d:APM ]+` the parsers used before, so every heading

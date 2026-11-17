@@ -25,9 +25,17 @@ Other files are not re-embedded, and search keeps working meanwhile.
   priors off, and short notes are unaffected; `mcp-server/eval/README.md`
   has the tables, including where the recency weight then costs. A log of
   short entries makes several times as many chunks as before (see
-  `MEMORIA_VECTOR_SCAN_CAP`). Text appended with `memory_daily` has no entry
-  heading and is chunked as before. The index version is unchanged, so a
-  0.3.1 server opening the same store does not rebuild it.
+  `MEMORIA_VECTOR_SCAN_CAP`). Text that `memory_daily` appended before it
+  wrote entry headings (next item) has none and is chunked as before. The
+  index version is unchanged, so a 0.3.1 server opening the same store does
+  not rebuild it.
+- **`memory_daily` writes each entry under a `## HH:MM UTC — note`
+  heading.** The text used to be appended bare, so nothing marked where an
+  entry ended: such a log could not be indexed entry by entry, and
+  `memory_stats`, `memory_compact` and the entity pages did not see the
+  entries. They now appear there under the source `note`. The text itself is
+  written as given (trimmed); text already in your logs is not touched, and
+  an empty entry is refused.
 - **The collector skips an event as "already captured" only when an existing
   entry holds its text.** A high similarity score alone used to be enough.
   With one entry per chunk, a new event shaped like an old one (the next

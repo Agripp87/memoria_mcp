@@ -140,7 +140,7 @@ describe("memory_write / memory_read round trip", () => {
   it("does not count a daily log entry as a duplicate of a note written from it", async () => {
     const fact =
       "The Antwerp depot prints customs paperwork from a template cache keyed by shipment, after the batch-key incident.";
-    await handlers.get("memory_daily")!({ entry: fact, source: "note" });
+    await handlers.get("memory_daily")!({ entry: fact });
     const r = await handlers.get("memory_write")!({
       file: "references/antwerp-templates.md",
       content: `---\nname: Antwerp templates\ntype: reference\nimportance: 5\n---\n\n${fact}`,
@@ -178,6 +178,54 @@ describe("memory_daily", () => {
     const daily = fs.readFileSync(path.join(MEM, "daily", `${today}.md`), "utf-8");
     expect(daily).toContain("Test entry from tools.test.ts");
     expect(daily).toContain("type: session");
+  });
+
+  // Until 2026-11 the text was appended bare: the index could not tell one
+  // entry from the next, and memory_stats, memory_compact and the entity
+  // pages did not see memory_daily entries at all.
+  it("writes each entry under its own time heading, and the text as given", async () => {
+    const today = new Date().toISOString().split("T")[0];
+    const file = path.join(MEM, "daily", `${today}.md`);
+    const before = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "";
+    await handlers.get("memory_daily")!({
+      entry: "  Chose the zebra codec for thumbnails.\n- smaller files\n- slower encode  ",
+    });
+    await handlers.get("memory_daily")!({ entry: "The walrus migration is finished." });
+    const added = fs.readFileSync(file, "utf-8").slice(before.length);
+    expect(added).toMatch(
+      /^\n?## \d{2}:\d{2} UTC — note\n\nChose the zebra codec for thumbnails\.\n- smaller files\n- slower encode\n\n## \d{2}:\d{2} UTC — note\n\nThe walrus migration is finished\.\n$/,
+    );
+  });
+
+  it("indexes each entry as its own chunk", async () => {
+    await handlers.get("memory_daily")!({ entry: "The ocelot cache is warmed at 04:00 UTC." });
+    await handlers.get("memory_daily")!({ entry: "Narwhal exports are paused until Friday." });
+    const today = new Date().toISOString().split("T")[0];
+    const hits = (await store.search("ocelot cache warmed", 10)).filter(
+      (r: any) => r.file === `daily/${today}.md`,
+    );
+    const ocelot = hits.find((r: any) => r.text.includes("ocelot"));
+    expect(ocelot).toBeDefined();
+    expect(ocelot!.text).toMatch(/^## \d{2}:\d{2} UTC — note\n\nThe ocelot cache is warmed/);
+    expect(ocelot!.text).not.toContain("Narwhal");
+  });
+
+  it("shows up as a source in memory_stats and as entries in memory_compact", async () => {
+    await handlers.get("memory_daily")!({ entry: "Decided to keep the heron queue on two nodes." });
+    expect(text(await handlers.get("memory_stats")!({}))).toMatch(/note/);
+    const digest = text(await handlers.get("memory_compact")!({ days: 1 }));
+    // The digest lists a source's count and its three most frequent texts.
+    expect(digest).toMatch(/### note\n- \d+ events \| \d+ distinct patterns/);
+    expect(digest).toContain("Test entry from tools.test.ts");
+  });
+
+  it("refuses an empty entry instead of writing a bare heading", async () => {
+    const today = new Date().toISOString().split("T")[0];
+    const file = path.join(MEM, "daily", `${today}.md`);
+    const before = fs.readFileSync(file, "utf-8");
+    const r = await handlers.get("memory_daily")!({ entry: "  \n " });
+    expect((r as any).isError).toBe(true);
+    expect(fs.readFileSync(file, "utf-8")).toBe(before);
   });
 });
 

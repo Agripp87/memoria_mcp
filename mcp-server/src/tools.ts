@@ -22,9 +22,11 @@ import { buildEntityPages } from "./entities.js";
 import {
   DAILY_ENTRY_BLOCK_SRC,
   DAILY_ENTRY_HEADING_SRC,
+  NOTE_SOURCE,
   collectorDailyHeader,
   entryImportance,
   stripImportanceTrailer,
+  utcTimeLabel,
 } from "./daily-format.js";
 import { createOrAppend, writeFileAtomic, writeFileExclusive } from "./atomic-fs.js";
 import { SourceRegistry } from "./collector/registry.js";
@@ -1057,13 +1059,19 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
   // Tool 6: memory_daily
   server.tool(
     "memory_daily",
-    "Append an entry to today's daily log (the file is created if it doesn't exist). Use it for what is worth remembering later: decisions made, preferences learned, problems solved, how a piece of work ended. A short summary after substantial work is a good default; routine or trivial sessions don't need one.",
+    "Append an entry to today's daily log (the file is created if it doesn't exist). Use it for what is worth remembering later: decisions made, preferences learned, problems solved, how a piece of work ended. A short summary after substantial work is a good default; routine or trivial sessions don't need one. The entry is written under its own time heading, so there is no need to add one; one call per topic is found more easily later than several topics in one entry.",
     {
       // Same ceiling as the dashboard journal. Without one, a single call
       // could append megabytes to a file every later read and reindex pays for.
       entry: z.string().max(50_000).describe("The text to append to today's daily log"),
     },
     async ({ entry }) => {
+      if (entry.trim() === "") {
+        return {
+          content: [{ type: "text" as const, text: "Nothing to append: the entry is empty." }],
+          isError: true,
+        };
+      }
       // Daily logs are UTC days (the dashboard journal and ingestion agree).
       const today = new Date().toISOString().split("T")[0];
       // Refuses a symlinked daily/ or log (see daily-paths.ts).
@@ -1076,7 +1084,13 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       // the file exclusively, so two writers that both find it missing cannot
       // truncate each other's first entry.
       const header = `---\nname: Daily log ${today}\ndescription: Session log for ${today}\ntype: session\nimportance: 3\ncreated: ${today}\nupdated: ${today}\ntags: [daily]\n---\n\n# Daily Log — ${today}\n\n`;
-      createOrAppend(dailyFile, header + entry, `\n${entry}`);
+      // Under an entry heading, like every other writer of the log. Until
+      // 2026-11 the text was appended bare, so nothing could tell where one
+      // entry ended: the index cut such a log every 1,600 characters, and
+      // memory_stats, memory_compact and the entity pages did not see the
+      // entries at all. The text itself is written as given.
+      const stamped = `## ${utcTimeLabel()} — ${NOTE_SOURCE}\n\n${entry.trim()}\n`;
+      createOrAppend(dailyFile, header + stamped, `\n${stamped}`);
 
       const indexed = await indexAfterWrite(store, dailyFile);
       // Refresh the index so a new day's log is immediately navigable
@@ -1241,8 +1255,9 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
         .sort((a, b) => b[1] - a[1])
         .slice(0, 8);
 
-      // Detect repetitive sources (likely scheduled jobs flooding the log)
-      const repetitiveSources = topSources.filter(([, n]) => n > 50);
+      // Detect repetitive sources (likely scheduled jobs flooding the log).
+      // memory_daily's own entries are not a job to rate-limit.
+      const repetitiveSources = topSources.filter(([s, n]) => n > 50 && s !== NOTE_SOURCE);
       if (repetitiveSources.length > 0) {
         warnings.push(
           `- ${repetitiveSources.length} source(s) generating >50 events/week — consider rate-limiting or filtering: ` +
