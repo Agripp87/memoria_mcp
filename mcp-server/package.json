@@ -48,7 +48,9 @@
     "prepublishOnly": "npm run build",
     "verify:vectors": "node scripts/verify-vector-space.mjs",
     "eval": "node eval/run.mjs",
-    "eval:hash": "node eval/run.mjs --hash"
+    "eval:hash": "node eval/run.mjs --hash",
+    "eval:sweep": "node eval/run.mjs --sweep",
+    "eval:check": "node eval/check.mjs --report"
   },
   "keywords": [
     "mcp",
