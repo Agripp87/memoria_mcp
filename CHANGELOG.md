@@ -11,8 +11,32 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
+Upgrading re-embeds daily logs once, in the background, at the first start
+(with `MEMORIA_EMBEDDINGS=openai`, every log entry is sent for embedding again).
+Other files are not re-embedded, and search keeps working meanwhile.
+
 ### Changed
 
+- **Daily logs are indexed one entry per chunk.** A log used to be cut every
+  1,600 characters, so one chunk held six or seven unrelated entries and
+  matched none of them well. A file with entry headings
+  (`## 14:05 UTC — email`) is now cut at its `## ` headings. On the retrieval
+  eval, queries answered by a log entry go from 52 to 89 nDCG@10 with the
+  priors off, and short notes are unaffected; `mcp-server/eval/README.md`
+  has the tables, including where the recency weight then costs. A log of
+  short entries makes several times as many chunks as before (see
+  `MEMORIA_VECTOR_SCAN_CAP`). Text appended with `memory_daily` has no entry
+  heading and is chunked as before. The index version is unchanged, so a
+  0.3.1 server opening the same store does not rebuild it.
+- **The collector skips an event as "already captured" only when an existing
+  entry holds its text.** A high similarity score alone used to be enough.
+  With one entry per chunk, a new event shaped like an old one (the next
+  invoice email) scores as high as an exact repeat and would have been
+  dropped. An event longer than a chunk is never skipped this way; an exact
+  repeat within 26 hours is still caught by its content hash.
+- **`memory_write` and `memory_compile` no longer report a daily log as a
+  potential duplicate.** A note written from a log entry resembles it on
+  purpose.
 - **Retrieval eval: 175 documents and 144 queries** (was 51 and 26), adding
   exact-term and mixed queries, date-only decision pairs, long daily logs, a
   dev/test split and a vector-mix sweep (`npm run eval:sweep`). No default

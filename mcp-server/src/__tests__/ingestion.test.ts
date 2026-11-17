@@ -85,14 +85,45 @@ describe("IngestionPipeline — H1: never writes into core memories", () => {
     expect([...result.writtenSources].sort()).toEqual(["agent-alpha", "agent-beta"]);
   });
 
-  it("skips an event that is near-identical to an existing memory", async () => {
+  it("skips an event whose text an existing entry already holds", async () => {
+    const event = ev();
     const pipeline = new IngestionPipeline({
       memoriesDir,
-      searchMemories: async () => [{ file: "daily/2026-01-01.md", content: "dup", score: 0.95 }],
+      searchMemories: async () => [
+        {
+          file: "daily/2026-01-01.md",
+          // As stored: under its entry heading, re-wrapped, different case.
+          content: `## 09:00 UTC — orchestrator-test\n\n${event.content.toUpperCase().replace(/ /g, "\n")}\n`,
+          score: 0.95,
+        },
+      ],
     });
-    const result = await pipeline.ingest([ev()]);
+    const result = await pipeline.ingest([event]);
     expect(result.written).toBe(0);
     expect(result.deduplicated).toBe(1);
+  });
+
+  // Since each log entry is its own chunk, a new event of the same shape as
+  // an old one (the next invoice, tomorrow's standup) scores as high as an
+  // exact repeat. A score alone used to be enough to skip it, which lost it.
+  it("writes a new event that only resembles an existing entry, however high it scores", async () => {
+    const pipeline = new IngestionPipeline({
+      memoriesDir,
+      searchMemories: async () => [
+        {
+          file: "daily/2026-01-01.md",
+          content:
+            "## 09:05 UTC — email\n\nYour invoice 88231 for March is attached. Amount due 14,220.50 EUR.",
+          score: 0.99,
+        },
+      ],
+    });
+    const result = await pipeline.ingest([
+      ev({ content: "Your invoice 88977 for April is attached. Amount due 9,870.00 EUR." }),
+    ]);
+    expect(result.written).toBe(1);
+    expect(result.deduplicated).toBe(0);
+    expect(fs.readFileSync(todayDailyPath(), "utf-8")).toContain("invoice 88977");
   });
 });
 

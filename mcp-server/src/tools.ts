@@ -180,6 +180,17 @@ export function getRelativePath(absPath: string): string {
   return path.relative(MEMORIES_DIR, absPath).split(path.sep).join("/");
 }
 
+/**
+ * Whether an index key names a daily log. The write-time duplicate check
+ * leaves these out: a note written from a log entry is meant to resemble
+ * it, and "update the existing file" is the wrong advice for a log. Since
+ * each entry is its own chunk, such a note would otherwise be held back
+ * almost every time.
+ */
+export function isDailyLogFile(relPath: string): boolean {
+  return relPath.startsWith("daily/");
+}
+
 export function readMemoryFile(filePath: string): { content: string; exists: boolean } {
   try {
     return { content: fs.readFileSync(filePath, "utf-8"), exists: true };
@@ -906,7 +917,9 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
           // Exclude self by the NORMALIZED relative path — the raw `file` input
           // may be unnormalized (e.g. "./project/x.md") and wouldn't match
           // s.file, causing a file to flag itself as its own duplicate.
-          const highSimilarity = similar.filter((s) => s.similarity > 0.85 && s.file !== relFile);
+          const highSimilarity = similar.filter(
+            (s) => s.similarity > 0.85 && s.file !== relFile && !isDailyLogFile(s.file),
+          );
 
           if (highSimilarity.length > 0) {
             const dupList = highSimilarity
@@ -1446,7 +1459,9 @@ export function registerTools(server: McpServer, store: MemoryStore): void {
       try {
         // Dedup check (same as memory_write)
         const similar = await store.findSimilar(bodyContent, 3);
-        const highSimilarity = similar.filter((s) => s.similarity > 0.85 && s.file !== relFile);
+        const highSimilarity = similar.filter(
+          (s) => s.similarity > 0.85 && s.file !== relFile && !isDailyLogFile(s.file),
+        );
 
         if (highSimilarity.length > 0) {
           const dupList = highSimilarity

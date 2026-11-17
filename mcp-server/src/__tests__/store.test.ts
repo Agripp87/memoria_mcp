@@ -387,6 +387,56 @@ describe("index format version (review 2026-10)", () => {
   });
 });
 
+describe("daily logs are re-chunked once after the upgrade to entry chunks (2026-11)", () => {
+  const log =
+    "---\nname: Daily log\n---\n\n# Log\n\n## 09:00 UTC — note\n\nFirst entry.\n\n## 09:30 UTC — email\n\nSecond entry.\n";
+  const note = "---\nname: N\n---\nA note about quantum widgets.\n\n## Details\n\nMore.";
+  // What an index looks like that was built before entry chunking: the whole
+  // log in one chunk, and no daily_chunking key.
+  const asBefore = async () => {
+    await store.indexChunks(
+      [{ text: log.split("---\n\n")[1].trim(), file: "daily/d.md", startLine: 5, endLine: 13 }],
+      5,
+      log,
+    );
+    await store.indexChunks(chunkMarkdown(note, "reference/n.md"), 5, note);
+    (store as any).db.prepare("DELETE FROM store_meta WHERE key = 'daily_chunking'").run();
+    store.close();
+    store = new MemoryStore(dbPath);
+  };
+
+  it("forgets the hash of daily logs only, and keeps the index answering meanwhile", async () => {
+    await asBefore();
+    // Not a rebuild: nothing is wiped, other files are not re-embedded.
+    expect(store.needsReindex).toBe(false);
+    expect(store.hasContentChanged("daily/d.md", log)).toBe(true);
+    expect(store.hasContentChanged("reference/n.md", note)).toBe(false);
+    expect((await store.search("second entry", 5)).map((r) => r.file)).toContain("daily/d.md");
+
+    // The next sweep re-indexes the log, now one entry per chunk.
+    await store.indexChunks(chunkMarkdown(log, "daily/d.md"), 5, log);
+    const hits = (await store.search("second entry email", 5)).filter(
+      (r) => r.file === "daily/d.md",
+    );
+    expect(hits.length).toBe(2);
+    expect(hits.some((r) => r.text === "## 09:30 UTC — email\n\nSecond entry.")).toBe(true);
+  });
+
+  it("does it once", async () => {
+    await asBefore();
+    await store.indexChunks(chunkMarkdown(log, "daily/d.md"), 5, log);
+    store.close();
+    store = new MemoryStore(dbPath);
+    expect(store.hasContentChanged("daily/d.md", log)).toBe(false);
+  });
+
+  it("keeps the index version, so an older server does not take it for outdated", () => {
+    // 0.3.1 wipes and re-embeds any index whose version it does not know.
+    expect(store.getMeta("index_version")).toBe("3");
+    expect(store.getMeta("daily_chunking")).toBe("entry");
+  });
+});
+
 describe("access history survives rebuilds and edits count as touches (re-review 2026-10)", () => {
   const DAY = 24 * 3600 * 1000;
   const daysAgo = (n: number) => new Date(Date.now() - n * DAY).toISOString().split("T")[0];

@@ -13,7 +13,7 @@
 
 import Database from "better-sqlite3";
 import { acquireStoreLock, StoreInUseError } from "./store-lock.js";
-import { Chunk } from "./chunker.js";
+import { Chunk, hasDailyEntryHeading } from "./chunker.js";
 import { embed, embedBatch, cosineSimilarity, getDimension, getProvider } from "./embeddings.js";
 import path from "node:path";
 import crypto from "crypto";
@@ -179,6 +179,15 @@ export function indexVersionOutdated(stored: string | undefined, provider: strin
   if (stored === "2" && provider !== "local") return false;
   return true;
 }
+
+/**
+ * How daily logs are cut into chunks. "entry": one chunk per entry
+ * (chunker.ts). Kept beside INDEX_VERSION and not as a new index version on
+ * purpose: an older server opening the store ignores a key it does not know,
+ * where it would take a newer INDEX_VERSION for an outdated index, wipe it
+ * and re-embed everything. Chunks cut both ways can sit in one index.
+ */
+const DAILY_CHUNKING = "entry";
 
 function contentHashOf(content: string): string {
   return crypto.createHash("sha256").update(content).digest("hex");
@@ -530,6 +539,23 @@ export class MemoryStore {
       this.needsReindex = true;
     }
 
+    // Daily logs indexed before they were cut one entry per chunk: forget
+    // their content hashes, so the next sweep re-embeds them (and only
+    // them). Their old chunks keep answering searches until it does. After a
+    // full rebuild, or in a new store, there is nothing to forget.
+    if (this.getMeta("daily_chunking") !== DAILY_CHUNKING) {
+      if (stored.provider && !providerChanged && !indexOutdated) {
+        const files = this.forgetDailyLogHashes();
+        if (files > 0) {
+          process.stderr.write(
+            `Memoria: ${files} daily log${files === 1 ? "" : "s"} will be re-indexed, ` +
+              `one entry per chunk.\n`,
+          );
+        }
+      }
+      this.setMeta("daily_chunking", DAILY_CHUNKING);
+    }
+
     // Store current provider info
     this.db
       .prepare("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('embedding_provider', ?)")
@@ -540,6 +566,20 @@ export class MemoryStore {
     this.db
       .prepare("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('index_version', ?)")
       .run(INDEX_VERSION);
+  }
+
+  /**
+   * Forget the content hash of every indexed file that holds a daily entry
+   * heading, so it is re-chunked at the next sweep. Returns how many.
+   */
+  private forgetDailyLogHashes(): number {
+    const rows = this.db
+      .prepare("SELECT file, text FROM chunks WHERE instr(text, '## ') > 0")
+      .all() as Array<{ file: string; text: string }>;
+    const files = new Set(rows.filter((r) => hasDailyEntryHeading(r.text)).map((r) => r.file));
+    const forget = this.db.prepare("UPDATE file_meta SET content_hash = NULL WHERE file = ?");
+    for (const file of files) forget.run(file);
+    return files.size;
   }
 
   /**

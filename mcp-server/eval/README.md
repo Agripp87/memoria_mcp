@@ -47,7 +47,81 @@ within its kind). A weight is chosen on dev and reported on test.
 
 ## Current results
 
+### 2026-11: daily logs chunked one entry at a time
+
+The section below found that queries answered inside a long daily log
+scored far worse than the rest, and guessed at the cause: the chunker cut
+every 1,600 characters, so one chunk of a log held six or seven unrelated
+entries. A file with daily entry headings (`## 14:05 UTC — email`) is now
+cut at its `## ` headings, one entry per chunk. Nothing else is chunked
+differently, and `--original` still reproduces every older number.
+
+Shipped default, local MiniLM, 144 queries. "Daily log" is the 26 queries
+whose answer is an entry of one of the six logs:
+
+```
+                                    all   daily log   short note
+  as written
+    before                         82.6        73.1         84.7
+    after                          83.7        94.3         81.4
+  without priors
+    before                         78.5        52.2         84.3
+    after                          84.8        88.7         83.9
+  dates shuffled (3 seeds)
+    before                         77.4        42.2         85.2
+    after                          84.4        82.2         84.9
+```
+
+- **Entries are found.** With no help from recency, queries answered by a
+  log entry go from 52.2 to 88.7 (difference 36.6, 95% interval 26.7 to
+  46.7), and from 42.2 to 82.2 with dates shuffled.
+- **Short notes pay nothing for it when dates are neutral**: −0.4 without
+  priors (interval −2.0 to +1.1), and within ±0.7 on each shuffled seed.
+- **As written, short notes lose 3.3** (interval −5.3 to −1.5). The six logs
+  are the newest documents in the corpus, so each of their 70 entries now
+  competes with an older note at full sharpness and with the recency prior
+  behind it. Most of the loss is a note dropping from first place to second
+  behind one entry on the same subject. This is the recency question from
+  the section below again, and the same caveat applies: whether a real
+  store's logs are that much newer than its notes is not something this
+  corpus knows.
+- **The vector mix is unaffected**: 0.7 and 0.8 both score 83.7 now.
+
+The current table (`npm run eval`):
+
+```
+  configuration           nDCG@10   R@20    MRR  stale
+  shipped default            83.7   97.2   80.2      3
+  keyword only               67.3   81.6   65.1      9
+  vector only                83.0   98.6   79.7      5
+  hybrid, no priors          84.8   98.6   81.0      7
+  recency, no importance     83.3   96.5   79.7      3
+  importance, no recency     86.1   98.6   82.5      6
+
+  nDCG@10 by query kind     temporal  hard-negative  paraphrase  exact-term  mixed
+  shipped default               88.6           72.5        72.8        92.9   95.9
+  hybrid, no priors             76.5           76.7        74.8        93.5   98.6
+```
+
+Two variants were measured and not taken: packing consecutive entries into
+chunks of up to 400 or 800 characters. With dates shuffled they score 83.0
+and 81.1 against 84.4 for one entry per chunk, and 72.7 and 61.1 on the
+daily-log queries against 82.2. Each halving of sharpness costs about ten
+points there.
+
+What it costs: the six logs were 12 chunks and are 70. A log of short
+entries makes several times as many chunks as before, and the vector scan
+reads at most `MEMORIA_VECTOR_SCAN_CAP` of them per query (5,000 by
+default; a search over 5,000 chunks took 65 ms on the machine that ran
+this, 113 ms over 10,000 and 226 ms over 20,000).
+
+What it does not reach: text appended with `memory_daily` has no entry
+heading, so a log written only that way is chunked by size as before.
+
 ### 2026-11: a larger corpus, and the keyword share measured
+
+Measured before daily logs were chunked by entry (above); the tables in this
+section are as they were then.
 
 The first corpus could not say whether keyword matching earns its 30% of
 relevance: every one of its queries avoids its answer's wording, so on it

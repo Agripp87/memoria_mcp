@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { dump } from "js-yaml";
-import { FRONTMATTER_WRITE_SCHEMA, parseFrontmatter, chunkMarkdown } from "../chunker.js";
+import {
+  FRONTMATTER_WRITE_SCHEMA,
+  parseFrontmatter,
+  chunkMarkdown,
+  hasDailyEntryHeading,
+} from "../chunker.js";
 
 describe("parseFrontmatter", () => {
   it("parses YAML frontmatter with string, number, and array values", () => {
@@ -274,5 +279,91 @@ describe("chunk line numbers with CRLF or a BOM (2026-10 re-review F42)", () => 
     expect(start(lf.replace(/\n/g, "\r\n"))).toBe(expected);
     expect(start("﻿" + lf)).toBe(expected);
     expect(start("﻿" + lf.replace(/\n/g, "\r\n"))).toBe(expected);
+  });
+});
+
+describe("daily logs are chunked one entry at a time (2026-11)", () => {
+  const log = [
+    "---",
+    "name: Daily log",
+    "importance: 5",
+    "---",
+    "",
+    "# 2026-11-17",
+    "",
+    "## 07:40 UTC — email",
+    "",
+    "The gate scanner at dock 4 is dead.",
+    "",
+    "## 08:15 UTC — Journal (good)",
+    "",
+    "Standup moved to Tuesday.",
+    "Two reviewers are out.",
+    "",
+    "## Summary",
+    "",
+    "A quiet day.",
+    "",
+  ].join("\n");
+
+  it("gives each entry its own chunk, with its heading and its own lines", () => {
+    const chunks = chunkMarkdown(log, "daily/2026-11-17.md");
+    expect(chunks.map((c) => c.text)).toEqual([
+      "## 07:40 UTC — email\n\nThe gate scanner at dock 4 is dead.",
+      "## 08:15 UTC — Journal (good)\n\nStandup moved to Tuesday.\nTwo reviewers are out.",
+      // Any "## " heading ends an entry, as it does for the log's parsers.
+      "## Summary\n\nA quiet day.",
+    ]);
+    // Line numbers count from the top of the file, frontmatter included.
+    expect(chunks.map((c) => [c.startLine, c.endLine])).toEqual([
+      [8, 11],
+      [12, 16],
+      [17, 20],
+    ]);
+    const lines = log.split("\n");
+    for (const c of chunks) expect(lines[c.startLine - 1]).toBe(c.text.split("\n")[0]);
+  });
+
+  it("drops a title that stands alone, and keeps text written before the first entry", () => {
+    expect(chunkMarkdown(log, "d.md").some((c) => c.text.includes("# 2026-11-17"))).toBe(false);
+    const withIntro = log.replace("# 2026-11-17\n", "# 2026-11-17\n\nOn call this week.\n");
+    expect(chunkMarkdown(withIntro, "d.md")[0].text).toBe("# 2026-11-17\n\nOn call this week.");
+  });
+
+  it("cuts an entry longer than a chunk by size, inside that entry only", () => {
+    const long = Array.from({ length: 60 }, (_, i) => `Line ${i} of a long pasted report.`).join(
+      "\n",
+    );
+    const content = `# Log\n\n## 09:00 UTC — note\n\nshort one\n\n## 09:05 UTC — email\n\n${long}\n\n## 09:10 UTC — note\n\nlast one\n`;
+    const chunks = chunkMarkdown(content, "d.md");
+    expect(chunks[0].text).toBe("## 09:00 UTC — note\n\nshort one");
+    expect(chunks[chunks.length - 1].text).toBe("## 09:10 UTC — note\n\nlast one");
+    const middle = chunks.slice(1, -1);
+    expect(middle.length).toBeGreaterThan(1);
+    expect(middle[0].text.startsWith("## 09:05 UTC — email")).toBe(true);
+    for (const c of middle) {
+      expect(c.text).not.toContain("short one");
+      expect(c.text).not.toContain("last one");
+    }
+  });
+
+  it("reads legacy local-time headings as entries too", () => {
+    const legacy =
+      "# Log\n\n## 02:05 PM — git\n\nPushed the fix.\n\n## 02:30 PM — git\n\nTagged.\n";
+    expect(chunkMarkdown(legacy, "d.md").map((c) => c.text)).toEqual([
+      "## 02:05 PM — git\n\nPushed the fix.",
+      "## 02:30 PM — git\n\nTagged.",
+    ]);
+  });
+
+  it("leaves a file without entry headings chunked by size, sections together", () => {
+    const note =
+      "---\nname: Runbook\n---\n\n# Runbook\n\n## Restart\n\nRoll the workers.\n\n## Verify\n\nWatch the lag panel.\n";
+    const chunks = chunkMarkdown(note, "reference/runbook.md");
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].text).toContain("## Restart");
+    expect(chunks[0].text).toContain("## Verify");
+    expect(hasDailyEntryHeading(note)).toBe(false);
+    expect(hasDailyEntryHeading(log)).toBe(true);
   });
 });

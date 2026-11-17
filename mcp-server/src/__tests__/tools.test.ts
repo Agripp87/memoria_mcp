@@ -133,6 +133,22 @@ describe("memory_write / memory_read round trip", () => {
     expect(text(dup)).toContain("Potential duplicates found");
     expect(fs.existsSync(path.join(MEM, "references", "dup-b.md"))).toBe(false);
   });
+
+  // A note written from a daily log entry resembles it on purpose. With
+  // each entry in its own chunk the gate would hold every such note back,
+  // and "update the existing file" is the wrong advice for a log.
+  it("does not count a daily log entry as a duplicate of a note written from it", async () => {
+    const fact =
+      "The Antwerp depot prints customs paperwork from a template cache keyed by shipment, after the batch-key incident.";
+    await handlers.get("memory_daily")!({ entry: fact, source: "note" });
+    const r = await handlers.get("memory_write")!({
+      file: "references/antwerp-templates.md",
+      content: `---\nname: Antwerp templates\ntype: reference\nimportance: 5\n---\n\n${fact}`,
+      force: false,
+    });
+    expect(text(r)).not.toContain("Potential duplicates found");
+    expect(fs.existsSync(path.join(MEM, "references", "antwerp-templates.md"))).toBe(true);
+  });
 });
 
 describe("memory_search", () => {
