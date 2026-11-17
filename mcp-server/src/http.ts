@@ -298,7 +298,7 @@ export const store = new MemoryStore(DB_PATH, { shared: true });
 function createServer(): McpServer {
   const server = new McpServer({
     name: "memoria",
-    version: "0.3.1",
+    version: "0.3.2",
     description: SERVER_DESCRIPTION,
   });
   registerTools(server, store);

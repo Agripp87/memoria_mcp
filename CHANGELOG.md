@@ -11,6 +11,12 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-11-17
+
+Daily logs are indexed one entry at a time, which is what makes an answer
+inside a long log findable. Files already in the store are not rewritten, and
+no setting changes its default.
+
 Upgrading re-embeds daily logs once, in the background, at the first start
 (with `MEMORIA_EMBEDDINGS=openai`, every log entry is sent for embedding again).
 Other files are not re-embedded, and search keeps working meanwhile.
@@ -779,7 +785,8 @@ so the public history starts here.
   from the SQLite index living on a FUSE mount — are listed in the
   [README](README.md#known-limitations) rather than glossed over.
 
-[Unreleased]: https://github.com/Agripp87/memoria_mcp/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Agripp87/memoria_mcp/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/Agripp87/memoria_mcp/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/Agripp87/memoria_mcp/compare/v0.2.1...v0.3.1
 [0.3.0]: https://github.com/Agripp87/memoria_mcp/compare/v0.2.1...344fab6
 [0.2.1]: https://github.com/Agripp87/memoria_mcp/compare/v0.2.0...v0.2.1
