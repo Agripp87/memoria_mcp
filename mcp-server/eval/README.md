@@ -15,8 +15,14 @@ harness, and the baselines that make a score mean something.
 npm run build
 npm run eval              # local MiniLM, ~23MB model download on first run
 npm run eval:hash         # no download; measures far less, see below
+npm run eval:sweep        # vector mix from 0.0 to 1.0
+npm run eval:check        # static checks on the data; no model, no search
 node eval/run.mjs --json  # machine-readable
 ```
+
+Flags for `eval/run.mjs`: `--original` (the first 51 documents and their 30
+queries only), `--split dev|test`, `--sweep`, `--shuffle-dates <seed>` and
+`--shuffle-importance <seed>` (controls, explained below).
 
 ## What it measures
 
@@ -30,10 +36,139 @@ node eval/run.mjs --json  # machine-readable
 Queries are grouped by what they test: **temporal** (an older answer reads as
 correct, only the newer one still holds — the only queries that exercise
 recency), **hard-negative** (two near-identical memories differing in one
-load-bearing detail), and **paraphrase** (reworded so keyword overlap does not
-carry the answer). A separate **unanswerable** set has no correct answer.
+load-bearing detail), **paraphrase** (reworded so keyword overlap does not
+carry the answer), **exact-term** (the query is or contains an identifier that
+is verbatim in the answer: a ticket number, an error code, a name) and
+**mixed** (an ordinary question that names one thing and paraphrases the
+rest). A separate **unanswerable** set has no correct answer.
+
+Every answerable query is on one side of a **dev/test split** (alternating
+within its kind). A weight is chosen on dev and reported on test.
 
 ## Current results
+
+### 2026-11: a larger corpus, and the keyword share measured
+
+The first corpus could not say whether keyword matching earns its 30% of
+relevance: every one of its queries avoids its answer's wording, so on it
+vector-only search won (96.2 against 91.0). `corpus-2.mjs` and `gold-2.mjs`
+add what was missing. The set is now **175 documents and 144 answerable
+queries** (12 unanswerable), was 51 and 26:
+
+- identifiers of every kind, many with a near-miss elsewhere in the corpus
+  (`INC-2291` / `INC-2219`), and the two new query kinds that use them;
+- five decision pairs that are the same sentences with one value changed, so
+  only their dates can separate them (caveat 4 below);
+- six daily logs long enough to be two chunks each, with the answer in one
+  entry. Every older document is a single chunk;
+- some personal notes next to the logistics company.
+
+The new data was committed before any sweep was run on it. Local MiniLM,
+all 144 queries:
+
+```
+  configuration           nDCG@10   R@20    MRR  stale
+  shipped default            82.6   97.2   78.9      3
+  keyword only               64.6   79.5   63.3      9
+  vector only                75.2   95.5   71.7      5
+  hybrid, no priors          78.5   97.9   75.0      7
+  recency, no importance     82.1   97.9   78.6      3
+  importance, no recency     80.4   96.5   77.4      6
+  priors only                 6.8   24.7    4.8      1
+
+  nDCG@10 by query kind     temporal  hard-negative  paraphrase  exact-term  mixed
+  shipped default               89.3           78.9        67.9        92.8   95.2
+  keyword only                  46.4           63.7        29.9        98.8   89.0
+  vector only                   88.9           75.4        70.1        69.9   85.7
+  hybrid, no priors             76.5           75.5        65.3        89.6   90.1
+```
+
+The sweep (`npm run eval:sweep`), with the shipped priors:
+
+```
+  vector mix  nDCG@10    MRR   R@20  temporal  hard-negative  paraphrase  exact-term  mixed
+  0.0            65.5   64.3   81.6      66.2           64.3        27.0        98.6   91.5
+  0.5            78.2   75.4   93.8      83.6           73.8        53.6        98.6   96.4
+  0.6            80.5   76.7   96.5      87.9           73.1        61.7        96.2   95.2
+  0.7            82.6   78.9   97.2      89.3           78.9        67.9        92.8   95.2   <- shipped
+  0.8            83.2   79.5   98.6      90.6           78.8        72.2        90.4   93.3
+  0.9            81.5   77.9   98.6      91.3           75.4        73.0        85.4   91.6
+  1.0            78.6   75.0   97.2      87.6           75.6        72.6        76.8   89.6
+```
+
+#### What this establishes
+
+**The hybrid beats both of its halves.** Against the shipped 0.7, keywords
+alone lose 17.1 points and vectors alone (mix 1.0) lose 4.0 (95% interval
+−7.8 to −0.3, paired bootstrap over the 144 queries). The first corpus's
+"vector only is better" came from its queries and its size: its own 26
+queries, searched in the larger corpus with the shipped priors, score 86.5
+at mix 0.7 and 86.1 at 1.0.
+
+**The vector mix stays at 0.7.** The dev half picks 0.8 (82.5 against 81.8)
+and the test half agrees in direction (83.9 against 83.5), but over all
+queries the difference is +0.6 with an interval of −1.1 to +2.2: not
+distinguishable from none. Without priors it is +1.4 (−0.4 to +3.4). What
+is distinguishable: 0.6 is worse than 0.7 (−2.1, interval −4.0 to −0.4), and
+so is 0.5 (−4.4). The trade between 0.7 and 0.8 is plain in the table:
+paraphrase gains 4.3, exact-term loses 2.4. It is a choice between kinds of
+query, and nothing here says which kind real use has more of.
+
+**Long files are harder, and lean on keywords.** Queries whose answer is in a
+two-chunk daily log score 73.1 at the default; the rest score 84.7. For
+those queries moving to 0.8 costs 2.3 points and vectors alone cost 9.6. The
+chunker cuts every 1,600 characters wherever that falls, so one chunk of a
+daily log holds six or seven unrelated entries and its vector is their
+average. Cutting daily logs at entry headings is the obvious thing to try
+next; it is not measured here.
+
+#### What this does NOT establish: the priors
+
+As written, the corpus makes the priors look good: the shipped default is
+4.1 points above "hybrid, no priors" (interval 1.4 to 6.9). Most of that is
+an accident of authorship. The documents a query cites are on average 67
+days newer than the rest (mean age 101 days against 168) and slightly more
+important (0.54 against 0.51), so preferring new and important documents
+scores well whatever is asked. Two controls deal those values out again at
+random (dates among every document that is not half of a temporal pair);
+means of five seeds:
+
+```
+                            shipped default  hybrid, no priors  temporal (default)
+  as written                           82.6               78.5                89.3
+  dates shuffled                       77.0               78.5                90.4
+  importance shuffled                  81.2               78.5                87.0
+  both shuffled                        76.6               78.5                88.7
+```
+
+- **Recency does its job and has a price.** On the temporal queries the
+  default scores about 90 with or without the shuffle, against 76.5 with no
+  priors, and on the five date-only pairs it ranks the newer document first
+  five times out of five (two out of five without priors). On every other
+  kind, once dates carry no other information, it costs about 2.7 points,
+  and 1.5 over all queries. Whether it is a net gain in a real store depends
+  on whether people ask about recent things more often than old ones. That
+  is likely, and a synthetic corpus cannot measure it.
+- **Importance is still unmeasured.** Alone it adds 1.9 as written and 0.3
+  with its values shuffled. The values are invented (caveat 3), so neither
+  number says what a real importance signal is worth.
+
+The weights stay at 0.1 / 0.1. This corpus gives no reason to raise them,
+and none to drop them.
+
+#### Also
+
+- **Abstention is still impossible.** Mean top score is 0.449 for answerable
+  queries and 0.322 for unanswerable ones, with overlapping ranges. Several
+  of the new unanswerable queries are identifiers that exist nowhere
+  (`INC-3051`).
+- **Recall@20 is no longer free**: keyword-only reaches 79.5.
+- **With the hash provider** (`npm run eval:hash`, no model) the shipped
+  default scores 65.5 on this set. As before, that number is not comparable
+  with the MiniLM ones.
+- **Paraphrase is the weak kind** (67.9), far below the first corpus's 93.8.
+  The corpus is larger and its paraphrases are harder; the five worst
+  queries at the default are all printed by `npm run eval`.
 
 ### 2026-11: the 0.3.x default measured with MiniLM
 
@@ -192,7 +327,9 @@ verdict. Read these before quoting any number:
    treated as provisional until it is reproduced on a corpus this project did
    not author — LongMemEval or similar, which is phase 3.
 
-2. **The paraphrase rule is structurally hostile to BM25.** Queries were
+2. **The paraphrase rule is structurally hostile to BM25.** (Since 2026-11
+   the exact-term and mixed queries give keywords a fair test; this caveat
+   stands for the paraphrase kind and for every table older than that.) Queries were
    deliberately written to avoid the answer's wording, because a query sharing
    surface tokens with its answer teaches nothing about the vector half. That
    choice is right for testing semantics and it means `keyword only` (53.8) is
@@ -207,13 +344,16 @@ verdict. Read these before quoting any number:
    right; it can only tell you the weight is not free.
 
 4. **The temporal queries do not isolate recency as cleanly as intended.**
+   (Since 2026-11 five date-only pairs do; this describes the older ones.)
    `vector only` scores 100.0 on them with recency switched off entirely,
    because the superseding documents also happen to be the more semantically
    on-point ones — a memory that says "reversing the earlier decision" matches
    "what did we settle on" on content alone. A sharper temporal set would use
    pairs that are semantically indistinguishable and differ only in date.
 
-5. **The corpus is small.** At 51 documents, Recall@20 is nearly free — most
+5. **The corpus is small.** (175 documents since 2026-11, which is still
+   small: one query moving one rank moves nDCG@10 by up to 0.7.) At 51
+   documents, Recall@20 is nearly free — most
    configurations score 100 because 20 slots over 51 documents is not a
    selective filter. Growing the corpus is the single highest-value improvement
    to this harness, and it is why the recall column is currently uninformative.
@@ -221,6 +361,14 @@ verdict. Read these before quoting any number:
 6. **One provider, one run.** Scores from different embedding providers are not
    comparable and must never appear in the same table. The provider is printed
    with every result for this reason.
+
+7. **Answers are newer than the rest of the corpus.** See "What this does NOT
+   establish: the priors" above, and use `--shuffle-dates` before crediting
+   recency with anything.
+
+8. **The dev/test split is not an independent test.** Both halves were written
+   by the same author in the same sitting. It guards against fitting a weight
+   to particular queries, not against the corpus being unrepresentative.
 
 ## Method
 
@@ -239,12 +387,17 @@ verdict. Read these before quoting any number:
 These are the rules the queries were written to, and the reason to trust the
 set as far as it goes:
 
-1. **Paraphrase every query.** No query reuses its answer's distinctive wording.
+1. **Paraphrase every query** of the paraphrase, temporal and hard-negative
+   kinds. No such query reuses its answer's distinctive wording.
+   `npm run eval:check` prints the content words each one shares with its
+   answer. Exact-term queries do the opposite on purpose: their term must be
+   verbatim in every relevant document, and the check enforces it.
 2. **Plant hard negatives.** Where two memories cover one topic, the query
    targets the detail that separates them.
 3. **Include temporal pairs.** Two plausible answers, only the newer true.
 4. **Label before tuning.** The gold set was frozen before any configuration was
-   swept, so the weights cannot be fitted to answers adjusted afterwards.
+   swept, so the weights cannot be fitted to answers adjusted afterwards. The
+   2026-11 additions were committed on their own, before their first sweep.
 5. **Report the failures.** The harness prints its five worst queries every run.
    A benchmark with no visible failures is one nobody should believe.
 
@@ -254,6 +407,10 @@ This is deliberate. The default provider downloads a ~23MB model on a cold
 cache, which is a poor fit for every pull request. `npm run eval:hash` runs
 without any download but substitutes the n-gram fallback for real embeddings,
 which changes what is being measured rather than merely making it cheaper.
+
+What does run in CI is `eval/check.mjs`, through
+`src/__tests__/eval_data.test.ts`: it needs no model, and it catches a query
+citing a document that was renamed or an exact term edited out of its answer.
 
 Gating merges on nDCG@10 and Recall@20 floors is phase 3, and should wait until
 the corpus is large enough for those numbers to be stable.

@@ -11,6 +11,16 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
+### Changed
+
+- **Retrieval eval: 175 documents and 144 queries** (was 51 and 26), adding
+  exact-term and mixed queries, date-only decision pairs, long daily logs, a
+  dev/test split and a vector-mix sweep (`npm run eval:sweep`). No default
+  changed: the 0.7 / 0.3 vector/keyword split is within noise of the best
+  setting, and keywords alone or vectors alone are clearly worse. The recency
+  and importance weights could not be validated on a synthetic corpus; the
+  eval README says why and what the controls show.
+
 ## [0.3.1] — 2026-11-12
 
 The first npm release since 0.2.1. It includes 0.3.0, which was never

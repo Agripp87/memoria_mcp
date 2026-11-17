@@ -13,6 +13,11 @@
  *   npm run build && node eval/run.mjs              # default: local MiniLM
  *   node eval/run.mjs --hash                        # no model download
  *   node eval/run.mjs --json                        # machine-readable
+ *   node eval/run.mjs --original                    # the first 51 documents only
+ *   node eval/run.mjs --split dev                   # dev or test queries only
+ *   node eval/run.mjs --sweep [--split dev]         # vector mix 0.0 to 1.0
+ *   node eval/run.mjs --shuffle-dates 1             # control: see below
+ *   node eval/run.mjs --shuffle-importance 1        # control: see below
  *
  * Notes on method, because a benchmark's credibility is its method:
  *
@@ -33,10 +38,74 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { CORPUS } from "./corpus.mjs";
-import { GOLD, ANSWERABLE, UNANSWERABLE } from "./gold.mjs";
+import { loadDataset, KINDS } from "./dataset.mjs";
 
 const AS_JSON = process.argv.includes("--json");
+const SWEEP = process.argv.includes("--sweep");
+const splitAt = process.argv.indexOf("--split");
+const SPLIT = splitAt === -1 ? null : process.argv[splitAt + 1];
+if (SPLIT !== null && SPLIT !== "dev" && SPLIT !== "test") {
+  process.stderr.write("--split takes dev or test\n");
+  process.exit(2);
+}
+
+// --original is the 51-document corpus and its 30 queries, exactly as every
+// number published before 2026-11 was measured.
+const DATA = loadDataset(process.argv.includes("--original") ? "original" : "full");
+// --shuffle-dates <seed> is a control for the recency weight. Documents a
+// query cites are, on average, newer than the rest of the corpus, so recency
+// can score well just by preferring new documents. The control deals the
+// dates out again at random among every document that is not half of a
+// temporal pair. What recency still gains then, it gains on the temporal
+// pairs, where it is supposed to.
+const seedOf = (flag) => {
+  const at = process.argv.indexOf(flag);
+  return at === -1 ? null : Number(process.argv[at + 1] ?? 1);
+};
+const SHUFFLE_SEED = seedOf("--shuffle-dates");
+// The same control for the importance weight: importance values are invented
+// (caveat 3), and the cited documents happen to average slightly higher.
+const SHUFFLE_IMPORTANCE_SEED = seedOf("--shuffle-importance");
+let CORPUS = SHUFFLE_SEED === null ? DATA.corpus : shuffledDates(DATA, SHUFFLE_SEED);
+if (SHUFFLE_IMPORTANCE_SEED !== null) {
+  const values = shuffled(
+    CORPUS.map((m) => m.importance),
+    SHUFFLE_IMPORTANCE_SEED,
+  );
+  CORPUS = CORPUS.map((m, i) => ({ ...m, importance: values[i] }));
+}
+
+function shuffled(values, seed) {
+  const out = [...values];
+  let state = Math.imul(seed, 2654435761) >>> 0 || 1;
+  const rnd = () => (state = (Math.imul(state, 1103515245) + 12345) >>> 0) / 4294967296;
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+function shuffledDates(data, seed) {
+  const fixed = new Set(
+    data.gold
+      .filter((g) => g.kind === "temporal")
+      .flatMap((g) => [...g.relevant, ...(g.stale ?? [])]),
+  );
+  const free = data.corpus.filter((m) => !fixed.has(m.id));
+  const days = shuffled(
+    free.map((m) => m.day),
+    seed,
+  );
+  const dealt = new Map(free.map((m, i) => [m.id, days[i]]));
+  return data.corpus.map((m) => (dealt.has(m.id) ? { ...m, day: dealt.get(m.id) } : m));
+}
+
+// A split leaves the unanswerable queries in: they are not scored for
+// ranking, only for the abstention figures.
+const GOLD = DATA.gold.filter((g) => !SPLIT || g.kind === "unanswerable" || g.split === SPLIT);
+const ANSWERABLE = GOLD.filter((g) => g.kind !== "unanswerable");
+const UNANSWERABLE = GOLD.filter((g) => g.kind === "unanswerable");
 
 // Default to the local model: deterministic, needs no API key, and unlike the
 // hash fallback it actually exercises the vector half of the formula.
@@ -157,6 +226,18 @@ const CONFIGS = [
     vectorMix: 0.7,
   },
   {
+    name: "recency, no importance",
+    note: "0.1/0/0.9 — what the recency prior is worth alone",
+    weights: { recency: 0.1, importance: 0, relevance: 0.9 },
+    vectorMix: 0.7,
+  },
+  {
+    name: "importance, no recency",
+    note: "0/0.1/0.9 — what the importance prior is worth alone",
+    weights: { recency: 0, importance: 0.1, relevance: 0.9 },
+    vectorMix: 0.7,
+  },
+  {
     name: "priors only",
     note: "recency+importance, no relevance — sanity floor",
     weights: { recency: 0.4, importance: 0.6, relevance: 0 },
@@ -178,7 +259,10 @@ async function evaluate(config) {
     const results = await store.search(g.q, K_RECALL, config.weights, config.vectorMix);
     latencies.push(performance.now() - t0);
 
-    const ranked = results.map((r) => idFromFile(r.file));
+    // Results are chunks, and a long file has several: keep each file once,
+    // at its best rank. (Every document in the original corpus is one chunk,
+    // so this changes nothing there.)
+    const ranked = [...new Set(results.map((r) => idFromFile(r.file)))];
     const topScore = results.length ? Number(results[0].score ?? 0) : 0;
 
     if (g.kind === "unanswerable") {
@@ -206,7 +290,7 @@ async function evaluate(config) {
   }
 
   const byKind = {};
-  for (const kind of ["temporal", "hard-negative", "paraphrase"]) {
+  for (const kind of KINDS) {
     const rows = perQuery.filter((r) => r.kind === kind);
     if (rows.length) byKind[kind] = mean(rows.map((r) => r.ndcg));
   }
@@ -229,14 +313,83 @@ async function evaluate(config) {
         Math.min(...answerableTopScores) > Math.max(...unanswerableTopScores) ? "yes" : "no",
     },
     worst: [...perQuery].sort((a, b) => a.ndcg - b.ndcg).slice(0, 5),
+    perQuery,
   };
+}
+
+// ─── Sweep ────────────────────────────────────────────────────────────────
+// One question: how should relevance be split between vector cosine and the
+// keyword score? Run it on --split dev, pick, then read the pick on test.
+if (SWEEP) {
+  const kinds = KINDS.filter((k) => ANSWERABLE.some((g) => g.kind === k));
+  const pct = (x) => (x == null ? "  -  " : (x * 100).toFixed(1).padStart(5));
+  const rows = [];
+  for (const priors of [true, false]) {
+    for (let step = 0; step <= 10; step++) {
+      const vectorMix = step / 10;
+      const r = await evaluate({
+        name: `mix ${vectorMix.toFixed(1)}`,
+        weights: priors
+          ? { recency: 0.1, importance: 0.1, relevance: 0.8 }
+          : { recency: 0, importance: 0, relevance: 1 },
+        vectorMix,
+      });
+      rows.push({
+        priors,
+        vectorMix,
+        ndcg: r.ndcg,
+        mrr: r.mrr,
+        recall: r.recall,
+        byKind: r.byKind,
+        // Per query, so two mixes can be compared pairwise (--json only).
+        perQuery: r.perQuery.map((x) => ({ q: x.q, kind: x.kind, ndcg: x.ndcg, rr: x.rr })),
+      });
+    }
+  }
+  if (AS_JSON) {
+    process.stdout.write(
+      JSON.stringify({ provider: getProvider(), split: SPLIT ?? "all", set: DATA.set, rows }) +
+        "\n",
+    );
+  } else {
+    process.stdout.write(
+      `\nVector-mix sweep: ${getProvider()}, ${DATA.set} corpus (${CORPUS.length} documents), ` +
+        `${ANSWERABLE.length} queries (${SPLIT ?? "all"})\n`,
+    );
+    for (const priors of [true, false]) {
+      process.stdout.write(
+        `\n  ${priors ? "priors 0.1 / 0.1 (shipped)" : "no priors"}\n` +
+          `  ${"vector mix".padEnd(10)} ${"nDCG@10".padStart(8)} ${"MRR".padStart(6)} ${"R@20".padStart(6)}` +
+          `${kinds.map((k) => k.padStart(14)).join("")}\n`,
+      );
+      for (const r of rows.filter((x) => x.priors === priors)) {
+        process.stdout.write(
+          `  ${r.vectorMix.toFixed(1).padEnd(10)} ${pct(r.ndcg).padStart(8)} ${pct(r.mrr).padStart(6)} ` +
+            `${pct(r.recall).padStart(6)}${kinds.map((k) => pct(r.byKind[k]).padStart(14)).join("")}\n`,
+        );
+      }
+    }
+    process.stdout.write("\n");
+  }
+  store.close();
+  fs.rmSync(ROOT, { recursive: true, force: true });
+  process.exit(0);
 }
 
 const results = [];
 for (const c of CONFIGS) results.push(await evaluate(c));
 
 // ─── Report ───────────────────────────────────────────────────────────────
+const CONTROL =
+  (SHUFFLE_SEED === null ? "" : `, dates shuffled (seed ${SHUFFLE_SEED})`) +
+  (SHUFFLE_IMPORTANCE_SEED === null
+    ? ""
+    : `, importance shuffled (seed ${SHUFFLE_IMPORTANCE_SEED})`);
 const meta = {
+  set: DATA.set,
+  shuffledDates: SHUFFLE_SEED,
+  shuffledImportance: SHUFFLE_IMPORTANCE_SEED,
+  split: SPLIT ?? "all",
   provider: getProvider(),
   dimension: getDimension(),
   documents: CORPUS.length,
@@ -247,22 +400,29 @@ const meta = {
 };
 
 if (AS_JSON) {
-  process.stdout.write(JSON.stringify({ meta, results }, null, 2) + "\n");
+  // perQuery is for the sweep's pairwise comparison; the report keeps `worst`.
+  const slim = results.map((r) => {
+    const copy = { ...r };
+    delete copy.perQuery;
+    return copy;
+  });
+  process.stdout.write(JSON.stringify({ meta, results: slim }, null, 2) + "\n");
 } else {
   const pct = (x) => (x == null ? "  -  " : (x * 100).toFixed(1).padStart(5));
   process.stdout.write(
     `\nMemoria retrieval eval\n` +
       `  provider   ${meta.provider} (${meta.dimension}d)\n` +
-      `  corpus     ${meta.documents} documents (${meta.cited} cited by a query, ${meta.distractors} pure distractors)\n` +
-      `  queries    ${meta.queries} answerable, ${meta.unanswerable} unanswerable\n\n`,
+      `  corpus     ${meta.set}${CONTROL}: ${meta.documents} documents (${meta.cited} cited by a query, ${meta.distractors} pure distractors)\n` +
+      `  queries    ${meta.queries} answerable, ${meta.unanswerable} unanswerable` +
+      `${SPLIT ? ` (${SPLIT} split)` : ""}\n\n`,
   );
   process.stdout.write(
-    `  ${"configuration".padEnd(20)} ${"nDCG@10".padStart(7)} ${"R@20".padStart(6)} ${"MRR".padStart(6)} ${"p95ms".padStart(6)}  stale\n` +
-      `  ${"-".repeat(20)} ${"-".repeat(7)} ${"-".repeat(6)} ${"-".repeat(6)} ${"-".repeat(6)}  -----\n`,
+    `  ${"configuration".padEnd(23)} ${"nDCG@10".padStart(7)} ${"R@20".padStart(6)} ${"MRR".padStart(6)} ${"p95ms".padStart(6)}  stale\n` +
+      `  ${"-".repeat(23)} ${"-".repeat(7)} ${"-".repeat(6)} ${"-".repeat(6)} ${"-".repeat(6)}  -----\n`,
   );
   for (const r of results) {
     process.stdout.write(
-      `  ${r.config.padEnd(20)} ${pct(r.ndcg).padStart(7)} ${pct(r.recall).padStart(6)} ` +
+      `  ${r.config.padEnd(23)} ${pct(r.ndcg).padStart(7)} ${pct(r.recall).padStart(6)} ` +
         `${pct(r.mrr).padStart(6)} ${r.p95.toFixed(0).padStart(6)}  ${String(r.staleWins).padStart(5)}\n`,
     );
   }
@@ -272,12 +432,12 @@ if (AS_JSON) {
   // question each weight exists to answer. "temporal" is the only column that
   // tests recency: if a configuration with recency switched off also wins
   // there, the recency weight is not earning its place.
-  const kinds = ["temporal", "hard-negative", "paraphrase"];
+  const kinds = KINDS.filter((k) => ANSWERABLE.some((g) => g.kind === k));
   process.stdout.write(`\n  nDCG@10 by query kind:\n`);
-  process.stdout.write(`  ${"".padEnd(20)} ${kinds.map((k) => k.padStart(14)).join("")}\n`);
+  process.stdout.write(`  ${"".padEnd(23)} ${kinds.map((k) => k.padStart(14)).join("")}\n`);
   for (const r of results) {
     process.stdout.write(
-      `  ${r.config.padEnd(20)} ${kinds.map((k) => pct(r.byKind[k]).padStart(14)).join("")}\n`,
+      `  ${r.config.padEnd(23)} ${kinds.map((k) => pct(r.byKind[k]).padStart(14)).join("")}\n`,
     );
   }
 
