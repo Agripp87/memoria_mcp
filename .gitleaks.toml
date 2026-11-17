@@ -15,6 +15,12 @@ regexes = [
   # privacy tier re-classifier REDACTS secrets (the test exists because of this
   # pattern). Not a credential.
   '''sk-abcdEFGH1234ijklMNOP5678''',
+  # mcp-server/eval: ids of two fictional documents in the retrieval eval
+  # ("Shipper API v1 is switched off", "Shipper API v2 stays"). The
+  # generic-api-key rule fires on the word "API" next to a quoted id in
+  # gold-2.mjs. They are file names, not credentials.
+  '''proj-api-v1-sunset''',
+  '''proj-api-v2-stays''',
 ]
 paths = [
   # Demo data generator emits realistic-looking fake content (the "Alex Rivera" persona)
