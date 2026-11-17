@@ -1,6 +1,6 @@
 # @agrippa87/memoria-mcp
 
-**Persistent, plain-text memory for Claude over MCP — a Markdown repo you own.**
+**Persistent, plain-text memory for Claude — as a Markdown repo you own.**
 
 Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude
 Code, claude.ai and any other MCP client a shared long-term memory. Memories are

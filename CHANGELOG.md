@@ -11,6 +11,14 @@ existing store gets a migration note here.
 
 ## [Unreleased]
 
+### Changed
+
+- **One description everywhere.** npm, the Claude Code plugin, its
+  marketplace entry and the MCP Registry now open with the README's
+  one-liner; they had drifted into four wordings. A test keeps them, and
+  the hand-bumped version strings, in step. The README's "Recent updates"
+  section moved below the reference sections, so Quick Start comes sooner.
+
 ## [0.3.2] — 2026-11-17
 
 Daily logs are indexed one entry at a time, which is what makes an answer
