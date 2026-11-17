@@ -9,6 +9,7 @@
 // "js-yaml"` still type-checks — then fails at link time in real Node with
 // "does not provide an export named 'default'", so the server would not start.
 import { CORE_SCHEMA, boolYaml11Tag, load } from "js-yaml";
+import { DAILY_ENTRY_HEADING_SRC } from "./daily-format.js";
 
 /**
  * Schema for READING frontmatter: YAML 1.2 core. Dates stay strings, and
@@ -103,17 +104,34 @@ export function parseFrontmatter(content: string): {
   return { metadata, body: match[2] };
 }
 
+const DAILY_ENTRY_HEADING = new RegExp(DAILY_ENTRY_HEADING_SRC, "m");
+
 /**
- * Split markdown content into overlapping chunks.
+ * Whether text holds a daily-log entry heading ("## 14:05 UTC — email").
+ * Such files are chunked one entry at a time; see chunkMarkdown.
+ */
+export function hasDailyEntryHeading(text: string): boolean {
+  return DAILY_ENTRY_HEADING.test(text);
+}
+
+/**
+ * Split markdown content into chunks.
+ *
+ * A file is cut every TARGET_CHARS with an overlap, wherever that falls.
+ * That is fine for a note about one thing. A daily log is a list of
+ * unrelated entries, and a 1,600-character window over it holds six or
+ * seven of them: its vector is their average and matches none of them
+ * well. On the retrieval eval, queries answered by one entry of a daily
+ * log scored 42 nDCG@10 that way and 82 with one chunk per entry (dates
+ * shuffled; eval/README.md).
+ *
+ * So a file with at least one daily entry heading is cut at its "## "
+ * headings instead: each entry is its own chunk, with no overlap. An entry
+ * longer than TARGET_CHARS is cut by size within itself.
  */
 export function chunkMarkdown(content: string, filePath: string): Chunk[] {
   const { body } = parseFrontmatter(content);
   const lines = body.split("\n");
-  const chunks: Chunk[] = [];
-
-  let currentChunk = "";
-  let chunkStartLine = 1;
-  let lineNum = 0;
 
   // Count newlines in the frontmatter region (not split-segments). Using
   // .split("\n").length over-counts by 1 for any string with content after
@@ -125,6 +143,47 @@ export function chunkMarkdown(content: string, filePath: string): Chunk[] {
   const normalized = content.replace(/^\ufeff/, "").replace(/\r\n/g, "\n");
   const frontmatterMatch = normalized.match(/^---\n[\s\S]*?\n---\n?/);
   const frontmatterLines = frontmatterMatch ? (frontmatterMatch[0].match(/\n/g) || []).length : 0;
+
+  if (!hasDailyEntryHeading(body)) {
+    return chunkBySize(lines, 0, filePath, frontmatterLines);
+  }
+
+  // Sections: the lines before the first "## " heading, then one per
+  // heading. Every "## " heading starts a section, not only the entry
+  // headings, as the daily-log parsers end an entry at the next "\n## ".
+  const starts: number[] = [];
+  lines.forEach((line, i) => {
+    if (line.startsWith("## ")) starts.push(i);
+  });
+  const bounds = [0, ...starts.filter((i) => i > 0), lines.length];
+  const chunks: Chunk[] = [];
+  for (let b = 0; b < bounds.length - 1; b++) {
+    const from = bounds[b];
+    const section = lines.slice(from, bounds[b + 1]);
+    // The part before the first entry is usually the log's title and
+    // nothing else. A heading alone is not worth a vector.
+    if (!section.some((line) => line.trim() !== "" && !/^#{1,6}\s/.test(line))) continue;
+    chunks.push(...chunkBySize(section, from, filePath, frontmatterLines));
+  }
+  return chunks;
+}
+
+/**
+ * Cut lines into chunks of about TARGET_CHARS with OVERLAP_CHARS of overlap.
+ * `offset` is the index of lines[0] in the file's body; line numbers in the
+ * result count from the top of the file.
+ */
+function chunkBySize(
+  lines: string[],
+  offset: number,
+  filePath: string,
+  frontmatterLines: number,
+): Chunk[] {
+  const chunks: Chunk[] = [];
+
+  let currentChunk = "";
+  let chunkStartLine = offset + 1;
+  let lineNum = offset;
 
   // A single line longer than a chunk (pasted logs, minified JSON, a long
   // paragraph without breaks) used to become one oversized chunk, which an

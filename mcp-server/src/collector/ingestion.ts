@@ -93,6 +93,9 @@ const RECENT_DEDUP_WINDOW_MS = 26 * 60 * 60_000; // 26 hours
 const DEDUP_SIDECAR = ".ingest-dedup.json"; // stored under the data dir
 const DEDUP_MAX_ENTRIES = 20_000;
 
+/** Text as the duplicate check compares it: case and whitespace do not count. */
+const comparableText = (text: string): string => text.toLowerCase().replace(/\s+/g, " ").trim();
+
 // ── Ingestion Pipeline ─────────────────────────────────────
 
 export class IngestionPipeline {
@@ -401,9 +404,23 @@ export class IngestionPipeline {
       const skipThreshold = getProvider() === "openai" ? DEDUP_SIMILARITY_THRESHOLD : 0.95;
       // searchMemories returns relevance in `score`, but results are ordered by
       // the combined three-signal score — so the most-relevant match may not be
-      // similar[0]. Gate on the max relevance across the returned set.
-      const maxRelevance = Math.max(...similar.map((s) => s.score));
-      if (maxRelevance >= skipThreshold) {
+      // similar[0]. Every returned match is checked.
+      //
+      // A high score alone is not "already captured". It also has to hold
+      // this event's text. Two invoice emails that differ in the invoice
+      // number score 0.93 against each other once each log entry is its own
+      // chunk, and 0.94 when they are identical: no threshold separates a
+      // repeat from a new event of the same shape, and skipping the second
+      // invoice loses it. (Before entries were chunked one by one, a chunk
+      // held six or seven of them and almost nothing scored this high, so
+      // the check rarely fired at all.) An event longer than a chunk is
+      // therefore never skipped here; Stage 3 still catches its exact repeat.
+      const wanted = comparableText(event.content);
+      const captured = similar.some(
+        (s) =>
+          s.score >= skipThreshold && wanted !== "" && comparableText(s.content).includes(wanted),
+      );
+      if (captured) {
         return { type: "skip" };
       }
 
