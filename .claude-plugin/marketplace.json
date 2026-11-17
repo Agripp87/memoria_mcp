@@ -1,6 +1,6 @@
 {
   "name": "memoria",
-  "description": "Memoria — persistent, plain-text memory for Claude, as a Markdown repo you own.",
+  "description": "Persistent, plain-text memory for Claude — as a Markdown repo you own.",
   "owner": {
     "name": "Agripp87",
     "url": "https://github.com/Agripp87"
@@ -10,7 +10,7 @@
       "name": "memoria",
       "source": ".",
       "displayName": "Memoria",
-      "description": "Persistent, plain-text memory for Claude — Markdown files you own, hybrid semantic + keyword search, and optional git sync across devices.",
+      "description": "Persistent, plain-text memory for Claude — as a Markdown repo you own. Hybrid semantic + keyword search, and optional git sync across devices.",
       "version": "0.3.2",
       "author": {
         "name": "Agripp87"

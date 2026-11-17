@@ -18,61 +18,7 @@ Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Co
 - **Spec-complete remote transport.** OAuth 2.1 with PKCE, client credentials, dynamic client registration and metadata discovery — works as a claude.ai custom connector out of the box.
 - **Honest about search.** Three embedding providers (local MiniLM → n-gram fallback, plus OpenAI as an explicit opt-in), three-signal scoring, and every result reports its scan coverage.
 
-## Recent updates — 0.3.0 to 0.3.2: security hardening and relevance-led search
-
-**0.3.2** indexes daily logs one entry per chunk, so an answer inside a long
-log is found (`memory_daily` now writes each entry under a time heading).
-Daily logs are re-embedded once, in the background, at the first start.
-
-A whole-repo review, and a critical re-review after it, hardened the
-server, the collector, and the sync scripts; 0.3.1 fixes what a second
-review of 0.3.0 found. Full details are in [CHANGELOG.md](CHANGELOG.md)
-and [SECURITY.md](SECURITY.md). In 0.3.1, custom sources need their
-consent given once more in the dashboard, and the dashboard's Sources
-tab works only in the server that opened the store first. The 0.3.0
-changes most likely to affect you:
-
-- **Search ranks by relevance first.** Default weights are now
-  `0.8·relevance + 0.1·recency + 0.1·importance` (were 0.5/0.2/0.3), and
-  recency comes from each memory's own `updated` date rather than from when
-  it was indexed. The index is rebuilt once on first start.
-- **Keyword search matches any query word** (BM25 still ranks chunks that
-  match more of them first), instead of requiring every word.
-- **MCP callers can only change a source's schedule.** Hosts, credentials,
-  paths and labels change in the dashboard, so a prompt-injected agent
-  cannot point a consented source (and its stored password) elsewhere.
-
-- **Collector consent is dashboard-only.** The `memory_sources` `agree`
-  action was removed: an MCP caller (including a prompt-injected one) can
-  no longer consent on your behalf. Grant consent in the dashboard's
-  Sources tab, then enable the source as before.
-- **Remote embeddings are opt-in.** Setting `OPENAI_API_KEY` no longer
-  sends memory content and search queries to OpenAI by itself; only
-  `MEMORIA_EMBEDDINGS=openai` does. `auto` now stays on this device.
-- **One collector per store, any number of sessions.** Each Claude Code
-  window or Claude Desktop session starts its own server on the same
-  store. The first holds the store lock and runs the collector and
-  scheduled maintenance; the others run as secondaries that search, read
-  and write the same memories, and take over when the first exits. A
-  stdio server exits when its client goes away, so it never holds the lock
-  for a session that is gone.
-- **Sync scripts are safer.** The pull hook executes a mirror script from
-  inside the synced store only with `MEMORIA_SYNC_ALLOW_STORE_MIRROR=true`,
-  and `sync-from-claude-memory.sh` overwrites only newer files, backing up
-  whatever it replaces (`--dry-run` previews changes).
-- **Pinned, bounded, encrypted.** On-demand adapter installs use exact
-  pinned versions, tool inputs (`days`, `batch_size`, query length, …)
-  are bounded, and the provenance archive stores content encrypted rather
-  than plaintext. Optional: `MEMORIA_AUTHORIZE_REQUIRE_APPROVAL=true`
-  requires the API key, or a dashboard login plus a click on a consent
-  page, before `/authorize` issues a code, and disables the
-  `client_credentials` grant. docker-compose now
-  also requires `MEMORIA_PUBLIC_URL` in `.env` (the `.env.example`
-  localhost value covers purely local use).
-
-Under the hood, the collector daemon gained a dedicated test suite (which
-also caught that its first poll on startup never ran — now fixed), and
-behavioural tests now cover the sync scripts and the Python ingestion hook.
+Upgrading from an earlier version? See [Recent updates](#recent-updates) and the [CHANGELOG](CHANGELOG.md).
 
 ## Architecture
 
@@ -896,6 +842,63 @@ These are the known open items after the October 2026 review; [issues](https://g
 - **No graph database**: Flat files with vector search and a `related` field provide 90% of graph benefits at 10% of the complexity.
 - **Compiled knowledge** (inspired by [Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)): Good query results are filed back as core memories via `memory_compile`, so investigations compound rather than disappearing into chat history. The `memory_lint` tool proactively catches contradictions, orphans, and knowledge gaps — maintaining the memory store like a wiki, not a write-only log.
 - **Dual transport**: stdio for Claude Code (zero latency), Streamable HTTP/SSE with OAuth 2.1 for claude.ai and other remote clients.
+
+## Recent updates
+
+What changed in 0.3.0 to 0.3.2, for anyone upgrading.
+
+**0.3.2** indexes daily logs one entry per chunk, so an answer inside a long
+log is found (`memory_daily` now writes each entry under a time heading).
+Daily logs are re-embedded once, in the background, at the first start.
+
+A whole-repo review, and a critical re-review after it, hardened the
+server, the collector, and the sync scripts; 0.3.1 fixes what a second
+review of 0.3.0 found. Full details are in [CHANGELOG.md](CHANGELOG.md)
+and [SECURITY.md](SECURITY.md). In 0.3.1, custom sources need their
+consent given once more in the dashboard, and the dashboard's Sources
+tab works only in the server that opened the store first. The 0.3.0
+changes most likely to affect you:
+
+- **Search ranks by relevance first.** Default weights are now
+  `0.8·relevance + 0.1·recency + 0.1·importance` (were 0.5/0.2/0.3), and
+  recency comes from each memory's own `updated` date rather than from when
+  it was indexed. The index is rebuilt once on first start.
+- **Keyword search matches any query word** (BM25 still ranks chunks that
+  match more of them first), instead of requiring every word.
+- **MCP callers can only change a source's schedule.** Hosts, credentials,
+  paths and labels change in the dashboard, so a prompt-injected agent
+  cannot point a consented source (and its stored password) elsewhere.
+- **Collector consent is dashboard-only.** The `memory_sources` `agree`
+  action was removed: an MCP caller (including a prompt-injected one) can
+  no longer consent on your behalf. Grant consent in the dashboard's
+  Sources tab, then enable the source as before.
+- **Remote embeddings are opt-in.** Setting `OPENAI_API_KEY` no longer
+  sends memory content and search queries to OpenAI by itself; only
+  `MEMORIA_EMBEDDINGS=openai` does. `auto` now stays on this device.
+- **One collector per store, any number of sessions.** Each Claude Code
+  window or Claude Desktop session starts its own server on the same
+  store. The first holds the store lock and runs the collector and
+  scheduled maintenance; the others run as secondaries that search, read
+  and write the same memories, and take over when the first exits. A
+  stdio server exits when its client goes away, so it never holds the lock
+  for a session that is gone.
+- **Sync scripts are safer.** The pull hook executes a mirror script from
+  inside the synced store only with `MEMORIA_SYNC_ALLOW_STORE_MIRROR=true`,
+  and `sync-from-claude-memory.sh` overwrites only newer files, backing up
+  whatever it replaces (`--dry-run` previews changes).
+- **Pinned, bounded, encrypted.** On-demand adapter installs use exact
+  pinned versions, tool inputs (`days`, `batch_size`, query length, …)
+  are bounded, and the provenance archive stores content encrypted rather
+  than plaintext. Optional: `MEMORIA_AUTHORIZE_REQUIRE_APPROVAL=true`
+  requires the API key, or a dashboard login plus a click on a consent
+  page, before `/authorize` issues a code, and disables the
+  `client_credentials` grant. docker-compose now
+  also requires `MEMORIA_PUBLIC_URL` in `.env` (the `.env.example`
+  localhost value covers purely local use).
+
+Under the hood, the collector daemon gained a dedicated test suite (which
+also caught that its first poll on startup never ran — now fixed), and
+behavioural tests now cover the sync scripts and the Python ingestion hook.
 
 ## Roadmap
 
