@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Renders demo.html to marketing/video/: demo.mp4 (1920x1080, 30 fps),
- * demo.gif (960 wide, for the README) and demo-poster.png.
+ * demo.gif (800 wide, for the README) and demo-poster.png.
  *
  *   node marketing/video/src/render.mjs
  *
@@ -28,7 +28,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
 await page.goto(pathToFileURL(path.join(here, "demo.html")).href);
 await page.evaluate(() => document.fonts.ready);
-await page.waitForFunction(() => document.getElementById("shot").complete);
+await page.waitForFunction(() => document.querySelector("#shot-journal img").complete);
 const duration = await page.evaluate(() => window.DURATION);
 const frames = Math.round(duration * FPS);
 
@@ -60,7 +60,7 @@ const gif = path.join(out, "demo.gif");
 const r = spawnSync(
   "ffmpeg",
   ["-y", "-loglevel", "error", "-i", mp4, "-vf",
-   "fps=10,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle",
+   "fps=8,scale=800:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle",
    gif],
   { stdio: "inherit" },
 );

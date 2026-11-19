@@ -13,7 +13,7 @@ change what does not sound like you. Nothing here has been posted anywhere.
 |------|------------|
 | [PLAN.md](PLAN.md) | The campaign brief: goal, audience, messages, channels, a day-by-day calendar, metrics, risks. |
 | [messaging.md](messaging.md) | Positioning, taglines, the five messages with their evidence, what not to claim, and paste-ready answers to the questions every thread will ask. |
-| [video/](video/) | The 46-second animated demo: `demo.mp4`, `demo.gif`, `demo-poster.png`. See below. |
+| [video/](video/) | The 84-second animated demo: `demo.mp4`, `demo.gif`, `demo-poster.png`. See below. |
 | [demo-video-script.md](demo-video-script.md) | Shot list for an optional live screen recording of the same story. |
 | [posts/show-hn.md](posts/show-hn.md) | Show HN title options and the maintainer's first comment. |
 | [posts/reddit.md](posts/reddit.md) | Separate posts for r/ClaudeAI, r/ClaudeCode, r/mcp and r/selfhosted. |
@@ -54,24 +54,35 @@ installed. `card-search.png` quotes eval scores: re-render it when
 
 ## Demo video
 
-`video/demo.mp4` (1920×1080, 30 fps, 46 seconds, about 4 MB) is a scripted
+`video/demo.mp4` (1920×1080, 30 fps, 84 seconds, about 7 MB) is a scripted
 animation, so it needs no Claude login and no recording session. It carries a
 small on-screen note saying it is an illustration.
 
-What in it is real: the `memory_search` and `memory_write` results, the
-Markdown file and the `git commit` output were captured from the 0.3.2 server
-with local MiniLM embeddings, running on the generated demo store, and the
-dashboard is a screenshot of that store. What is scripted: the two prompts and
-Claude's two replies, which are written from those results.
+It tells the story in four parts, each labelled with the machine it happens
+on:
+
+| Time | Part | What it shows |
+|------|------|---------------|
+| 0:00 | A session on the laptop | Claude recalls an old decision with `memory_search`, then records a new one with `memory_write`. The new memory is shown as a Markdown file. |
+| 0:27 | Sync across devices | The Stop hook commits and pushes the store. On the desktop, the SessionStart hook pulls, and a new session finds the decision made on the laptop. Both machines had written to the same day's log, and the merged file holds both entries. |
+| 1:00 | Dashboard | Four views of the same store: overview counts, search, the wiki page with its backlink to the new decision, and the journal. |
+| 1:18 | End card | The two install commands. |
+
+What in it is real: the tool results and scores, the Markdown file, the
+`.sync.log` lines, the merged daily log and the dashboard screenshots. They
+come from one continuous run of the 0.3.2 server (local MiniLM embeddings) and
+the real `scripts/sync/` hook scripts, on two clones of the generated demo
+store with a bare git remote between them. What is scripted: the three prompts
+and Claude's three replies, which are written from those results.
 
 | File | Use |
 |------|-----|
 | `video/demo.mp4` | X, Reddit, LinkedIn, Discord, the blog posts. |
-| `video/demo.gif` | The README and anywhere that will not play video (960 wide, 10 fps, about 5 MB). |
+| `video/demo.gif` | The README and anywhere that will not play video (800 wide, 8 fps, about 6 MB). |
 | `video/demo-poster.png` | Thumbnail. |
 
-To change the wording or timing, edit the `CHAT`, `SHELL`, `SCENES` and
-`CAPTIONS` tables at the top of the script in
+To change the wording or timing, edit the `TERMS`, `SHOTS` and `CAPTIONS`
+tables at the top of the script in
 [video/src/demo.html](video/src/demo.html), then:
 
 ```bash

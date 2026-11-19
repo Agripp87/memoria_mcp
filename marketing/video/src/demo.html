@@ -7,10 +7,14 @@
   Source for marketing/video/demo.mp4 and demo.gif. A scripted animation, not a
   screen recording: nothing here needs a Claude login.
 
-  What is real: every Memoria tool result, the Markdown file, and the git
-  output were captured from the actual server (0.3.2, local MiniLM embeddings)
-  running against the generated demo store. What is scripted: the two user
-  prompts and Claude's two replies, which are written from those results.
+  What is real: every Memoria tool result, the Markdown file, the sync log
+  lines, the merged daily log and the dashboard screenshots. They come from
+  one continuous run of the actual server (0.3.2, local MiniLM embeddings) and
+  the actual sync hook scripts, against two clones of the generated demo store
+  ("laptop" and "desktop") with a bare git remote between them.
+
+  What is scripted: the user prompts and Claude's replies, which are written
+  from those results.
 
   The page is driven by window.seek(seconds), so render.mjs can capture it
   frame by frame. Open it in a browser to watch it in real time, or add
@@ -32,7 +36,7 @@
   }
   .scene { position: absolute; inset: 0; opacity: 0; }
   .win {
-    position: absolute; left: 150px; top: 70px; width: 1620px; height: 790px;
+    position: absolute; left: 150px; top: 96px; width: 1620px; height: 764px;
     background: var(--panel); border: 1px solid var(--line); border-radius: 22px;
     box-shadow: 0 50px 110px rgba(0,0,0,.5); overflow: hidden;
   }
@@ -45,7 +49,7 @@
   .bar span { margin-left: 16px; }
   .view { position: absolute; left: 0; right: 0; top: 58px; bottom: 0; overflow: hidden; }
   .term {
-    position: absolute; left: 0; right: 0; top: 0; padding: 30px 40px 34px;
+    position: absolute; left: 0; right: 0; top: 0; padding: 28px 40px 30px;
     font-family: "JetBrains Mono", monospace; font-size: 27px; line-height: 1.52;
     color: #c9c8dc; white-space: pre-wrap;
   }
@@ -54,26 +58,39 @@
   .w { color: var(--text); } .b { color: var(--text); font-weight: 700; } .y { color: var(--amber); }
   .cur { display: inline-block; width: .6em; height: 1.08em; background: var(--accent); vertical-align: -0.18em; margin-left: 2px; }
 
+  /* Which machine we are on, and what part of the story this is. */
+  .where {
+    position: absolute; left: 150px; top: 36px; display: flex; align-items: center; gap: 16px;
+    font-family: "JetBrains Mono", monospace; font-size: 22px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--dim); opacity: 0;
+  }
+  .where b { color: var(--text); font-weight: 500; }
+  .where .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--accent); }
+  .where.desktop .dot { background: var(--green); }
+
   .caption {
-    position: absolute; left: 150px; right: 150px; top: 902px; text-align: center;
-    font-size: 54px; font-weight: 650; letter-spacing: -.028em; opacity: 0;
+    position: absolute; left: 110px; right: 110px; top: 898px; text-align: center;
+    font-size: 52px; font-weight: 650; letter-spacing: -.028em; opacity: 0;
   }
   .caption em { font-style: normal; color: var(--accent); }
-  .tag {
-    position: absolute; left: 150px; bottom: 34px; font-weight: 700; font-size: 26px; letter-spacing: -.02em;
-  }
+  .tag { position: absolute; left: 150px; bottom: 34px; font-weight: 700; font-size: 26px; letter-spacing: -.02em; }
   .note {
     position: absolute; right: 150px; bottom: 38px; color: var(--dim);
     font-family: "JetBrains Mono", monospace; font-size: 18px;
   }
 
-  /* dashboard scene */
+  /* dashboard scene: real screenshots, cross-faded */
   .shotwrap {
-    position: absolute; left: 150px; top: 70px; width: 1620px; height: 790px;
+    position: absolute; left: 150px; top: 96px; width: 1620px; height: 764px;
     border: 1px solid var(--line); border-radius: 22px; overflow: hidden;
     box-shadow: 0 50px 110px rgba(0,0,0,.5); background: #0f1016;
   }
-  .shotwrap img { position: absolute; left: 0; top: 0; width: 1620px; transform-origin: 0 0; }
+  .shot { position: absolute; left: 0; top: 0; width: 1620px; height: 790px; opacity: 0; transform-origin: 0 0; }
+  .shot img { display: block; width: 1620px; }
+  .ring {
+    position: absolute; border: 3px solid var(--accent); border-radius: 10px;
+    box-shadow: 0 0 0 6px rgba(167,162,255,.18); opacity: 0;
+  }
 
   /* end card */
   #end { display: grid; grid-template-columns: 1fr 1fr; gap: 90px; align-items: center; padding: 0 150px 60px; }
@@ -89,28 +106,19 @@
 </head>
 <body>
 
-<!-- Scene 1: a Claude Code session -->
-<section class="scene" id="s-chat">
-  <div class="win">
-    <div class="bar"><i></i><i></i><i></i><span>claude · ~/code/atlas-api</span></div>
-    <div class="view"><div class="term" id="t-chat"></div></div>
-  </div>
-</section>
+<div id="terms"></div>
 
-<!-- Scene 2: a plain shell -->
-<section class="scene" id="s-shell">
-  <div class="win">
-    <div class="bar"><i></i><i></i><i></i><span>zsh · ~/.memoria</span></div>
-    <div class="view"><div class="term" id="t-shell"></div></div>
-  </div>
-</section>
-
-<!-- Scene 3: the dashboard (a real screenshot of the demo store) -->
 <section class="scene" id="s-dash">
-  <div class="shotwrap"><img id="shot" src="../../images/src/wiki-shot.png" alt=""></div>
+  <div class="shotwrap">
+    <div class="shot" id="shot-overview"><img src="dash-overview.png" alt=""></div>
+    <div class="shot" id="shot-search"><img src="dash-search.png" alt=""></div>
+    <div class="shot" id="shot-wiki"><img src="dash-wiki.png" alt="">
+      <div class="ring" id="ring" style="left:1212px; top:481px; width:250px; height:38px"></div>
+    </div>
+    <div class="shot" id="shot-journal"><img src="dash-journal.png" alt=""></div>
+  </div>
 </section>
 
-<!-- Scene 4: end card -->
 <section class="scene" id="end">
   <div>
     <div class="eyebrow">Open-source MCP server</div>
@@ -127,79 +135,140 @@
   </div>
 </section>
 
+<div class="where" id="where"><span class="dot"></span><b></b><span></span></div>
 <div class="caption" id="cap"></div>
 <div class="tag" id="tag">Memoria</div>
 <div class="note" id="note">Illustration · Memoria output is real, from the demo store</div>
 
 <script>
-/* ---------- script of the film ---------- */
-const DURATION = 46;
+/* ---------- script of the film ----------
+   Times inside a scene are seconds from that scene's start.
+   A line with `type` is revealed character by character over that many
+   seconds; without it the line appears whole. `html` is trusted markup. */
 
-// Each line: at = when it starts; type = seconds spent revealing it (0 = appears whole).
-// html is trusted markup written here; `type` reveals its text characters in order.
-const CHAT = [
-  { at: 0.9, type: 2.7, html: '<span class="k">&gt;</span> <span class="w">Which database are we using for Atlas API, and why?</span>' },
-  { at: 3.9, html: '' },
-  { at: 4.0, html: '<span class="g">●</span> <span class="b">memoria</span> <span class="d">·</span> memory_search<span class="d">(</span><span class="y">"database choice for Atlas API"</span><span class="d">)</span>' },
-  { at: 5.0, html: '  <span class="d">└</span> 1. <span class="w">decisions/postgres-over-mongo.md</span>   <span class="d">score</span> 0.546' },
-  { at: 5.25, html: '    2. project/nimbus-notes.md            <span class="d">score</span> 0.533' },
-  { at: 5.5, html: '    3. daily/2026-11-11.md                <span class="d">score</span> 0.519' },
-  { at: 6.2, html: '' },
-  { at: 6.3, type: 3.6, html: '<span class="g">●</span> <span class="w">Postgres. You chose it over Mongo for Atlas API: shared notebooks\n  and sync cursors needed relational integrity, and Mongo\'s flexible\n  schema wasn\'t worth losing transactions and joins.</span>' },
-  { at: 12.0, html: '' },
-  { at: 12.2, type: 3.4, html: '<span class="k">&gt;</span> <span class="w">We\'re moving the job queue to Postgres too, with SKIP LOCKED.\n  Remember that.</span>' },
-  { at: 15.9, html: '' },
-  { at: 16.0, html: '<span class="g">●</span> <span class="b">memoria</span> <span class="d">·</span> memory_write<span class="d">(</span><span class="y">"decisions/job-queue-postgres.md"</span><span class="d">)</span>' },
-  { at: 17.0, html: '  <span class="d">└</span> Written: decisions/job-queue-postgres.md (1 chunks indexed)' },
-  { at: 17.5, html: '' },
-  { at: 17.6, type: 1.5, html: '<span class="g">●</span> <span class="w">Saved as a decision, linked to the Postgres-over-Mongo note.</span>' },
+const P = (s) => `<span class="k">&gt;</span> <span class="w">${s}</span>`;          // user prompt
+const A = (s) => `<span class="g">●</span> <span class="w">${s}</span>`;             // Claude's reply
+const T = (tool, arg) => `<span class="g">●</span> <span class="b">memoria</span> <span class="d">·</span> ${tool}<span class="d">(</span><span class="y">"${arg}"</span><span class="d">)</span>`;
+const SH = (s) => `<span class="g">$</span> <span class="w">${s}</span>`;               // shell command
+const C = (s) => `<span class="d"># ${s}</span>`;                                     // comment
+const D = '<span class="d">score</span>';
+
+const TERMS = [
+  { // 1. A session on the laptop: recall, then record.
+    id: 'laptop-chat', start: 0, end: 19.4, title: 'claude · ~/code/atlas-api',
+    where: ['laptop', 'a Claude Code session'],
+    lines: [
+      { at: 0.9, type: 2.6, html: P('Which database are we using for Atlas API, and why?') },
+      { at: 3.8, html: '' },
+      { at: 3.9, html: T('memory_search', 'Atlas API database decision') },
+      { at: 4.8, html: `  <span class="d">└</span> 1. daily/2026-11-11.md                ${D} 0.499` },
+      { at: 5.0, html: `    2. <span class="w">decisions/postgres-over-mongo.md</span>   ${D} 0.497` },
+      { at: 5.2, html: `    3. daily/2026-11-10.md                ${D} 0.492` },
+      { at: 5.8, html: '' },
+      { at: 5.9, type: 3.3, html: A("Postgres. You chose it over Mongo for Atlas API: shared notebooks\n  and sync cursors needed relational integrity, and Mongo's flexible\n  schema wasn't worth losing transactions and joins.") },
+      { at: 11.2, html: '' },
+      { at: 11.4, type: 3.2, html: P("We're moving the job queue to Postgres too, with SKIP LOCKED.\n  Remember that.") },
+      { at: 14.9, html: '' },
+      { at: 15.0, html: T('memory_write', 'decisions/job-queue-postgres.md') },
+      { at: 15.9, html: '  <span class="d">└</span> Written: decisions/job-queue-postgres.md (1 chunks indexed)' },
+      { at: 16.4, html: '' },
+      { at: 16.5, type: 1.4, html: A('Saved as a decision, linked to the Postgres-over-Mongo note.') },
+    ],
+  },
+  { // 2. The memory is a file.
+    id: 'laptop-file', start: 19.4, end: 27.0, title: 'zsh · ~/.memoria',
+    where: ['laptop', 'the memory store'],
+    lines: [
+      { at: 0.6, type: 1.8, html: SH('head -15 memories/decisions/job-queue-postgres.md') },
+      ...[
+        '<span class="d">---</span>',
+        '<span class="k">name:</span> <span class="g">Job queue on Postgres</span>',
+        '<span class="k">description:</span> Moved the Atlas API job queue to Postgres with SKIP LOCKED',
+        '<span class="k">type:</span> decision',
+        '<span class="k">importance:</span> 6',
+        '<span class="k">created:</span> 2026-11-19',
+        '<span class="k">updated:</span> 2026-11-19',
+        '<span class="k">tags:</span> [architecture, database, queue]',
+        '<span class="k">related:</span> [decisions/postgres-over-mongo.md, project/atlas-api.md]',
+        '<span class="d">---</span>',
+        '',
+        '<span class="b">## Decision: job queue on Postgres</span>',
+        '',
+        '**Decision:** move the Atlas API job queue to Postgres, using',
+        '`SELECT ... FOR UPDATE SKIP LOCKED`.',
+      ].map((html, i) => ({ at: 2.7 + i * 0.08, html })),
+    ],
+  },
+  { // 3. The Stop hook publishes the store.
+    id: 'laptop-push', start: 27.0, end: 34.0, title: 'zsh · ~/.memoria',
+    where: ['laptop', 'Claude stops'],
+    lines: [
+      { at: 0.5, html: C("The plugin's Stop hook ran scripts/sync/memoria-sync-push.sh") },
+      { at: 1.0, type: 1.1, html: SH('tail -2 .sync.log') },
+      { at: 2.4, html: '<span class="d">[2026-11-19T02:15:23+00:00]</span> push: committed session changes' },
+      { at: 2.7, html: '<span class="d">[2026-11-19T02:15:23+00:00]</span> push: <span class="g">pushed to origin/main</span>' },
+      { at: 3.6, html: '' },
+      { at: 3.7, html: C('origin is your own private git repo. There is no Memoria service.') },
+    ],
+  },
+  { // 4. Another machine: the SessionStart hook pulls, and Claude finds the decision.
+    id: 'desktop-chat', start: 34.0, end: 50.0, title: 'claude · ~/code/atlas-api', desktop: true,
+    where: ['desktop', 'a new session on another machine'],
+    lines: [
+      { at: 0.5, html: C('The SessionStart hook ran scripts/sync/memoria-sync-pull.sh') },
+      { at: 1.0, type: 1.3, html: SH('grep pull: ~/.memoria/.sync.log') },
+      { at: 2.6, html: '<span class="d">[2026-11-19T02:15:23+00:00]</span> pull: committed unflushed local changes before pulling' },
+      { at: 2.9, html: '<span class="d">[2026-11-19T02:15:24+00:00]</span> pull: <span class="g">merged 1 commit(s) from origin/main</span>' },
+      { at: 5.6, html: '' },
+      { at: 5.8, type: 1.7, html: P('What do we use for the job queue?') },
+      { at: 7.8, html: '' },
+      { at: 7.9, html: T('memory_search', 'what do we use for the job queue?') },
+      { at: 8.8, html: `  <span class="d">└</span> 1. <span class="w">decisions/job-queue-postgres.md</span>   ${D} 0.528` },
+      { at: 9.0, html: `    2. daily/2026-11-19.md               ${D} 0.475` },
+      { at: 9.6, html: '' },
+      { at: 9.7, type: 2.8, html: A('Postgres, with SELECT ... FOR UPDATE SKIP LOCKED: one less service\n  to run, and jobs commit in the same transaction as their data.') },
+    ],
+  },
+  { // 5. Both machines wrote to today's log. The union merge kept both.
+    id: 'desktop-merge', start: 50.0, end: 60.0, title: 'zsh · ~/.memoria', desktop: true,
+    where: ['desktop', 'one day, two machines writing'],
+    lines: [
+      { at: 0.6, type: 1.5, html: SH('tail -6 memories/daily/2026-11-19.md') },
+      { at: 2.3, html: '<span class="b">## 02:13 UTC — note</span>' },
+      { at: 2.3, html: '' },
+      { at: 2.3, html: 'Fixed the sync cursor off-by-one in Atlas API. Regression test added first.' },
+      { at: 2.5, html: '<span class="b">## 02:15 UTC — note</span>' },
+      { at: 2.5, html: '' },
+      { at: 2.5, html: 'Moved the Atlas API job queue to Postgres (SKIP LOCKED). See decisions/job-queue-postgres.md.' },
+      { at: 5.2, html: '' },
+      { at: 5.3, type: 1.3, html: SH("grep '^memories' .gitattributes") },
+      { at: 6.8, html: '<span class="k">memories/daily/*.md</span> <span class="g">merge=union</span>' },
+      { at: 6.9, html: '<span class="k">memories/MEMORY_INDEX.md</span> <span class="g">merge=union</span>' },
+    ],
+  },
 ];
 
-const FILE = [
-  '<span class="d">---</span>',
-  '<span class="k">name:</span> <span class="g">Job queue on Postgres</span>',
-  '<span class="k">description:</span> Moved the Atlas API job queue to Postgres with SKIP LOCKED',
-  '<span class="k">type:</span> decision',
-  '<span class="k">importance:</span> 6',
-  '<span class="k">created:</span> 2026-11-19',
-  '<span class="k">updated:</span> 2026-11-19',
-  '<span class="k">tags:</span> [architecture, database, queue]',
-  '<span class="k">related:</span> [decisions/postgres-over-mongo.md, project/atlas-api.md]',
-  '<span class="d">---</span>',
-  '',
-  '<span class="b">## Decision: job queue on Postgres</span>',
-  '',
-  '**Decision:** move the Atlas API job queue to Postgres, using',
-  '`SELECT ... FOR UPDATE SKIP LOCKED`.',
-];
+const DASH_START = 60.0;
+// [id, seconds on screen]
+const SHOTS = [['shot-overview', 4.2], ['shot-search', 4.6], ['shot-wiki', 5.2], ['shot-journal', 4.4]];
+const DASH_END = DASH_START + SHOTS.reduce((s, x) => s + x[1], 0);   // 78.4
+const DURATION = DASH_END + 5.6;                                      // 84.0
 
-const SHELL = [
-  { at: 21.0, type: 1.9, html: '<span class="g">$</span> <span class="w">head -15 memories/decisions/job-queue-postgres.md</span>' },
-  ...FILE.map((html, i) => ({ at: 23.2 + i * 0.09, html })),
-  { at: 28.9, html: '' },
-  { at: 29.0, type: 2.0, html: '<span class="g">$</span> <span class="w">git add -A &amp;&amp; git commit -m "memory: job queue on Postgres"</span>' },
-  { at: 31.3, html: '[main <span class="y">18622cf</span>] memory: job queue on Postgres' },
-  { at: 31.4, html: ' 2 files changed, 88 insertions(<span class="g">+</span>)' },
-  { at: 31.5, html: ' create mode 100644 memories/MEMORY_INDEX.md' },
-  { at: 31.6, html: ' create mode 100644 memories/decisions/job-queue-postgres.md' },
-];
-
-// [start, end, scene id]
-const SCENES = [
-  [0, 20.6, 's-chat'],
-  [20.6, 34.8, 's-shell'],
-  [34.8, 40.2, 's-dash'],
-  [40.2, DURATION, 'end'],
-];
-
-// [start, end, caption html]
+// [start, end, caption html] in film time.
 const CAPTIONS = [
-  [0.3, 3.9, 'Every session starts from zero.'],
-  [4.0, 11.9, 'Unless Claude can <em>remember</em>.'],
-  [12.0, 20.4, 'Decisions are written down as you work.'],
-  [20.8, 28.8, 'Every memory is a <em>Markdown file</em> you own.'],
-  [28.9, 34.6, 'Sync is <em>git</em>. No service.'],
-  [35.0, 40.0, 'Browse it like a wiki.'],
+  [0.3, 3.7, 'Every session starts from zero.'],
+  [3.9, 11.1, 'Unless Claude can <em>remember</em>.'],
+  [11.3, 19.2, 'Decisions are written down as you work.'],
+  [19.6, 26.8, 'Every memory is a <em>Markdown file</em> you own.'],
+  [27.2, 33.8, 'When Claude stops, a hook <em>commits and pushes</em> the store.'],
+  [34.2, 39.4, 'On another machine, the next session <em>pulls first</em>.'],
+  [39.6, 49.8, 'What you decided on the laptop is already there.'],
+  [50.2, 55.0, "Both machines wrote to today's log. <em>Both entries kept.</em>"],
+  [55.2, 59.8, 'A git <em>union merge</em>. No sync service.'],
+  [60.2, 64.0, 'A dashboard on the <em>same files</em>.'],
+  [64.4, 68.6, 'Search with the ranking Claude uses.'],
+  [69.0, 73.8, 'A wiki of your memory, with <em>backlinks</em>.'],
+  [74.2, 78.2, 'A journal for what only you know.'],
 ];
 
 /* ---------- engine ---------- */
@@ -208,8 +277,15 @@ const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const ease = (x) => x * x * (3 - 2 * x);
 const fade = (t, a, b) => ease(clamp((t - a) / FADE)) * ease(clamp((b - t) / FADE));
 
-function build(el, lines) {
-  for (const l of lines) {
+const host = document.getElementById('terms');
+for (const s of TERMS) {
+  const sec = document.createElement('section');
+  sec.className = 'scene';
+  sec.innerHTML = `<div class="win"><div class="bar"><i></i><i></i><i></i><span>${s.title}</span></div><div class="view"><div class="term"></div></div></div>`;
+  host.appendChild(sec);
+  s.sec = sec;
+  s.term = sec.querySelector('.term');
+  for (const l of s.lines) {
     const d = document.createElement('div');
     d.className = 'ln';
     d.innerHTML = l.html;
@@ -217,19 +293,20 @@ function build(el, lines) {
     const walker = document.createTreeWalker(d, NodeFilter.SHOW_TEXT);
     l.nodes = [];
     for (let n = walker.nextNode(); n; n = walker.nextNode()) l.nodes.push({ n, full: n.nodeValue });
-    l.total = l.nodes.reduce((s, x) => s + x.full.length, 0);
+    l.total = l.nodes.reduce((sum, x) => sum + x.full.length, 0);
     l.el = d;
     l.cur = document.createElement('span');
     l.cur.className = 'cur';
-    el.appendChild(d);
+    s.term.appendChild(d);
   }
 }
 
-function draw(el, lines, t) {
+function draw(s, t) {
   let active = null;
-  for (const l of lines) {
+  for (const l of s.lines) {
     const on = t >= l.at;
     l.el.style.display = on ? 'block' : 'none';
+    if (l.cur.parentNode) l.cur.remove();
     if (!on) continue;
     const frac = l.type ? clamp((t - l.at) / l.type) : 1;
     let left = Math.round(l.total * frac);
@@ -239,45 +316,74 @@ function draw(el, lines, t) {
       left -= take;
     }
     if (l.type && t < l.at + l.type + 0.5) active = l;
-    if (l.cur.parentNode) l.cur.remove();
   }
   if (active) {
     // Solid while typing, blinking once the line is complete.
     const typing = t < active.at + active.type;
     if (typing || Math.floor(t * 2.5) % 2 === 0) {
-      const last = active.nodes[active.nodes.length - 1].n;
-      last.parentNode.appendChild(active.cur);
+      active.nodes[active.nodes.length - 1].n.parentNode.appendChild(active.cur);
     }
   }
   // Behave like a terminal: once the text is taller than the window, scroll.
-  const over = el.scrollHeight - el.parentNode.clientHeight;
-  el.style.transform = `translateY(${-Math.max(0, over)}px)`;
+  const over = s.term.scrollHeight - s.term.parentNode.clientHeight;
+  s.term.style.transform = `translateY(${-Math.max(0, over)}px)`;
 }
 
-const chat = document.getElementById('t-chat');
-const shell = document.getElementById('t-shell');
-build(chat, CHAT);
-build(shell, SHELL);
 const cap = document.getElementById('cap');
-const shot = document.getElementById('shot');
-let capKey = -1;
+const where = document.getElementById('where');
+const dash = document.getElementById('s-dash');
+const ring = document.getElementById('ring');
+let capKey = -2, whereKey = -2;
 
 window.DURATION = DURATION;
 window.seek = function (t) {
-  for (const [a, b, id] of SCENES) document.getElementById(id).style.opacity = fade(t, a, b + FADE * 0.5);
-  draw(chat, CHAT, t);
-  draw(shell, SHELL, t);
+  // Terminal scenes.
+  let cur = -1;
+  TERMS.forEach((s, i) => {
+    s.sec.style.opacity = fade(t, s.start, s.end + FADE * 0.5);
+    draw(s, t - s.start);
+    if (t >= s.start && t < s.end) cur = i;
+  });
 
-  const i = CAPTIONS.findIndex(([a, b]) => t >= a && t <= b);
+  // Machine label.
+  if (cur !== whereKey) {
+    whereKey = cur;
+    if (cur >= 0) {
+      const s = TERMS[cur];
+      where.className = 'where' + (s.desktop ? ' desktop' : '');
+      where.children[1].textContent = s.where[0];
+      where.children[2].textContent = '· ' + s.where[1];
+    }
+  }
+  const inDash = t >= DASH_START && t < DASH_END;
+  if (inDash && whereKey !== 'dash') {
+    whereKey = 'dash';
+    where.className = 'where desktop';
+    where.children[1].textContent = 'dashboard';
+    where.children[2].textContent = '· the same store, in a browser';
+  }
+  where.style.opacity = inDash ? fade(t, DASH_START + 0.1, DASH_END)
+    : cur < 0 ? 0 : fade(t, TERMS[cur].start + 0.1, TERMS[cur].end);
+
+  // Dashboard: each screenshot fades in over the last and drifts slightly.
+  dash.style.opacity = fade(t, DASH_START, DASH_END + FADE * 0.5);
+  let a = DASH_START;
+  for (const [id, len] of SHOTS) {
+    const el = document.getElementById(id);
+    el.style.opacity = ease(clamp((t - a) / 0.45));
+    el.style.transform = `scale(${1 + 0.025 * clamp((t - a) / len)})`;
+    if (id === 'shot-wiki') ring.style.opacity = fade(t, a + 1.3, a + len);
+    a += len;
+  }
+
+  // Caption.
+  const i = CAPTIONS.findIndex(([x, y]) => t >= x && t <= y);
   if (i !== capKey) { capKey = i; cap.innerHTML = i < 0 ? '' : CAPTIONS[i][2]; }
   cap.style.opacity = i < 0 ? 0 : fade(t, CAPTIONS[i][0], CAPTIONS[i][1]);
 
-  // Slow push-in on the dashboard.
-  const z = clamp((t - 34.8) / 5.4);
-  shot.style.transform = `scale(${1 + 0.04 * ease(z)})`;
-
-  // The corner mark and the note give way to the end card.
-  const endIn = fade(t, 40.2, DURATION + 1);
+  // End card; the corner mark and the note give way to it.
+  const endIn = fade(t, DASH_END, DURATION + 1);
+  document.getElementById('end').style.opacity = endIn;
   document.getElementById('tag').style.opacity = 1 - endIn;
   document.getElementById('note').style.opacity = 1 - endIn;
 };
