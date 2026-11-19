@@ -57,8 +57,15 @@ describe("stdio startup", () => {
         });
         expect(events).toEqual(["initialized", "indexed"]);
       } finally {
-        child.kill();
-        fs.rmSync(dir, { recursive: true, force: true });
+        // kill() only requests the exit. On Windows the index file cannot be
+        // unlinked while the server still has it open (EBUSY), so wait for the
+        // process to be gone before removing its directory.
+        if (child.exitCode === null && child.signalCode === null) {
+          const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+          child.kill();
+          await exited;
+        }
+        fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
       }
     },
     70_000,
