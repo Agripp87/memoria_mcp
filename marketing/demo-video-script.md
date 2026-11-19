@@ -1,7 +1,8 @@
 # Demo video script
 
 **An animated version already exists:** [video/demo.mp4](video/demo.mp4) tells
-this story, plus sync and the dashboard, in 84 seconds and needs no recording. It is labelled as an
+this story, plus sync and the dashboard, in 84 seconds with a voice-over
+(and [video/demo-30s.mp4](video/demo-30s.mp4) in 30) and needs no recording. It is labelled as an
 illustration; the Memoria output in it is real and Claude's replies are
 scripted (see [README.md](README.md#demo-video)). This file is for an optional
 live recording, which is worth making if a thread asks "is that real?".

@@ -13,7 +13,7 @@ change what does not sound like you. Nothing here has been posted anywhere.
 |------|------------|
 | [PLAN.md](PLAN.md) | The campaign brief: goal, audience, messages, channels, a day-by-day calendar, metrics, risks. |
 | [messaging.md](messaging.md) | Positioning, taglines, the five messages with their evidence, what not to claim, and paste-ready answers to the questions every thread will ask. |
-| [video/](video/) | The 84-second animated demo: `demo.mp4`, `demo.gif`, `demo-poster.png`. See below. |
+| [video/](video/) | The animated demo with narration: `demo.mp4` (84 seconds), `demo-30s.mp4` and `demo-30s.gif` (30 seconds), `demo-poster.png`. See below. |
 | [demo-video-script.md](demo-video-script.md) | Shot list for an optional live screen recording of the same story. |
 | [posts/show-hn.md](posts/show-hn.md) | Show HN title options and the maintainer's first comment. |
 | [posts/reddit.md](posts/reddit.md) | Separate posts for r/ClaudeAI, r/ClaudeCode, r/mcp and r/selfhosted. |
@@ -54,9 +54,12 @@ installed. `card-search.png` quotes eval scores: re-render it when
 
 ## Demo video
 
-`video/demo.mp4` (1920×1080, 30 fps, 84 seconds, about 7 MB) is a scripted
-animation, so it needs no Claude login and no recording session. It carries a
-small on-screen note saying it is an illustration.
+`video/demo.mp4` (1920×1080, 30 fps, 84 seconds, about 8 MB) is a scripted
+animation with a voice-over, so it needs no Claude login and no recording
+session. It carries a small on-screen note saying it is an illustration.
+`video/demo-30s.mp4` is a 30-second cut of the same material, and
+`video/demo-30s.gif` is that cut without sound, which the repository README
+shows at the top.
 
 It tells the story in four parts, each labelled with the machine it happens
 on:
@@ -75,10 +78,22 @@ the real `scripts/sync/` hook scripts, on two clones of the generated demo
 store with a bare git remote between them. What is scripted: the three prompts
 and Claude's three replies, which are written from those results.
 
+The 30-second cut keeps four beats: Claude records a decision, the memory is
+shown as a file, a session on the desktop finds it after the pull, and the
+wiki shows the backlink.
+
+**Narration.** The voice is ElevenLabs' "Aabo" (model `eleven_v4`), one clip
+per sentence in [video/src/audio/](video/src/audio/). The text of each clip
+and the second it starts at are in the `AUDIO` lists in `demo.html`; the
+render script mixes them in. To change a line, generate a new clip, save it
+under the same name, and re-render. Check the licence terms of your ElevenLabs
+plan before using the voice-over commercially.
+
 | File | Use |
 |------|-----|
-| `video/demo.mp4` | X, Reddit, LinkedIn, Discord, the blog posts. |
-| `video/demo.gif` | The README and anywhere that will not play video (800 wide, 8 fps, about 6 MB). |
+| `video/demo.mp4` | The full story, with sound: the blog posts, LinkedIn, YouTube. |
+| `video/demo-30s.mp4` | The short cut, with sound: X, Reddit, Discord. |
+| `video/demo-30s.gif` | The README and anywhere that will not play video (960 wide, 10 fps, silent, about 4.5 MB). |
 | `video/demo-poster.png` | Thumbnail. |
 
 To change the wording or timing, edit the `TERMS`, `SHOTS` and `CAPTIONS`
@@ -86,12 +101,13 @@ tables at the top of the script in
 [video/src/demo.html](video/src/demo.html), then:
 
 ```bash
-node marketing/video/src/render.mjs
+node marketing/video/src/render.mjs          # both cuts; or pass full / short
 ```
 
 That needs Playwright with Chromium, `ffmpeg`, and the Inter and JetBrains
 Mono fonts. Opening `demo.html` in a browser plays it in real time, and
-`demo.html?t=12.5` freezes it at one moment. If you change what a tool result
+`demo.html?t=12.5` freezes it at one moment; `?cut=short` selects the 30-second
+cut. The page itself is silent. If you change what a tool result
 says, capture the new text from the real server first.
 
 ## Before launch

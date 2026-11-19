@@ -17,8 +17,9 @@
   from those results.
 
   The page is driven by window.seek(seconds), so render.mjs can capture it
-  frame by frame. Open it in a browser to watch it in real time, or add
-  ?t=12.5 to freeze on one moment.
+  frame by frame. Open it in a browser to watch it in real time (silent: the
+  narration is mixed in by render.mjs), add ?t=12.5 to freeze on one moment,
+  or ?cut=short for the 30-second version.
 -->
 <style>
   :root {
@@ -153,7 +154,7 @@ const SH = (s) => `<span class="g">$</span> <span class="w">${s}</span>`;       
 const C = (s) => `<span class="d"># ${s}</span>`;                                     // comment
 const D = '<span class="d">score</span>';
 
-const TERMS = [
+let TERMS = [
   { // 1. A session on the laptop: recall, then record.
     id: 'laptop-chat', start: 0, end: 19.4, title: 'claude · ~/code/atlas-api',
     where: ['laptop', 'a Claude Code session'],
@@ -248,14 +249,13 @@ const TERMS = [
   },
 ];
 
-const DASH_START = 60.0;
+let DASH_START = 60.0;
 // [id, seconds on screen]
-const SHOTS = [['shot-overview', 4.2], ['shot-search', 4.6], ['shot-wiki', 5.2], ['shot-journal', 4.4]];
-const DASH_END = DASH_START + SHOTS.reduce((s, x) => s + x[1], 0);   // 78.4
-const DURATION = DASH_END + 5.6;                                      // 84.0
+let SHOTS = [['shot-overview', 4.2], ['shot-search', 4.6], ['shot-wiki', 5.2], ['shot-journal', 4.4]];
+let END_CARD = 5.6;
 
 // [start, end, caption html] in film time.
-const CAPTIONS = [
+let CAPTIONS = [
   [0.3, 3.7, 'Every session starts from zero.'],
   [3.9, 11.1, 'Unless Claude can <em>remember</em>.'],
   [11.3, 19.2, 'Decisions are written down as you work.'],
@@ -270,6 +270,82 @@ const CAPTIONS = [
   [69.0, 73.8, 'A wiki of your memory, with <em>backlinks</em>.'],
   [74.2, 78.2, 'A journal for what only you know.'],
 ];
+
+// Narration: [start, clip in audio/]. render.mjs mixes these into the video.
+// Each clip is one sentence or two, generated with ElevenLabs (voice "Aabo").
+let AUDIO = [
+  [0.4, 'intro'],      // Every Claude Code session starts from zero. With Memoria, Claude searches...
+  [11.5, 'write'],     // When you make a new decision, Claude writes it down.
+  [19.8, 'file'],      // Every memory is a plain Markdown file, in a folder you own.
+  [27.4, 'push'],      // When Claude stops, a hook commits the store and pushes it to your own private git repository.
+  [34.4, 'pull'],      // On another machine, the next session pulls first.
+  [40.0, 'ask'],       // Ask a question there, and the decision you made on the laptop is already waiting.
+  [50.4, 'merge'],     // If both machines wrote to today's log, git's union merge keeps both entries. No conflicts, and no sync service.
+  [60.3, 'dash'],      // The dashboard reads the same files.
+  [64.5, 'search'],    // Search them with the same ranking Claude uses.
+  [69.1, 'wiki'],      // Browse your memory as a wiki, with backlinks between notes.
+  [74.4, 'journal'],   // And add notes of your own in the journal.
+  [78.9, 'outro'],     // Memoria. Open source, and two commands to install.
+];
+
+/* ---------- the 30-second cut (demo.html?cut=short) ----------
+   Same captured output, fewer beats: record a decision, see the file, find it
+   on the other machine, browse the wiki. */
+const CUT = new URLSearchParams(location.search).get('cut') === 'short' ? 'short' : 'full';
+if (CUT === 'short') {
+  const full = Object.fromEntries(TERMS.map((s) => [s.id, s]));
+  TERMS = [
+    { id: 'laptop-chat', start: 0, end: 7.0, title: 'claude · ~/code/atlas-api',
+      where: ['laptop', 'a Claude Code session'],
+      lines: [
+        { at: 0.4, type: 2.4, html: P("We're moving the job queue to Postgres, with SKIP LOCKED.\n  Remember that.") },
+        { at: 3.0, html: '' },
+        { at: 3.1, html: T('memory_write', 'decisions/job-queue-postgres.md') },
+        { at: 3.8, html: '  <span class="d">└</span> Written: decisions/job-queue-postgres.md (1 chunks indexed)' },
+        { at: 4.1, html: '' },
+        { at: 4.2, type: 1.2, html: A('Saved as a decision, linked to the Postgres-over-Mongo note.') },
+      ] },
+    { id: 'laptop-file', start: 7.0, end: 12.5, title: 'zsh · ~/.memoria',
+      where: ['laptop', 'the memory store'],
+      lines: full['laptop-file'].lines.map((l, i) => i === 0
+        ? { at: 0.3, type: 1.0, html: l.html }
+        : { at: 1.5 + (i - 1) * 0.05, html: l.html }) },
+    { id: 'desktop-chat', start: 12.5, end: 21.0, title: 'claude · ~/code/atlas-api', desktop: true,
+      where: ['desktop', 'a new session on another machine'],
+      lines: [
+        { at: 0.3, html: C('The SessionStart hook ran scripts/sync/memoria-sync-pull.sh') },
+        { at: 0.5, type: 0.7, html: SH('grep pull: ~/.memoria/.sync.log') },
+        { at: 1.3, html: '<span class="d">[2026-11-19T02:15:23+00:00]</span> pull: committed unflushed local changes before pulling' },
+        { at: 1.5, html: '<span class="d">[2026-11-19T02:15:24+00:00]</span> pull: <span class="g">merged 1 commit(s) from origin/main</span>' },
+        { at: 2.1, html: '' },
+        { at: 2.2, type: 1.2, html: P('What do we use for the job queue?') },
+        { at: 3.6, html: '' },
+        { at: 3.7, html: T('memory_search', 'what do we use for the job queue?') },
+        { at: 4.3, html: `  <span class="d">└</span> 1. <span class="w">decisions/job-queue-postgres.md</span>   ${D} 0.528` },
+        { at: 4.5, html: `    2. daily/2026-11-19.md               ${D} 0.475` },
+        { at: 4.8, html: '' },
+        { at: 4.9, type: 2.0, html: A('Postgres, with SELECT ... FOR UPDATE SKIP LOCKED: one less service\n  to run, and jobs commit in the same transaction as their data.') },
+      ] },
+  ];
+  DASH_START = 21.0;
+  SHOTS = [['shot-wiki', 4.4]];
+  END_CARD = 4.6;
+  CAPTIONS = [
+    [0.2, 6.8, 'Claude <em>remembers</em> what you decide.'],
+    [7.2, 12.3, 'Every memory is a <em>Markdown file</em> you own.'],
+    [12.7, 20.8, 'Synced with <em>git</em> to every machine.'],
+    [21.2, 25.2, 'Browse it like a wiki.'],
+  ];
+  AUDIO = [
+    [0.3, 'shortintro'],  // Claude Code forgets between sessions. Memoria lets it remember.
+    [7.3, 'file'],
+    [12.8, 'gitsync'],    // Git syncs it to your other machines, so the next session there already knows.
+    [21.2, 'wiki'],
+    [25.9, 'outro'],
+  ];
+}
+const DASH_END = DASH_START + SHOTS.reduce((s, x) => s + x[1], 0);
+const DURATION = DASH_END + END_CARD;   // 84 s full, 30 s short
 
 /* ---------- engine ---------- */
 const FADE = 0.35;
@@ -336,6 +412,8 @@ const ring = document.getElementById('ring');
 let capKey = -2, whereKey = -2;
 
 window.DURATION = DURATION;
+window.AUDIO = AUDIO;
+window.CUT = CUT;
 window.seek = function (t) {
   // Terminal scenes.
   let cur = -1;
@@ -372,7 +450,7 @@ window.seek = function (t) {
     const el = document.getElementById(id);
     el.style.opacity = ease(clamp((t - a) / 0.45));
     el.style.transform = `scale(${1 + 0.025 * clamp((t - a) / len)})`;
-    if (id === 'shot-wiki') ring.style.opacity = fade(t, a + 1.3, a + len);
+    if (id === 'shot-wiki') ring.style.opacity = fade(t, a + 1.0, a + len);
     a += len;
   }
 
