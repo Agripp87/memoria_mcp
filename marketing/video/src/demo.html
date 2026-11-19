@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Memoria demo animation</title>
+<!--
+  Source for marketing/video/demo.mp4 and demo.gif. A scripted animation, not a
+  screen recording: nothing here needs a Claude login.
+
+  What is real: every Memoria tool result, the Markdown file, and the git
+  output were captured from the actual server (0.3.2, local MiniLM embeddings)
+  running against the generated demo store. What is scripted: the two user
+  prompts and Claude's two replies, which are written from those results.
+
+  The page is driven by window.seek(seconds), so render.mjs can capture it
+  frame by frame. Open it in a browser to watch it in real time, or add
+  ?t=12.5 to freeze on one moment.
+-->
+<style>
+  :root {
+    --bg: #0e0f14; --panel: #14151d; --line: #2a2b3b; --text: #edecf6;
+    --muted: #9c9cb4; --dim: #6c6c85; --accent: #a7a2ff; --green: #7fe0a4; --amber: #f0c674;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; }
+  body {
+    font-family: "Inter Display", "Inter", sans-serif; color: var(--text);
+    background:
+      radial-gradient(1100px 700px at 0% 100%, rgba(167,162,255,.10), transparent 60%),
+      radial-gradient(800px 600px at 100% 0%, rgba(127,224,164,.05), transparent 60%),
+      var(--bg);
+  }
+  .scene { position: absolute; inset: 0; opacity: 0; }
+  .win {
+    position: absolute; left: 150px; top: 70px; width: 1620px; height: 790px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 22px;
+    box-shadow: 0 50px 110px rgba(0,0,0,.5); overflow: hidden;
+  }
+  .bar {
+    height: 58px; display: flex; align-items: center; gap: 11px; padding: 0 26px;
+    border-bottom: 1px solid var(--line); color: var(--dim);
+    font-family: "JetBrains Mono", monospace; font-size: 21px;
+  }
+  .bar i { width: 13px; height: 13px; border-radius: 50%; background: #34354a; display: block; }
+  .bar span { margin-left: 16px; }
+  .view { position: absolute; left: 0; right: 0; top: 58px; bottom: 0; overflow: hidden; }
+  .term {
+    position: absolute; left: 0; right: 0; top: 0; padding: 30px 40px 34px;
+    font-family: "JetBrains Mono", monospace; font-size: 27px; line-height: 1.52;
+    color: #c9c8dc; white-space: pre-wrap;
+  }
+  .ln { display: none; min-height: 1.52em; }
+  .k { color: var(--accent); } .g { color: var(--green); } .d { color: var(--dim); }
+  .w { color: var(--text); } .b { color: var(--text); font-weight: 700; } .y { color: var(--amber); }
+  .cur { display: inline-block; width: .6em; height: 1.08em; background: var(--accent); vertical-align: -0.18em; margin-left: 2px; }
+
+  .caption {
+    position: absolute; left: 150px; right: 150px; top: 902px; text-align: center;
+    font-size: 54px; font-weight: 650; letter-spacing: -.028em; opacity: 0;
+  }
+  .caption em { font-style: normal; color: var(--accent); }
+  .tag {
+    position: absolute; left: 150px; bottom: 34px; font-weight: 700; font-size: 26px; letter-spacing: -.02em;
+  }
+  .note {
+    position: absolute; right: 150px; bottom: 38px; color: var(--dim);
+    font-family: "JetBrains Mono", monospace; font-size: 18px;
+  }
+
+  /* dashboard scene */
+  .shotwrap {
+    position: absolute; left: 150px; top: 70px; width: 1620px; height: 790px;
+    border: 1px solid var(--line); border-radius: 22px; overflow: hidden;
+    box-shadow: 0 50px 110px rgba(0,0,0,.5); background: #0f1016;
+  }
+  .shotwrap img { position: absolute; left: 0; top: 0; width: 1620px; transform-origin: 0 0; }
+
+  /* end card */
+  #end { display: grid; grid-template-columns: 1fr 1fr; gap: 90px; align-items: center; padding: 0 150px 60px; }
+  #end .eyebrow { font-family: "JetBrains Mono", monospace; font-size: 25px; letter-spacing: .22em; text-transform: uppercase; color: var(--dim); margin-bottom: 30px; }
+  #end h1 { font-size: 176px; line-height: .95; font-weight: 800; letter-spacing: -.045em; }
+  #end p { font-size: 42px; line-height: 1.32; color: var(--muted); margin-top: 36px; }
+  #end p b { color: var(--text); font-weight: 600; }
+  #end .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 22px; overflow: hidden; font-family: "JetBrains Mono", monospace; font-size: 29px; line-height: 1.7; }
+  #end .panel .body { padding: 30px 36px 34px; white-space: pre; color: #c9c8dc; }
+  #end .url { margin-top: 34px; font-family: "JetBrains Mono", monospace; font-size: 29px; color: var(--accent); }
+  #end .lic { color: var(--dim); }
+</style>
+</head>
+<body>
+
+<!-- Scene 1: a Claude Code session -->
+<section class="scene" id="s-chat">
+  <div class="win">
+    <div class="bar"><i></i><i></i><i></i><span>claude · ~/code/atlas-api</span></div>
+    <div class="view"><div class="term" id="t-chat"></div></div>
+  </div>
+</section>
+
+<!-- Scene 2: a plain shell -->
+<section class="scene" id="s-shell">
+  <div class="win">
+    <div class="bar"><i></i><i></i><i></i><span>zsh · ~/.memoria</span></div>
+    <div class="view"><div class="term" id="t-shell"></div></div>
+  </div>
+</section>
+
+<!-- Scene 3: the dashboard (a real screenshot of the demo store) -->
+<section class="scene" id="s-dash">
+  <div class="shotwrap"><img id="shot" src="../../images/src/wiki-shot.png" alt=""></div>
+</section>
+
+<!-- Scene 4: end card -->
+<section class="scene" id="end">
+  <div>
+    <div class="eyebrow">Open-source MCP server</div>
+    <h1>Memoria</h1>
+    <p>Long-term memory for Claude, as <b>a Markdown repo you own</b>.</p>
+  </div>
+  <div>
+    <div class="panel">
+      <div class="bar"><i></i><i></i><i></i><span>in Claude Code</span></div>
+<div class="body"><span class="g">/plugin</span> marketplace add Agripp87/memoria_mcp
+<span class="g">/plugin</span> install memoria@memoria</div>
+    </div>
+    <div class="url">github.com/Agripp87/memoria_mcp <span class="lic">· Apache-2.0</span></div>
+  </div>
+</section>
+
+<div class="caption" id="cap"></div>
+<div class="tag" id="tag">Memoria</div>
+<div class="note" id="note">Illustration · Memoria output is real, from the demo store</div>
+
+<script>
+/* ---------- script of the film ---------- */
+const DURATION = 46;
+
+// Each line: at = when it starts; type = seconds spent revealing it (0 = appears whole).
+// html is trusted markup written here; `type` reveals its text characters in order.
+const CHAT = [
+  { at: 0.9, type: 2.7, html: '<span class="k">&gt;</span> <span class="w">Which database are we using for Atlas API, and why?</span>' },
+  { at: 3.9, html: '' },
+  { at: 4.0, html: '<span class="g">●</span> <span class="b">memoria</span> <span class="d">·</span> memory_search<span class="d">(</span><span class="y">"database choice for Atlas API"</span><span class="d">)</span>' },
+  { at: 5.0, html: '  <span class="d">└</span> 1. <span class="w">decisions/postgres-over-mongo.md</span>   <span class="d">score</span> 0.546' },
+  { at: 5.25, html: '    2. project/nimbus-notes.md            <span class="d">score</span> 0.533' },
+  { at: 5.5, html: '    3. daily/2026-11-11.md                <span class="d">score</span> 0.519' },
+  { at: 6.2, html: '' },
+  { at: 6.3, type: 3.6, html: '<span class="g">●</span> <span class="w">Postgres. You chose it over Mongo for Atlas API: shared notebooks\n  and sync cursors needed relational integrity, and Mongo\'s flexible\n  schema wasn\'t worth losing transactions and joins.</span>' },
+  { at: 12.0, html: '' },
+  { at: 12.2, type: 3.4, html: '<span class="k">&gt;</span> <span class="w">We\'re moving the job queue to Postgres too, with SKIP LOCKED.\n  Remember that.</span>' },
+  { at: 15.9, html: '' },
+  { at: 16.0, html: '<span class="g">●</span> <span class="b">memoria</span> <span class="d">·</span> memory_write<span class="d">(</span><span class="y">"decisions/job-queue-postgres.md"</span><span class="d">)</span>' },
+  { at: 17.0, html: '  <span class="d">└</span> Written: decisions/job-queue-postgres.md (1 chunks indexed)' },
+  { at: 17.5, html: '' },
+  { at: 17.6, type: 1.5, html: '<span class="g">●</span> <span class="w">Saved as a decision, linked to the Postgres-over-Mongo note.</span>' },
+];
+
+const FILE = [
+  '<span class="d">---</span>',
+  '<span class="k">name:</span> <span class="g">Job queue on Postgres</span>',
+  '<span class="k">description:</span> Moved the Atlas API job queue to Postgres with SKIP LOCKED',
+  '<span class="k">type:</span> decision',
+  '<span class="k">importance:</span> 6',
+  '<span class="k">created:</span> 2026-11-19',
+  '<span class="k">updated:</span> 2026-11-19',
+  '<span class="k">tags:</span> [architecture, database, queue]',
+  '<span class="k">related:</span> [decisions/postgres-over-mongo.md, project/atlas-api.md]',
+  '<span class="d">---</span>',
+  '',
+  '<span class="b">## Decision: job queue on Postgres</span>',
+  '',
+  '**Decision:** move the Atlas API job queue to Postgres, using',
+  '`SELECT ... FOR UPDATE SKIP LOCKED`.',
+];
+
+const SHELL = [
+  { at: 21.0, type: 1.9, html: '<span class="g">$</span> <span class="w">head -15 memories/decisions/job-queue-postgres.md</span>' },
+  ...FILE.map((html, i) => ({ at: 23.2 + i * 0.09, html })),
+  { at: 28.9, html: '' },
+  { at: 29.0, type: 2.0, html: '<span class="g">$</span> <span class="w">git add -A &amp;&amp; git commit -m "memory: job queue on Postgres"</span>' },
+  { at: 31.3, html: '[main <span class="y">18622cf</span>] memory: job queue on Postgres' },
+  { at: 31.4, html: ' 2 files changed, 88 insertions(<span class="g">+</span>)' },
+  { at: 31.5, html: ' create mode 100644 memories/MEMORY_INDEX.md' },
+  { at: 31.6, html: ' create mode 100644 memories/decisions/job-queue-postgres.md' },
+];
+
+// [start, end, scene id]
+const SCENES = [
+  [0, 20.6, 's-chat'],
+  [20.6, 34.8, 's-shell'],
+  [34.8, 40.2, 's-dash'],
+  [40.2, DURATION, 'end'],
+];
+
+// [start, end, caption html]
+const CAPTIONS = [
+  [0.3, 3.9, 'Every session starts from zero.'],
+  [4.0, 11.9, 'Unless Claude can <em>remember</em>.'],
+  [12.0, 20.4, 'Decisions are written down as you work.'],
+  [20.8, 28.8, 'Every memory is a <em>Markdown file</em> you own.'],
+  [28.9, 34.6, 'Sync is <em>git</em>. No service.'],
+  [35.0, 40.0, 'Browse it like a wiki.'],
+];
+
+/* ---------- engine ---------- */
+const FADE = 0.35;
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const ease = (x) => x * x * (3 - 2 * x);
+const fade = (t, a, b) => ease(clamp((t - a) / FADE)) * ease(clamp((b - t) / FADE));
+
+function build(el, lines) {
+  for (const l of lines) {
+    const d = document.createElement('div');
+    d.className = 'ln';
+    d.innerHTML = l.html;
+    // Collect text nodes so typing can reveal characters without touching markup.
+    const walker = document.createTreeWalker(d, NodeFilter.SHOW_TEXT);
+    l.nodes = [];
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) l.nodes.push({ n, full: n.nodeValue });
+    l.total = l.nodes.reduce((s, x) => s + x.full.length, 0);
+    l.el = d;
+    l.cur = document.createElement('span');
+    l.cur.className = 'cur';
+    el.appendChild(d);
+  }
+}
+
+function draw(el, lines, t) {
+  let active = null;
+  for (const l of lines) {
+    const on = t >= l.at;
+    l.el.style.display = on ? 'block' : 'none';
+    if (!on) continue;
+    const frac = l.type ? clamp((t - l.at) / l.type) : 1;
+    let left = Math.round(l.total * frac);
+    for (const x of l.nodes) {
+      const take = Math.min(left, x.full.length);
+      x.n.nodeValue = x.full.slice(0, take);
+      left -= take;
+    }
+    if (l.type && t < l.at + l.type + 0.5) active = l;
+    if (l.cur.parentNode) l.cur.remove();
+  }
+  if (active) {
+    // Solid while typing, blinking once the line is complete.
+    const typing = t < active.at + active.type;
+    if (typing || Math.floor(t * 2.5) % 2 === 0) {
+      const last = active.nodes[active.nodes.length - 1].n;
+      last.parentNode.appendChild(active.cur);
+    }
+  }
+  // Behave like a terminal: once the text is taller than the window, scroll.
+  const over = el.scrollHeight - el.parentNode.clientHeight;
+  el.style.transform = `translateY(${-Math.max(0, over)}px)`;
+}
+
+const chat = document.getElementById('t-chat');
+const shell = document.getElementById('t-shell');
+build(chat, CHAT);
+build(shell, SHELL);
+const cap = document.getElementById('cap');
+const shot = document.getElementById('shot');
+let capKey = -1;
+
+window.DURATION = DURATION;
+window.seek = function (t) {
+  for (const [a, b, id] of SCENES) document.getElementById(id).style.opacity = fade(t, a, b + FADE * 0.5);
+  draw(chat, CHAT, t);
+  draw(shell, SHELL, t);
+
+  const i = CAPTIONS.findIndex(([a, b]) => t >= a && t <= b);
+  if (i !== capKey) { capKey = i; cap.innerHTML = i < 0 ? '' : CAPTIONS[i][2]; }
+  cap.style.opacity = i < 0 ? 0 : fade(t, CAPTIONS[i][0], CAPTIONS[i][1]);
+
+  // Slow push-in on the dashboard.
+  const z = clamp((t - 34.8) / 5.4);
+  shot.style.transform = `scale(${1 + 0.04 * ease(z)})`;
+
+  // The corner mark and the note give way to the end card.
+  const endIn = fade(t, 40.2, DURATION + 1);
+  document.getElementById('tag').style.opacity = 1 - endIn;
+  document.getElementById('note').style.opacity = 1 - endIn;
+};
+
+const fixed = new URLSearchParams(location.search).get('t');
+if (fixed !== null) {
+  window.seek(parseFloat(fixed));
+} else if (!navigator.webdriver) {
+  const t0 = performance.now();
+  (function tick() {
+    window.seek(((performance.now() - t0) / 1000) % (DURATION + 1));
+    requestAnimationFrame(tick);
+  })();
+} else {
+  window.seek(0);
+}
+</script>
+</body>
+</html>

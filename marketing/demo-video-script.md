@@ -1,8 +1,14 @@
 # Demo video script
 
-A 60-second screen recording with no voice-over. It is the most-used asset in
-the campaign: the first post of the X thread, every Reddit post, the README
-and the Discord posts all want it.
+**An animated version already exists:** [video/demo.mp4](video/demo.mp4) tells
+this story in 46 seconds and needs no recording. It is labelled as an
+illustration; the Memoria output in it is real and Claude's replies are
+scripted (see [README.md](README.md#demo-video)). This file is for an optional
+live recording, which is worth making if a thread asks "is that real?".
+
+A 60-second screen recording with no voice-over. The demo is the most-used
+asset in the campaign: the first post of the X thread, every Reddit post, the
+README and the Discord posts all want it.
 
 The point it has to make, in order: a new session knows nothing; with Memoria
 it finds Monday's decision; that decision is a file you can read.
@@ -50,8 +56,8 @@ video.
 
 - **15 seconds, for an X reply or a README header:** shots 1, 2 and 4, with
   the captions.
-- **Still image:** if you cannot record before launch, `launch.png` stands in
-  everywhere the clip is called for.
+- **No recording:** use the animated `video/demo.mp4` everywhere the clip is
+  called for.
 
 ## Checks before publishing
 

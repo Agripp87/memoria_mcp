@@ -13,7 +13,8 @@ change what does not sound like you. Nothing here has been posted anywhere.
 |------|------------|
 | [PLAN.md](PLAN.md) | The campaign brief: goal, audience, messages, channels, a day-by-day calendar, metrics, risks. |
 | [messaging.md](messaging.md) | Positioning, taglines, the five messages with their evidence, what not to claim, and paste-ready answers to the questions every thread will ask. |
-| [demo-video-script.md](demo-video-script.md) | Shot list for the 60-second demo. Still to record. |
+| [video/](video/) | The 46-second animated demo: `demo.mp4`, `demo.gif`, `demo-poster.png`. See below. |
+| [demo-video-script.md](demo-video-script.md) | Shot list for an optional live screen recording of the same story. |
 | [posts/show-hn.md](posts/show-hn.md) | Show HN title options and the maintainer's first comment. |
 | [posts/reddit.md](posts/reddit.md) | Separate posts for r/ClaudeAI, r/ClaudeCode, r/mcp and r/selfhosted. |
 | [posts/x.md](posts/x.md) | A seven-post launch thread and six follow-ups, each matched to an image. |
@@ -51,6 +52,37 @@ That needs Playwright with Chromium, and the Inter and JetBrains Mono fonts
 installed. `card-search.png` quotes eval scores: re-render it when
 `mcp-server/eval/README.md` changes.
 
+## Demo video
+
+`video/demo.mp4` (1920×1080, 30 fps, 46 seconds, about 4 MB) is a scripted
+animation, so it needs no Claude login and no recording session. It carries a
+small on-screen note saying it is an illustration.
+
+What in it is real: the `memory_search` and `memory_write` results, the
+Markdown file and the `git commit` output were captured from the 0.3.2 server
+with local MiniLM embeddings, running on the generated demo store, and the
+dashboard is a screenshot of that store. What is scripted: the two prompts and
+Claude's two replies, which are written from those results.
+
+| File | Use |
+|------|-----|
+| `video/demo.mp4` | X, Reddit, LinkedIn, Discord, the blog posts. |
+| `video/demo.gif` | The README and anywhere that will not play video (960 wide, 10 fps, about 5 MB). |
+| `video/demo-poster.png` | Thumbnail. |
+
+To change the wording or timing, edit the `CHAT`, `SHELL`, `SCENES` and
+`CAPTIONS` tables at the top of the script in
+[video/src/demo.html](video/src/demo.html), then:
+
+```bash
+node marketing/video/src/render.mjs
+```
+
+That needs Playwright with Chromium, `ffmpeg`, and the Inter and JetBrains
+Mono fonts. Opening `demo.html` in a browser plays it in real time, and
+`demo.html?t=12.5` freezes it at one moment. If you change what a tool result
+says, capture the new text from the real server first.
+
 ## Before launch
 
 - [ ] Read [messaging.md](messaging.md). Fix anything that is not how you
@@ -59,7 +91,9 @@ installed. `card-search.png` quotes eval scores: re-render it when
       describe your experience in words guessed from the README.
 - [ ] Check what Claude Code's and claude.ai's built-in memory currently do,
       and adjust the "Claude already has memory" answer to match.
-- [ ] Record the demo ([demo-video-script.md](demo-video-script.md)).
+- [ ] Watch `video/demo.mp4` and decide whether it is enough on its own, or
+      whether to also record a live session
+      ([demo-video-script.md](demo-video-script.md)).
 - [ ] Install from scratch on a clean macOS, Linux and Windows machine, by
       all three routes: the plugin, `npx`, and `docker compose`.
 - [ ] Confirm the hosted demo is up and its key works, and cap its maximum

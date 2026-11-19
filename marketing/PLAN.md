@@ -115,7 +115,7 @@ Not planned: paid ads (no budget, and this audience blocks them), Product Hunt
 | When | Piece | Channel | Notes |
 |------|-------|---------|-------|
 | L−7 | Repo pass: topics, social preview, pinned discussion, `good first issue` labels | GitHub | Checklist in [README.md](README.md#before-launch). |
-| L−7 | Record the 60-second demo | — | Script in [demo-video-script.md](demo-video-script.md). Needed by every post. |
+| L−7 | Review the animated demo; optionally record a live one | — | [video/demo.mp4](video/demo.mp4) is ready. A live take follows [demo-video-script.md](demo-video-script.md). |
 | L−5 | Awesome-list pull requests and directory submissions | GitHub, directories | They take days to merge; start early. |
 | L−2 | Publish the launch blog post | dev.to / blog | Live before HN so comments can link to it. |
 | L−1 | Check the hosted demo is up and the install commands work on a clean machine | — | A broken install on launch day costs more than any post earns. |
@@ -149,7 +149,8 @@ All drafted here. "Must" means the launch does not go without it.
 | Reddit posts for four subreddits | [posts/reddit.md](posts/reddit.md) | Must |
 | X launch thread and six follow-up posts | [posts/x.md](posts/x.md) | Must |
 | Launch blog post | [posts/blog-launch.md](posts/blog-launch.md) | Must |
-| 60-second demo script and shot list | [demo-video-script.md](demo-video-script.md) | Must |
+| Animated demo video, GIF and poster | [video/](video/) | Must |
+| Shot list for an optional live recording | [demo-video-script.md](demo-video-script.md) | Nice to have |
 | Social cards (launch, four feature cards, square) | [images/](images/) | Must |
 | Technical blog post on the retrieval eval | [posts/blog-eval.md](posts/blog-eval.md) | Should |
 | LinkedIn post | [posts/linkedin.md](posts/linkedin.md) | Should |
@@ -181,8 +182,8 @@ and where installs fail (that is the next release).
 
 ## 8. Budget
 
-None. The cost is time: about 12 hours before L (mostly the demo recording and
-the repo pass), a full day on L, and three to four hours a week afterwards.
+None. The cost is time: about 8 hours before L (mostly the repo pass and the
+install checks), a full day on L, and three to four hours a week afterwards.
 The hosted demo's Cloud Run bill may rise with traffic; it scales to zero and
 runs on throwaway data, so cap its max instances rather than take it down.
 
@@ -202,8 +203,8 @@ runs on throwaway data, so cap its max instances rather than take it down.
    like you. Every post is written in your first person and will be read as
    your word.
 2. Pick L.
-3. Record the demo ([demo-video-script.md](demo-video-script.md)). Nothing
-   else is blocked on anyone but you.
+3. Watch the animated demo ([video/demo.mp4](video/demo.mp4)) and change any
+   wording you would not say.
 4. Work through the [pre-launch checklist](README.md#before-launch).
 
 Decisions that are yours and that the drafts assume:
