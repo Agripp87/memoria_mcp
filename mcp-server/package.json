@@ -83,14 +83,14 @@
     "@types/jsdom": "^30.0.0",
     "@types/node": "^26.6.1",
     "@types/supertest": "^7.2.1",
-    "@vitest/coverage-v8": "^5.1.0",
-    "eslint": "^10.10.0",
+    "@vitest/coverage-v8": "^5.1.1",
+    "eslint": "^10.15.0",
     "eslint-config-prettier": "^10.1.8",
     "jsdom": "^29.1.1",
-    "prettier": "^3.9.8",
+    "prettier": "^3.10.1",
     "supertest": "^7.2.2",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.70.0",
+    "typescript-eslint": "^8.73.0",
     "vitest": "^5.1.0"
   },
   "optionalDependencies": {
