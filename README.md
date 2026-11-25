@@ -2,6 +2,8 @@
 
 **Persistent, plain-text memory for Claude — as a Markdown repo you own.**
 
+**[memoria website](https://agripp87.github.io/memoria_mcp/)** · [30-second demo](https://agripp87.github.io/memoria_mcp/#top) · [install](#quick-start) · [live demo dashboard](https://memoria-demo-hpb4luig7q-uc.a.run.app/dashboard) (key: `memoria-demo`)
+
 Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Code, claude.ai (Chat / CoWork) and any other MCP client a shared long-term memory. Memories are Markdown files with YAML frontmatter in a directory you control; a derived SQLite + FTS5 index provides hybrid semantic + keyword search; a set of agentic tools (reflect, lint, compact, compile) keeps the store healthy; and an optional collector daemon feeds in events from your own tools. It runs as a stdio server for Claude Code and as an OAuth 2.1 HTTP server for remote clients.
 
 ![A 30-second demo: Claude records a decision, the memory is shown as a Markdown file, a session on a second machine finds it after a git pull, and the dashboard shows it in the wiki](marketing/video/demo-30s.gif)
