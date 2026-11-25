@@ -904,13 +904,24 @@ describe("Streamable HTTP sessions and body parsing (review 2026-10)", () => {
   it("does not parse a large body before authentication", async () => {
     // 2MB of JSON: rejected by auth (401), not parsed (413/400) first.
     const big = JSON.stringify({ pad: "x".repeat(2 * 1024 * 1024) });
+    // The server answers 401 without reading the body and then closes the
+    // socket. A client still sending its 2MB can see that as a reset instead
+    // of the 401 (seen on Windows CI). Either way the body was not parsed,
+    // which is the claim; a 413 or 400 would mean it was.
     for (const route of ["/mcp", "/ingest", "/dashboard/api/stats"]) {
-      const r = await request(app)
-        .post(route)
-        .set("Content-Type", "application/json")
-        .set("X-Forwarded-For", "10.8.3.1")
-        .send(big);
-      expect(r.status).toBe(401);
+      let status: number | undefined;
+      try {
+        status = (
+          await request(app)
+            .post(route)
+            .set("Content-Type", "application/json")
+            .set("X-Forwarded-For", "10.8.3.1")
+            .send(big)
+        ).status;
+      } catch (err) {
+        expect(["ECONNRESET", "EPIPE"]).toContain((err as NodeJS.ErrnoException).code);
+      }
+      if (status !== undefined) expect(status).toBe(401);
     }
     // Unauthenticated routes only take small bodies.
     const reg = await request(app)
