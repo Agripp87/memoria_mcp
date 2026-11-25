@@ -153,6 +153,7 @@ All drafted here. "Must" means the launch does not go without it.
 | Launch blog post | [posts/blog-launch.md](posts/blog-launch.md) | Must |
 | Animated demo with narration: 84-second and 30-second cuts, GIF, poster | [video/](video/) | Must |
 | README visuals: demo GIF, feature cards, dashboard screenshots | [../README.md](../README.md) | Must |
+| Landing page for GitHub Pages | [../docs/index.html](../docs/index.html) | Should |
 | Shot list for an optional live recording | [demo-video-script.md](demo-video-script.md) | Nice to have |
 | Social cards (launch, four feature cards, square) | [images/](images/) | Must |
 | Technical blog post on the retrieval eval | [posts/blog-eval.md](posts/blog-eval.md) | Should |

@@ -49,6 +49,7 @@ The official MCP Registry listing is already done. For community directories
 | Tagline | Persistent, plain-text memory for Claude — as a Markdown repo you own. |
 | Category | Memory / Knowledge |
 | Repository | `https://github.com/Agripp87/memoria_mcp` |
+| Website | `https://agripp87.github.io/memoria_mcp/` (once GitHub Pages is enabled) |
 | Package | `@agrippa87/memoria-mcp` (npm) |
 | Registry name | `io.github.Agripp87/memoria-mcp` |
 | License | Apache-2.0 |
