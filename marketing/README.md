@@ -110,6 +110,31 @@ Mono fonts. Opening `demo.html` in a browser plays it in real time, and
 cut. The page itself is silent. If you change what a tool result
 says, capture the new text from the real server first.
 
+## Landing page
+
+[../docs/index.html](../docs/index.html) is a GitHub Pages landing page: one
+static file with no build step and no external fonts, scripts or trackers. It
+uses the dashboard screenshots in `docs/images/` and web-sized copies of the
+two videos in `docs/site/` (1280 wide, about 1 MB and 2.6 MB).
+
+To publish it, once, in the repository's settings: **Settings → Pages → Build
+and deployment → Source: Deploy from a branch → Branch: `main`, folder
+`/docs`**. It then lives at <https://agripp87.github.io/memoria_mcp/> and
+redeploys on every push to `main` that touches `docs/`. After it is live, set
+that URL as the repository's Website in the About panel, and add it to the
+README and to the directory listings.
+
+The page quotes the same facts as the README (eval scores, install commands,
+the demo URL). When one changes, change it in `docs/index.html` too. If the
+videos are re-rendered, re-encode the web copies:
+
+```bash
+for n in demo demo-30s; do
+  ffmpeg -y -i marketing/video/$n.mp4 -vf scale=1280:-2 -c:v libx264 -preset slow -crf 27 \
+    -pix_fmt yuv420p -c:a aac -b:a 96k -movflags +faststart docs/site/$n.mp4
+done
+```
+
 ## Where the visuals are used
 
 | Place | What it shows |
@@ -133,6 +158,9 @@ show up once this branch is merged.
       describe your experience in words guessed from the README.
 - [ ] Check what Claude Code's and claude.ai's built-in memory currently do,
       and adjust the "Claude already has memory" answer to match.
+- [ ] Enable GitHub Pages from `main` `/docs` (see Landing page above), check
+      the page at its public URL on a phone and a laptop, then set it as the
+      repository's Website.
 - [ ] Merge this branch, then open the repository page on github.com and
       check that the demo GIF plays and every image loads.
 - [ ] Listen to both videos. The narration was generated and placed by cue

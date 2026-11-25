@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memoria: long-term memory for Claude, as a Markdown repo you own</title>
+<meta name="description" content="Memoria is an open-source MCP server that gives Claude Code and claude.ai a shared long-term memory, stored as Markdown files you own and sync with git.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0e0f14">
+<link rel="canonical" href="https://agripp87.github.io/memoria_mcp/">
+<link rel="icon" href="site/favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Memoria: long-term memory for Claude, as a Markdown repo you own">
+<meta property="og:description" content="An open-source MCP server. Memories are Markdown files in a folder you control, with hybrid local search and git sync across machines.">
+<meta property="og:url" content="https://agripp87.github.io/memoria_mcp/">
+<meta property="og:image" content="https://agripp87.github.io/memoria_mcp/images/social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta name="twitter:card" content="summary_large_image">
+<!--
+  The GitHub Pages landing page. One static file: no build step, no external
+  fonts, scripts or trackers. Published from the docs/ folder of the main
+  branch (Settings → Pages → Deploy from a branch → main, /docs).
+
+  Facts and numbers here come from the README and mcp-server/eval/README.md as
+  of 0.3.2. When one changes there, change it here. marketing/messaging.md
+  lists each quoted fact with its source.
+-->
+<style>
+  :root {
+    --bg: #0e0f14; --panel: #15161f; --panel-2: #1a1b26; --line: #2a2b3b;
+    --text: #edecf6; --muted: #a3a3ba; --dim: #7c7c96;
+    --accent: #a7a2ff; --accent-ink: #14132b; --green: #7fe0a4; --amber: #f0c674;
+    --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --wrap: 1120px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 76px; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 17px/1.6 var(--sans); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:hover { text-decoration-thickness: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  img, video { max-width: 100%; height: auto; display: block; }
+  code, pre, kbd { font-family: var(--mono); }
+  code { font-size: .9em; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: .08em .38em; }
+  .wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
+  .skip { position: absolute; left: -9999px; }
+  .skip:focus { left: 16px; top: 12px; z-index: 20; background: var(--accent); color: var(--accent-ink); padding: 8px 14px; border-radius: 8px; }
+
+  /* nav */
+  header.nav {
+    position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--line);
+    background: rgba(14,15,20,.86); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  }
+  .nav .wrap { display: flex; align-items: center; gap: 28px; height: 60px; }
+  .brand { font-weight: 750; font-size: 20px; letter-spacing: -.02em; color: var(--text); text-decoration: none; }
+  .nav nav { display: flex; gap: 22px; margin-left: auto; }
+  .nav nav a { color: var(--muted); text-decoration: none; font-size: 15px; }
+  .nav nav a:hover { color: var(--text); }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px; text-decoration: none; font-weight: 600; font-size: 15px;
+    padding: 9px 16px; border-radius: 10px; border: 1px solid var(--line); color: var(--text); background: var(--panel);
+  }
+  .btn:hover { border-color: #44456a; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn.primary:hover { background: #b9b5ff; }
+  @media (max-width: 760px) { .nav nav { display: none; } .nav .btn { margin-left: auto; } }
+
+  /* hero */
+  .hero {
+    padding: 76px 0 64px;
+    background:
+      radial-gradient(900px 520px at 0% 0%, rgba(167,162,255,.13), transparent 62%),
+      radial-gradient(700px 480px at 100% 10%, rgba(127,224,164,.06), transparent 60%);
+  }
+  .eyebrow { font: 500 13px/1 var(--mono); letter-spacing: .2em; text-transform: uppercase; color: var(--dim); margin: 0 0 20px; }
+  h1 { font-size: clamp(38px, 6.2vw, 68px); line-height: 1.03; letter-spacing: -.04em; font-weight: 800; margin: 0; max-width: 16ch; text-wrap: balance; }
+  h1 em { font-style: normal; color: var(--accent); }
+  .lede { font-size: clamp(18px, 2.1vw, 22px); color: var(--muted); max-width: 60ch; margin: 24px 0 0; text-wrap: pretty; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+  .meta { margin-top: 18px; color: var(--dim); font-size: 14.5px; }
+  .hero-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 44px; }
+
+  /* code blocks */
+  .code { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .code .bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--dim); font: 13px var(--mono); }
+  .code .bar i { width: 10px; height: 10px; border-radius: 50%; background: #34354a; }
+  .code .bar span { margin-left: 8px; }
+  .code pre { margin: 0; padding: 16px 18px 18px; overflow-x: auto; font-size: 14.5px; line-height: 1.62; color: #cfcee0; }
+  .k { color: var(--accent); } .g { color: var(--green); } .d { color: var(--dim); } .y { color: var(--amber); } .w { color: var(--text); font-weight: 600; }
+  .copy {
+    position: absolute; top: 6px; right: 8px; font: 500 12.5px var(--sans); color: var(--muted);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; cursor: pointer;
+  }
+  .copy:hover { color: var(--text); border-color: #44456a; }
+
+  /* media */
+  .frame { border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: #0b0c10; box-shadow: 0 30px 80px rgba(0,0,0,.45); }
+  .frame video { width: 100%; aspect-ratio: 16 / 9; }
+  .note { color: var(--dim); font-size: 14px; margin-top: 12px; }
+
+  /* sections */
+  section { padding: 72px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: clamp(28px, 3.6vw, 40px); line-height: 1.1; letter-spacing: -.03em; margin: 0 0 14px; text-wrap: balance; }
+  h3 { font-size: 20px; letter-spacing: -.015em; margin: 0 0 8px; }
+  .sub { color: var(--muted); max-width: 62ch; margin: 0 0 36px; font-size: 18.5px; text-wrap: pretty; }
+  .two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; align-items: start; }
+  .three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+  @media (max-width: 900px) { .two, .three { grid-template-columns: minmax(0, 1fr); } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px; }
+  .card p { color: var(--muted); margin: 0; font-size: 16px; }
+  .card p + p { margin-top: 10px; }
+  .step { font: 500 13px var(--mono); color: var(--accent); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 10px; }
+  .stack > * + * { margin-top: 16px; }
+  .where { display: inline-flex; align-items: center; gap: 9px; font: 500 12.5px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+  .where::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+  .where.desktop::before { background: var(--green); }
+
+  /* eval bars */
+  .bars { display: grid; gap: 14px; }
+  .bar-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) 52px; gap: 14px; align-items: center; font-size: 15.5px; color: var(--muted); }
+  .bar-row .track { height: 16px; background: #20212e; border-radius: 5px; overflow: hidden; }
+  .bar-row .fill { height: 100%; background: #4b4b68; border-radius: 5px; }
+  .bar-row.on { color: var(--text); font-weight: 600; }
+  .bar-row.on .fill { background: var(--accent); }
+  .bar-row .v { font-family: var(--mono); text-align: right; }
+  @media (max-width: 520px) { .bar-row { grid-template-columns: 112px minmax(0, 1fr) 44px; } }
+
+  /* clients diagram */
+  .clients { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .client { background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 14px 12px; text-align: center; }
+  .client b { display: block; font-size: 16px; }
+  .client span { display: block; font: 12.5px var(--mono); color: var(--dim); margin-top: 4px; }
+  .down { text-align: center; color: var(--dim); font: 14px var(--mono); margin: 8px 0; }
+  .store { border: 1px solid #3a3a55; background: var(--panel-2); border-radius: 12px; padding: 14px; text-align: center; }
+  .store b { font: 500 16px var(--mono); color: var(--accent); }
+  .store span { display: block; color: var(--muted); font-size: 14px; margin-top: 4px; }
+
+  /* gallery */
+  .shots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+  @media (max-width: 760px) { .shots { grid-template-columns: minmax(0, 1fr); } }
+  figure { margin: 0; }
+  figure a { display: block; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  figure a:hover { border-color: #44456a; }
+  figcaption { color: var(--muted); font-size: 14.5px; margin-top: 8px; }
+
+  /* lists */
+  ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+  ul.plain li { padding-left: 22px; position: relative; color: var(--muted); }
+  ul.plain li::before { content: ""; position: absolute; left: 2px; top: .68em; width: 8px; height: 8px; border-radius: 2px; background: var(--dim); }
+  ul.plain li b { color: var(--text); font-weight: 600; }
+
+  /* tabs-free install: three plain blocks */
+  .install h3 { margin-top: 0; }
+  .install .card { padding: 20px; }
+  .install .card p { margin-bottom: 14px; }
+
+  footer { border-top: 1px solid var(--line); padding: 36px 0 56px; color: var(--dim); font-size: 14.5px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; justify-content: space-between; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top">Memoria</a>
+    <nav aria-label="Sections">
+      <a href="#how">How it works</a>
+      <a href="#sync">Sync</a>
+      <a href="#search">Search</a>
+      <a href="#dashboard">Dashboard</a>
+      <a href="#install">Install</a>
+    </nav>
+    <a class="btn" href="https://github.com/Agripp87/memoria_mcp">GitHub</a>
+  </div>
+</header>
+
+<main id="main">
+
+<div class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div>
+      <p class="eyebrow">Open-source MCP server</p>
+      <h1>Long-term memory for Claude, as a <em>Markdown repo you own</em>.</h1>
+      <p class="lede">Memoria gives Claude Code and claude.ai one shared memory. Every memory is a plain file in a folder you control: searchable, synced between your machines with git, and readable without the tool.</p>
+      <div class="cta">
+        <a class="btn primary" href="#install">Install in two commands</a>
+        <a class="btn" href="https://memoria-demo-hpb4luig7q-uc.a.run.app/dashboard">Try the live demo</a>
+        <a class="btn" href="https://github.com/Agripp87/memoria_mcp">View on GitHub</a>
+      </div>
+      <p class="meta">Apache-2.0 · Node 20+ · embeddings run locally · no account, no telemetry. Demo key: <code>memoria-demo</code></p>
+    </div>
+    <div>
+      <div class="frame">
+        <video controls preload="none" playsinline poster="site/poster-30s.jpg" aria-label="A 30-second demo of Memoria with narration">
+          <source src="site/demo-30s.mp4" type="video/mp4">
+          <a href="site/demo-30s.mp4">Watch the 30-second demo</a>
+        </video>
+      </div>
+      <p class="note">30 seconds, with narration. A scripted illustration: the prompts and Claude's replies are written, and everything Memoria outputs in it is real, from the demo data.</p>
+    </div>
+  </div>
+</div>
+
+<section id="how">
+  <div class="wrap">
+    <h2>Every session starts from zero. This one doesn't.</h2>
+    <p class="sub">Claude calls Memoria's tools over MCP: it searches the store when a task begins and writes down what is worth keeping as you work.</p>
+    <div class="three">
+      <div class="card">
+        <div class="step">1 · Recall</div>
+        <h3>Claude searches what you decided</h3>
+        <p>A question about last month's architecture choice is answered from your own notes, with the file it came from.</p>
+      </div>
+      <div class="card">
+        <div class="step">2 · Record</div>
+        <h3>Decisions are written as you go</h3>
+        <p>Durable facts become their own notes. Day-to-day events go to an append-only daily log. A check before each write returns the three most similar memories, so Claude updates a note where it would otherwise duplicate one.</p>
+      </div>
+      <div class="card">
+        <div class="step">3 · Read</div>
+        <h3>The memory is a file</h3>
+        <p>Open it, fix it, delete it, grep the folder. The SQLite search index beside it is derived: remove it and it rebuilds from the files.</p>
+      </div>
+    </div>
+
+    <div class="two" style="margin-top:28px">
+      <div class="code">
+        <div class="bar"><i></i><i></i><i></i><span>claude · ~/code/atlas-api</span></div>
+<pre><span class="k">&gt;</span> <span class="w">We're moving the job queue to Postgres, with
+  SKIP LOCKED. Remember that.</span>
+
+<span class="g">●</span> <span class="w">memoria</span> <span class="d">·</span> memory_write<span class="d">(</span><span class="y">"decisions/job-queue-postgres.md"</span><span class="d">)</span>
+  <span class="d">└</span> Written: decisions/job-queue-postgres.md
+    (1 chunks indexed)
+
+<span class="g">●</span> <span class="w">Saved as a decision, linked to the
+  Postgres-over-Mongo note.</span></pre>
+      </div>
+      <div class="code">
+        <div class="bar"><i></i><i></i><i></i><span>~/.memoria/memories/decisions/job-queue-postgres.md</span></div>
+<pre><span class="d">---</span>
+<span class="k">name:</span> <span class="g">Job queue on Postgres</span>
+<span class="k">type:</span> decision
+<span class="k">importance:</span> 6
+<span class="k">tags:</span> [architecture, database, queue]
+<span class="k">related:</span> [decisions/postgres-over-mongo.md]
+<span class="d">---</span>
+
+<span class="w">## Decision: job queue on Postgres</span>
+
+Move the Atlas API job queue to Postgres, using
+`SELECT ... FOR UPDATE SKIP LOCKED`.</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="sync">
+  <div class="wrap">
+    <h2>Sync is git. There is no service.</h2>
+    <p class="sub">Put the store in a private git repository. The plugin adds two Claude Code hooks: commit and push when Claude stops, pull when the next session starts. Both fail soft when you are offline.</p>
+    <div class="two">
+      <div class="stack">
+        <div>
+          <div class="where">Laptop · Claude stops</div>
+          <div class="code">
+<pre><span class="d"># the Stop hook ran memoria-sync-push.sh</span>
+<span class="g">$</span> tail -2 .sync.log
+push: committed session changes
+push: <span class="g">pushed to origin/main</span></pre>
+          </div>
+        </div>
+        <div>
+          <div class="where desktop">Desktop · a new session</div>
+          <div class="code">
+<pre><span class="d"># the SessionStart hook ran memoria-sync-pull.sh</span>
+<span class="g">$</span> grep pull: .sync.log
+pull: committed unflushed local changes before pulling
+pull: <span class="g">merged 1 commit(s) from origin/main</span>
+
+<span class="k">&gt;</span> <span class="w">What do we use for the job queue?</span>
+
+<span class="g">●</span> <span class="w">memoria</span> <span class="d">·</span> memory_search<span class="d">(</span>…<span class="d">)</span>
+  <span class="d">└</span> 1. <span class="w">decisions/job-queue-postgres.md</span>  0.528
+    2. daily/2026-11-19.md              0.475</pre>
+          </div>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="card">
+          <h3>Two machines, same day, no conflict</h3>
+          <p>Daily logs are append-only, so when two machines both write to today's file the answer is mechanical: keep both sides. Git ships a merge driver that does exactly that, and one line in the store's <code>.gitattributes</code> turns it on.</p>
+        </div>
+        <div class="code">
+          <div class="bar"><i></i><i></i><i></i><span>memories/daily/2026-11-19.md · after the merge</span></div>
+<pre><span class="w">## 02:13 UTC — note</span>
+Fixed the sync cursor off-by-one in Atlas API.
+Regression test added first.
+<span class="w">## 02:15 UTC — note</span>
+Moved the Atlas API job queue to Postgres
+(SKIP LOCKED). See decisions/job-queue-postgres.md.</pre>
+        </div>
+        <div class="code">
+          <div class="bar"><i></i><i></i><i></i><span>.gitattributes</span></div>
+<pre><span class="k">memories/daily/*.md</span> <span class="g">merge=union</span></pre>
+        </div>
+        <p class="note">Curated notes keep git's normal three-way merge on purpose: if both machines edited the same decision, that is a real disagreement and you should see it. Log lines above are shortened by their timestamps.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="everywhere">
+  <div class="wrap">
+    <div class="two">
+      <div>
+        <h2>One memory. Every Claude.</h2>
+        <p class="sub" style="margin-bottom:20px">The same store serves Claude Code over stdio and claude.ai over HTTP. A decision recorded in a terminal can be found from a chat on your phone.</p>
+        <ul class="plain">
+          <li><b>Claude Code:</b> installs as a plugin, or with <code>claude mcp add</code>.</li>
+          <li><b>claude.ai:</b> a custom connector. The HTTP transport implements OAuth 2.1 with PKCE, dynamic client registration and metadata discovery.</li>
+          <li><b>Other MCP clients:</b> any client should work. Cursor has a tested configuration.</li>
+        </ul>
+        <p class="note">The claude.ai side means running the HTTP server somewhere reachable, with your own TLS in front. A Docker Compose file and a Cloud Run template are in the repository.</p>
+      </div>
+      <div class="card">
+        <div class="clients">
+          <div class="client"><b>Claude Code</b><span>stdio · plugin</span></div>
+          <div class="client"><b>claude.ai</b><span>HTTP · OAuth 2.1</span></div>
+          <div class="client"><b>Cursor</b><span>stdio · npx</span></div>
+        </div>
+        <div class="down">↓</div>
+        <div class="store"><b>~/.memoria/memories/</b><span>Markdown files · the source of truth</span></div>
+        <div class="down">↓</div>
+        <div class="client"><b style="font-weight:500;color:var(--muted)">SQLite + FTS5 index</b><span>derived · rebuildable</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="search">
+  <div class="wrap">
+    <div class="two">
+      <div>
+        <h2>Search with the numbers attached.</h2>
+        <p class="sub" style="margin-bottom:20px">Retrieval combines embeddings with BM25 keyword search. Embeddings catch a reworded question; keywords catch the things embeddings blur, like a ticket number or an error string.</p>
+        <ul class="plain">
+          <li><b>Local by default.</b> Embeddings are computed on your machine with all-MiniLM-L6-v2, a one-time download of about 23 MB. Remote embeddings need an explicit setting; an API key in your environment is not consent.</li>
+          <li><b>Coverage is never silent.</b> Every result reports how many chunks were scanned.</li>
+          <li><b>The eval is in the repository,</b> with the sweeps, the controls, and a list of what it does not show.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>nDCG@10 on the retrieval eval</h3>
+        <div class="bars" style="margin-top:18px" role="img" aria-label="Keyword only 67.3, vector only 83.0, shipped default 83.7">
+          <div class="bar-row"><span>Keyword only</span><span class="track"><span class="fill" style="display:block;width:67.3%"></span></span><span class="v">67.3</span></div>
+          <div class="bar-row"><span>Vector only</span><span class="track"><span class="fill" style="display:block;width:83%"></span></span><span class="v">83.0</span></div>
+          <div class="bar-row on"><span>Shipped default</span><span class="track"><span class="fill" style="display:block;width:83.7%"></span></span><span class="v">83.7</span></div>
+        </div>
+        <p class="note" style="margin-top:20px">175 synthetic documents, 144 queries, local MiniLM. Synthetic is the important word: this shows the weights are not broken, not how it does on your notes. <a href="https://github.com/Agripp87/memoria_mcp/blob/main/mcp-server/eval/README.md">Read the eval write-up</a>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="dashboard">
+  <div class="wrap">
+    <h2>A dashboard on the same files.</h2>
+    <p class="sub">Browse the store as a wiki with related links and backlinks, search it with the same ranking Claude uses, and add notes of your own in the journal.</p>
+    <figure>
+      <a href="images/dashboard-wiki-backlinks.png"><img src="images/dashboard-wiki-backlinks.png" width="2460" height="1200" loading="lazy" alt="The dashboard's wiki view: the Postgres over Mongo decision rendered from Markdown, with its details, related memories, and a backlink from the newer Job queue on Postgres decision"></a>
+      <figcaption>The wiki view. The older decision shows a backlink from the one recorded in the demo.</figcaption>
+    </figure>
+    <div class="shots">
+      <figure>
+        <a href="images/dashboard-overview.png"><img src="images/dashboard-overview.png" width="2460" height="1200" loading="lazy" alt="Overview tab: 31 memory files, 98 indexed chunks, average importance 5.5, no stale files, and the most recent journal entries"></a>
+        <figcaption>Overview</figcaption>
+      </figure>
+      <figure>
+        <a href="images/dashboard-search.png"><img src="images/dashboard-search.png" width="2460" height="1200" loading="lazy" alt="Memories tab: a search for 'what do we use for the job queue?' returns the job-queue decision first, with its score"></a>
+        <figcaption>Search</figcaption>
+      </figure>
+      <figure>
+        <a href="images/dashboard-journal.png"><img src="images/dashboard-journal.png" width="2460" height="1200" loading="lazy" alt="Journal tab: a text box for a new entry with mood buttons and tags, above the recent entries"></a>
+        <figcaption>Journal</figcaption>
+      </figure>
+    </div>
+    <p class="note">All four views show generated demo data. <a href="https://memoria-demo-hpb4luig7q-uc.a.run.app/dashboard">Open the live demo</a> (key: <code>memoria-demo</code>) to click through it yourself.</p>
+  </div>
+</section>
+
+<section id="video">
+  <div class="wrap">
+    <h2>The whole story in 84 seconds.</h2>
+    <p class="sub">One decision, followed from a laptop to a desktop and into the dashboard.</p>
+    <div class="frame">
+      <video controls preload="none" playsinline poster="site/poster-full.jpg" aria-label="The full 84-second demo of Memoria with narration">
+        <source src="site/demo.mp4" type="video/mp4">
+        <a href="site/demo.mp4">Watch the full demo</a>
+      </video>
+    </div>
+    <p class="note">With narration; the same captions are on screen. A scripted illustration with real Memoria output, as above.</p>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="wrap">
+    <div class="two">
+      <div>
+        <h2>What it is not.</h2>
+        <p class="sub" style="margin-bottom:0">A tool that holds your memory should say where it is thin. The README keeps a full <a href="https://github.com/Agripp87/memoria_mcp#known-limitations">Known Limitations</a> section; these are the ones to know first.</p>
+      </div>
+      <ul class="plain">
+        <li><b>Not multi-user.</b> It is single-tenant, for your own assistant. If you are building memory into a product, use something built for that.</li>
+        <li><b>Not a replacement for CLAUDE.md.</b> Standing instructions belong there. Memoria is for the long tail that is searched when relevant and never loaded otherwise.</li>
+        <li><b>One key, one writer.</b> The hosted setup has a single static key as its perimeter and runs one instance per store.</li>
+        <li><b>The collector is experimental.</b> Optional ingestion of email, calendar and messages ships switched off. Consent can only be given in the dashboard. Read <a href="https://github.com/Agripp87/memoria_mcp/blob/main/SECURITY.md">SECURITY.md</a> first.</li>
+        <li><b>Solo project.</b> Used daily by its maintainer since spring 2026; reviews are asynchronous.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="install" class="install">
+  <div class="wrap">
+    <h2>Install</h2>
+    <p class="sub">The store defaults to <code>~/.memoria</code> and is created on the first write. Node 20 or newer.</p>
+    <div class="two">
+      <div class="card">
+        <h3>Claude Code plugin</h3>
+        <p>Registers the server and wires the sync hooks. The first start builds from source and takes about a minute.</p>
+        <div class="code">
+          <button class="copy" type="button" data-copy="/plugin marketplace add Agripp87/memoria_mcp&#10;/plugin install memoria@memoria">Copy</button>
+<pre><span class="g">/plugin</span> marketplace add Agripp87/memoria_mcp
+<span class="g">/plugin</span> install memoria@memoria</pre>
+        </div>
+      </div>
+      <div class="card">
+        <h3>From npm</h3>
+        <p>The server alone, without the hooks. Other MCP clients use the same command.</p>
+        <div class="code">
+          <button class="copy" type="button" data-copy="claude mcp add memoria -s user -- npx -y @agrippa87/memoria-mcp">Copy</button>
+<pre><span class="g">$</span> claude mcp add memoria -s user -- \
+    npx -y @agrippa87/memoria-mcp</pre>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:28px">
+      <h3>Then tell Claude how to use it</h3>
+      <p>Add a standing instruction to your <code>CLAUDE.md</code>, for example:</p>
+      <div class="code">
+        <button class="copy" type="button" data-copy="At session start, memory_search for context relevant to the task. Record decisions, solved bugs and preferences with memory_daily during the session, memory_write for durable facts. Do not capture transactional work.">Copy</button>
+<pre style="white-space:pre-wrap">At session start, memory_search for context relevant to the task. Record decisions, solved bugs and preferences with memory_daily during the session, memory_write for durable facts. Do not capture transactional work.</pre>
+      </div>
+      <p style="margin:14px 0 0">For claude.ai, Docker, multi-device sync and every setting, see the <a href="https://github.com/Agripp87/memoria_mcp#quick-start">Quick Start in the README</a>.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Memoria · <a href="https://github.com/Agripp87/memoria_mcp/blob/main/LICENSE">Apache-2.0</a> · Copyright the Memoria contributors</span>
+    <span>
+      <a href="https://github.com/Agripp87/memoria_mcp">GitHub</a> ·
+      <a href="https://www.npmjs.com/package/@agrippa87/memoria-mcp">npm</a> ·
+      <a href="https://github.com/Agripp87/memoria_mcp/blob/main/CHANGELOG.md">Changelog</a> ·
+      <a href="https://github.com/Agripp87/memoria_mcp/blob/main/SECURITY.md">Security</a> ·
+      <a href="https://github.com/Agripp87/memoria_mcp/issues">Issues</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+  // Copy buttons. The only script on the page.
+  for (const b of document.querySelectorAll('.copy')) {
+    b.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(b.dataset.copy);
+        b.textContent = 'Copied';
+      } catch {
+        b.textContent = 'Select and copy';
+      }
+      setTimeout(() => { b.textContent = 'Copy'; }, 1600);
+    });
+  }
+</script>
+</body>
+</html>
