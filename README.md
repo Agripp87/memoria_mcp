@@ -4,9 +4,9 @@
 
 Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Code, claude.ai (Chat / CoWork) and any other MCP client a shared long-term memory. Memories are Markdown files with YAML frontmatter in a directory you control; a derived SQLite + FTS5 index provides hybrid semantic + keyword search; a set of agentic tools (reflect, lint, compact, compile) keeps the store healthy; and an optional collector daemon feeds in events from your own tools. It runs as a stdio server for Claude Code and as an OAuth 2.1 HTTP server for remote clients.
 
-![The Memoria dashboard's wiki view: a memory rendered from Markdown, with its details, related memories and backlinks](docs/images/dashboard-wiki.png)
+![A 30-second demo: Claude records a decision, the memory is shown as a Markdown file, a session on a second machine finds it after a git pull, and the dashboard shows it in the wiki](marketing/video/demo-30s.gif)
 
-<sub>The dashboard's wiki view, showing the built-in demo data (`npm run demo`).</sub>
+<sub>A scripted illustration; the Memoria output in it is real, from the demo data. With narration: [30 seconds](marketing/video/demo-30s.mp4) · [the full 84 seconds](marketing/video/demo.mp4), which adds sync between devices and the dashboard.</sub>
 
 > **Status: early public release.** The server has run as the maintainer's daily driver since spring 2026 (hosted on Cloud Run, two adversarial security reviews and a full code review, a test suite CI runs on Ubuntu and Windows). It installs as a Claude Code plugin or from npm as [`@agrippa87/memoria-mcp`](https://www.npmjs.com/package/@agrippa87/memoria-mcp) — see [Roadmap](#roadmap). The sub-memory **collector** (iMessage / IMAP / Google ingestion) ships but should be treated as **experimental**; read [SECURITY.md](SECURITY.md) before enabling sources.
 
@@ -17,6 +17,17 @@ Memoria is an [MCP](https://modelcontextprotocol.io) server that gives Claude Co
 - **Agentic self-maintenance.** Write-time dedup, reflection, contradiction lint, decay/promotion, and a deterministic "compile, don't retrieve" loop that rolls the daily firehose into linked entity pages.
 - **Spec-complete remote transport.** OAuth 2.1 with PKCE, client credentials, dynamic client registration and metadata discovery — works as a claude.ai custom connector out of the box.
 - **Honest about search.** Three embedding providers (local MiniLM → n-gram fallback, plus OpenAI as an explicit opt-in), three-signal scoring, and every result reports its scan coverage.
+
+<table>
+  <tr>
+    <td width="50%"><a href="#memory-file-format"><img src="marketing/images/card-own.png" alt="Your memory is a folder: Markdown files with YAML frontmatter that you can grep, edit and commit. The search index is derived and rebuilds from the files."></a></td>
+    <td width="50%"><a href="#multi-device-sync"><img src="marketing/images/card-sync.png" alt="Sync is git, and same-day writes merge: a laptop and a desktop each append an entry to the same daily log, and after a push and a pull the file holds both, because .gitattributes sets merge=union on daily logs."></a></td>
+  </tr>
+  <tr>
+    <td><a href="#remote-access-claudeai-other-devices-with-docker"><img src="marketing/images/card-everywhere.png" alt="One memory, every Claude: Claude Code over stdio, claude.ai over HTTP with OAuth 2.1, and Cursor over stdio all read and write the same Markdown store, with a derived SQLite index beside it."></a></td>
+    <td><a href="#search-algorithm"><img src="marketing/images/card-search.png" alt="Hybrid search, measured in the open: on the retrieval eval the shipped default scores 83.7 nDCG@10, against 83.0 for vectors only and 67.3 for keywords only, on 175 synthetic documents with local embeddings."></a></td>
+  </tr>
+</table>
 
 Upgrading from an earlier version? See [Recent updates](#recent-updates) and the [CHANGELOG](CHANGELOG.md).
 
@@ -89,6 +100,8 @@ Upgrading from an earlier version? See [Recent updates](#recent-updates) and the
 - (Optional) an OpenAI API key for the highest-quality embeddings. Without one, a local `all-MiniLM-L6-v2` model provides semantic embeddings fully offline (one-time ~23 MB download).
 
 ### Option A: install the Claude Code plugin (fastest)
+
+<img src="marketing/images/card-install.png" width="720" alt="Two commands in Claude Code: /plugin marketplace add Agripp87/memoria_mcp, then /plugin install memoria@memoria. Or from npm: claude mcp add memoria -s user -- npx -y @agrippa87/memoria-mcp">
 
 In Claude Code:
 
@@ -458,6 +471,23 @@ hook.flush()  # on shutdown
 
 Memoria includes a built-in web dashboard for managing memory, data sources, and journaling — no CLI required.
 
+![The dashboard's wiki view: the "Postgres over Mongo" decision rendered from Markdown, with its details, related memories, and a backlink from the newer "Job queue on Postgres" decision](docs/images/dashboard-wiki-backlinks.png)
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/images/dashboard-overview.png" alt="Overview tab: 31 memory files, 98 indexed chunks, average importance 5.5, no stale files, collector status and the most recent journal entries"></td>
+    <td width="33%"><img src="docs/images/dashboard-search.png" alt="Memories tab: a search for 'what do we use for the job queue?' returns the job-queue decision first with its score, then today's daily log entry"></td>
+    <td width="33%"><img src="docs/images/dashboard-journal.png" alt="Journal tab: a text box for a new entry with mood buttons and tags, above the recent entries"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Overview</sub></td>
+    <td align="center"><sub>Search</sub></td>
+    <td align="center"><sub>Journal</sub></td>
+  </tr>
+</table>
+
+<sub>All four views show the built-in demo data (`npm run demo`), after the two-machine sync in the [demo video](marketing/video/demo.mp4).</sub>
+
 **Access**: `http://127.0.0.1:3100/dashboard` (or your public URL)
 
 On first visit, the dashboard asks for your `MEMORIA_API_KEY` once and exchanges it for an httpOnly session cookie; the key itself is not stored in the browser.
@@ -672,6 +702,8 @@ Results are returned in descending score order.
 > **Provider caveat:** with the `hash` n-gram provider, `vector_cosine_similarity` is only a lexical approximation — the vector and FTS terms largely measure the same thing, so treat a `hash` deployment as keyword search with extra steps, not semantic search. Use `minilm` (local, the default) or `openai` for true semantic retrieval; the Docker image pre-bakes the MiniLM model.
 
 ## Multi-device sync
+
+<a href="marketing/video/demo.mp4"><img src="marketing/images/card-sync.png" width="720" alt="A laptop and a desktop each append an entry to the same daily log; after a push and a pull, the file holds both entries"></a>
 
 Memoria deliberately has **no sync service**. The store is a directory of Markdown files, so git already solves this — [`scripts/sync/`](scripts/sync/README.md) just makes the setup correct rather than merely possible.
 

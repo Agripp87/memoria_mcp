@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Memoria social cards</title>
+<!--
+  Source for every PNG in marketing/images/. Each <section class="card"> is one
+  image; render.mjs screenshots them by id. Fonts: Inter Display and JetBrains
+  Mono, installed locally (both SIL OFL). Edit the text here and re-run
+  `node marketing/images/src/render.mjs`.
+-->
+<style>
+  :root {
+    --bg: #0e0f14;
+    --panel: #161720;
+    --panel-2: #1b1c27;
+    --line: #2a2b3b;
+    --text: #edecf6;
+    --muted: #9c9cb4;
+    --dim: #6c6c85;
+    --accent: #a7a2ff;
+    --green: #7fe0a4;
+    --amber: #f0c674;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #000; font-family: "Inter Display", "Inter", sans-serif; color: var(--text); }
+  .card {
+    position: relative; overflow: hidden;
+    width: 1600px; height: 900px; padding: 88px 96px;
+    background:
+      radial-gradient(900px 600px at 0% 100%, rgba(167,162,255,.10), transparent 60%),
+      radial-gradient(700px 500px at 100% 0%, rgba(127,224,164,.05), transparent 60%),
+      var(--bg);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 72px; align-items: center;
+    margin-bottom: 40px;
+  }
+  .card.wide-left { grid-template-columns: 0.82fr 1.18fr; }
+  .eyebrow {
+    font-family: "JetBrains Mono", monospace; font-size: 22px; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--dim); margin-bottom: 28px;
+  }
+  h1 { font-size: 150px; line-height: .95; font-weight: 800; letter-spacing: -.045em; }
+  h2 { font-size: 78px; line-height: 1.02; font-weight: 700; letter-spacing: -.035em; text-wrap: balance; }
+  p.lede { font-size: 36px; line-height: 1.32; color: var(--muted); margin-top: 32px; font-weight: 400; text-wrap: pretty; }
+  p.lede b { color: var(--text); font-weight: 600; }
+  .foot {
+    position: absolute; left: 96px; bottom: 64px;
+    font-family: "JetBrains Mono", monospace; font-size: 23px; color: var(--dim);
+  }
+  .foot .a { color: var(--accent); }
+  .foot .sep { margin: 0 16px; color: var(--line); }
+  .mark {
+    position: absolute; right: 96px; bottom: 64px; font-weight: 700; font-size: 28px;
+    letter-spacing: -.02em; color: var(--text);
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 20px;
+    font-family: "JetBrains Mono", monospace; font-size: 25px; line-height: 1.62;
+    overflow: hidden;
+  }
+  .panel + .panel { margin-top: 22px; }
+  .bar {
+    display: flex; align-items: center; gap: 10px; padding: 18px 26px;
+    border-bottom: 1px solid var(--line); color: var(--dim); font-size: 21px;
+  }
+  .bar i { width: 12px; height: 12px; border-radius: 50%; background: #34354a; display: block; }
+  .bar span { margin-left: 14px; }
+  .body { padding: 26px 30px 30px; white-space: pre; color: #c9c8dc; }
+  .k { color: var(--accent); } .g { color: var(--green); } .d { color: var(--dim); }
+  .w { color: var(--text); font-weight: 700; } .y { color: var(--amber); }
+  .stack > * + * { margin-top: 22px; }
+
+  /* sync card */
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: stretch; }
+  #card-sync .panel { font-size: 19px; }
+  #card-sync .body { white-space: pre-wrap; }
+  #card-sync .panel + .panel { margin-top: 0; }
+  #card-sync .body { padding: 18px 24px 20px; }
+  #card-sync .bar { padding: 13px 22px; font-size: 18px; }
+  #card-sync .gap { height: 18px; }
+  
+  .arrow { text-align: center; color: var(--dim); font-family: "JetBrains Mono", monospace; font-size: 21px; margin: 10px 0; }
+
+  /* search card */
+  .rows { padding: 34px 34px 30px; font-family: "Inter Display", sans-serif; }
+  .row { display: grid; grid-template-columns: 250px 1fr 96px; align-items: center; gap: 20px; margin-bottom: 26px; }
+  .row .lab { font-size: 26px; color: var(--muted); }
+  .row .track { height: 30px; background: #20212e; border-radius: 6px; overflow: hidden; }
+  .row .fill { height: 100%; background: #4a4a66; border-radius: 6px; }
+  .row.on .fill { background: var(--accent); }
+  .row.on .lab, .row.on .val { color: var(--text); font-weight: 600; }
+  .row .val { font-family: "JetBrains Mono", monospace; font-size: 27px; color: var(--muted); text-align: right; }
+  .note { font-size: 21px; line-height: 1.45; color: var(--dim); border-top: 1px solid var(--line); padding-top: 22px; margin-top: 8px; }
+
+  /* everywhere card */
+  .clients { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .client { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px 22px; }
+  .client b { display: block; font-size: 30px; font-weight: 650; letter-spacing: -.01em; }
+  .client span { display: block; margin-top: 8px; font-family: "JetBrains Mono", monospace; font-size: 19px; color: var(--dim); }
+  .wires { height: 74px; }
+  .store { background: var(--panel-2); border: 1px solid #3a3a55; border-radius: 16px; padding: 26px 30px; text-align: center; }
+  .store b { font-family: "JetBrains Mono", monospace; font-size: 30px; color: var(--accent); font-weight: 500; }
+  .store span { display: block; margin-top: 10px; font-size: 23px; color: var(--muted); }
+
+  /* dashboard card */
+  .shot { border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 40px 90px rgba(0,0,0,.55); }
+  .shot img { display: block; width: 100%; }
+  .card.dash { grid-template-columns: 600px; }
+  .card.dash .shot { position: absolute; left: 770px; top: 84px; width: 1500px; border-radius: 18px; }
+
+  /* other sizes */
+  .card.square { width: 1080px; height: 1080px; grid-template-columns: 1fr; padding: 64px 80px; align-content: start; gap: 34px; }
+  .card.square h1 { font-size: 136px; }
+  .card.square p.lede { font-size: 38px; }
+  .card.square .foot { left: 80px; bottom: 44px; }
+  .card.li { width: 1200px; height: 627px; padding: 60px 68px; gap: 48px; }
+  .card.li h1 { font-size: 104px; }
+  .card.li .eyebrow { font-size: 17px; margin-bottom: 20px; }
+  .card.li p.lede { font-size: 27px; margin-top: 22px; }
+  .card.li .panel { font-size: 18px; border-radius: 16px; }
+  .card.li .bar { font-size: 15px; padding: 13px 20px; }
+  .card.li .bar i { width: 9px; height: 9px; }
+  .card.li .body { padding: 18px 22px 22px; }
+  .card.li .foot { left: 68px; bottom: 44px; font-size: 17px; }
+</style>
+</head>
+<body>
+
+<!-- 1. Launch hero, 16:9 -->
+<section class="card" id="launch">
+  <div>
+    <div class="eyebrow">Open-source MCP server</div>
+    <h1>Memoria</h1>
+    <p class="lede">Long-term memory for Claude, as <b>a Markdown repo you own</b>. Hybrid search, git sync, one memory for Claude Code and claude.ai.</p>
+  </div>
+  <div class="stack">
+    <div class="panel">
+      <div class="bar"><i></i><i></i><i></i><span>memories/decisions/postgres-over-mongo.md</span></div>
+<div class="body"><span class="d">---</span>
+<span class="k">name:</span> <span class="g">Postgres over Mongo</span>
+<span class="k">type:</span> decision
+<span class="k">importance:</span> 6
+<span class="k">related:</span> [project/atlas-api.md]
+<span class="d">---</span>
+<span class="w">## Decision: Postgres over Mongo</span>
+Needed relational integrity for
+shared notebooks + sync cursors.</div>
+    </div>
+    <div class="panel">
+<div class="body"><span class="d">in Claude Code</span>
+<span class="g">/plugin</span> marketplace add Agripp87/memoria_mcp
+<span class="g">/plugin</span> install memoria@memoria</div>
+    </div>
+  </div>
+  <div class="foot"><span class="a">github.com/Agripp87/memoria_mcp</span><span class="sep">•</span>Apache-2.0</div>
+</section>
+
+<!-- 2. You own it -->
+<section class="card" id="card-own">
+  <div>
+    <div class="eyebrow">Plain text</div>
+    <h2>Your memory is a folder.</h2>
+    <p class="lede">Markdown files with YAML frontmatter. <b>Grep it, edit it, commit it.</b> The search index is derived and rebuilds from the files.</p>
+  </div>
+  <div class="panel">
+    <div class="bar"><i></i><i></i><i></i><span>~/.memoria/memories</span></div>
+<div class="body"><span class="g">$</span> ls
+daily/      decisions/  feedback/
+project/    references/ sessions/
+user/
+
+<span class="g">$</span> grep -rl "Postgres" decisions project
+decisions/postgres-over-mongo.md
+project/atlas-api.md
+project/nimbus-notes.md
+
+<span class="g">$</span> git diff --stat
+ decisions/postgres-over-mongo.md | 2 <span class="g">+</span><span style="color:#f08a8a">-</span></div>
+  </div>
+  <div class="foot"><span class="a">github.com/Agripp87/memoria_mcp</span></div>
+  <div class="mark">Memoria</div>
+</section>
+
+<!-- 3. Sync -->
+<section class="card wide-left" id="card-sync">
+  <div>
+    <div class="eyebrow">Multi-device</div>
+    <h2>Sync is git. Same-day writes merge.</h2>
+    <p class="lede">No sync service. Daily logs are append-only, so git's <b>union</b> merge driver keeps both machines' entries.</p>
+  </div>
+  <div>
+    <div class="two">
+      <div class="panel">
+        <div class="bar"><i></i><i></i><i></i><span>laptop</span></div>
+<div class="body"><span class="w">## 02:15 UTC — note</span>
+Moved the Atlas API job queue to Postgres (SKIP LOCKED). See decisions/job-queue-postgres.md.</div>
+      </div>
+      <div class="panel">
+        <div class="bar"><i></i><i></i><i></i><span>desktop</span></div>
+<div class="body"><span class="w">## 02:13 UTC — note</span>
+Fixed the sync cursor off-by-one in Atlas API. Regression test added first.</div>
+      </div>
+    </div>
+    <div class="arrow">↓ &nbsp;push, then pull on the other machine&nbsp; ↓</div>
+    <div class="panel">
+      <div class="bar"><i></i><i></i><i></i><span>memories/daily/2026-11-19.md &nbsp;·&nbsp; both entries kept</span></div>
+<div class="body"><span class="w">## 02:13 UTC — note</span>
+Fixed the sync cursor off-by-one in Atlas API. Regression test added first.
+<span class="w">## 02:15 UTC — note</span>
+Moved the Atlas API job queue to Postgres (SKIP LOCKED). See decisions/job-queue-postgres.md.</div>
+    </div>
+    <div class="gap"></div>
+    <div class="panel">
+<div class="body"><span class="d"># .gitattributes</span>
+<span class="k">memories/daily/*.md</span> <span class="g">merge=union</span></div>
+    </div>
+  </div>
+  <div class="foot"><span class="a">github.com/Agripp87/memoria_mcp</span></div>
+</section>
+
+<!-- 4. Search -->
+<section class="card" id="card-search">
+  <div>
+    <div class="eyebrow">Retrieval</div>
+    <h2>Hybrid search, measured in the open.</h2>
+    <p class="lede">Local embeddings plus BM25 keywords. <b>The eval is in the repo</b>, with what it does not prove written next to the score.</p>
+  </div>
+  <div class="panel">
+    <div class="bar"><i></i><i></i><i></i><span>npm run eval &nbsp;·&nbsp; nDCG@10</span></div>
+    <div class="rows">
+      <div class="row"><div class="lab">Keyword only</div><div class="track"><div class="fill" style="width:67.3%"></div></div><div class="val">67.3</div></div>
+      <div class="row"><div class="lab">Vector only</div><div class="track"><div class="fill" style="width:83.0%"></div></div><div class="val">83.0</div></div>
+      <div class="row on"><div class="lab">Shipped default</div><div class="track"><div class="fill" style="width:83.7%"></div></div><div class="val">83.7</div></div>
+      <div class="note">175 synthetic documents, 144 queries, local all-MiniLM-L6-v2. Nothing leaves the machine unless you opt in to remote embeddings. Every result reports how much of the store was scanned.</div>
+    </div>
+  </div>
+  <div class="foot"><span class="a">mcp-server/eval/README.md</span></div>
+  <div class="mark">Memoria</div>
+</section>
+
+<!-- 5. Everywhere -->
+<section class="card wide-left" id="card-everywhere">
+  <div>
+    <div class="eyebrow">One store</div>
+    <h2>One memory. Every Claude.</h2>
+    <p class="lede">stdio for Claude Code, <b>OAuth 2.1 over HTTP</b> for claude.ai. What one learns, the other can find.</p>
+  </div>
+  <div>
+    <div class="clients">
+      <div class="client"><b>Claude Code</b><span>stdio · plugin</span></div>
+      <div class="client"><b>claude.ai</b><span>HTTP · OAuth 2.1</span></div>
+      <div class="client"><b>Cursor</b><span>stdio · npx</span></div>
+    </div>
+    <svg class="wires" viewBox="0 0 780 74" width="100%" preserveAspectRatio="none" fill="none" stroke="#3a3a55" stroke-width="2">
+      <path d="M125 0 V30 Q125 44 139 44 H376 Q390 44 390 58 V74"/>
+      <path d="M390 0 V74"/>
+      <path d="M655 0 V30 Q655 44 641 44 H404 Q390 44 390 58"/>
+    </svg>
+    <div class="store"><b>~/.memoria/memories/</b><span>Markdown files · the source of truth</span></div>
+    <svg class="wires" viewBox="0 0 780 74" width="100%" preserveAspectRatio="none" fill="none" stroke="#3a3a55" stroke-width="2" style="height:48px">
+      <path d="M390 0 V74"/>
+    </svg>
+    <div class="client" style="text-align:center"><b style="font-size:26px;font-weight:500;color:var(--muted)">SQLite + FTS5 index</b><span>derived · rebuildable</span></div>
+  </div>
+  <div class="foot"><span class="a">github.com/Agripp87/memoria_mcp</span></div>
+  <div class="mark">Memoria</div>
+</section>
+
+<!-- 6. Dashboard -->
+<section class="card dash" id="card-dashboard">
+  <div>
+    <div class="eyebrow">Dashboard</div>
+    <h2>Browse it like a wiki.</h2>
+    <p class="lede">Rendered Markdown, related links and <b>backlinks</b>, for every memory in the store.</p>
+  </div>
+  <div class="shot"><img src="wiki-shot.png" alt=""></div>
+  <div class="foot"><span class="a">github.com/Agripp87/memoria_mcp</span></div>
+</section>
+
+<!-- 7. Install -->
+<section class="card" id="card-install">
+  <div>
+    <div class="eyebrow">Claude Code plugin</div>
+    <h2>Two commands. No account.</h2>
+    <p class="lede">The store defaults to <b>~/.memoria</b> and is created on the first write. Embeddings run locally.</p>
+  </div>
+  <div class="stack">
+    <div class="panel">
+      <div class="bar"><i></i><i></i><i></i><span>in Claude Code</span></div>
+<div class="body"><span class="g">/plugin</span> marketplace add Agripp87/memoria_mcp
+<span class="g">/plugin</span> install memoria@memoria</div>
+    </div>
+    <div class="panel">
+      <div class="bar"><i></i><i></i><i></i><span>or from npm</span></div>
+<div class="body"><span class="g">$</span> claude mcp add memoria -s user -- \
+    npx -y @agrippa87/memoria-mcp</div>
+    </div>
+  </div>
+  <div class="foot"><span class="a">github.com/Agripp87/memoria_mcp</span><span class="sep">•</span>Apache-2.0</div>
+  <div class="mark">Memoria</div>
+</section>
+
+<!-- 8. Square, for LinkedIn/Instagram-shaped slots -->
+<section class="card square" id="launch-square">
+  <div>
+    <div class="eyebrow">Open-source MCP server</div>
+    <h1>Memoria</h1>
+    <p class="lede">Long-term memory for Claude, as <b>a Markdown repo you own</b>.</p>
+  </div>
+  <div class="stack">
+    <div class="panel">
+      <div class="bar"><i></i><i></i><i></i><span>memories/decisions/postgres-over-mongo.md</span></div>
+<div class="body"><span class="d">---</span>
+<span class="k">name:</span> <span class="g">Postgres over Mongo</span>
+<span class="k">type:</span> decision
+<span class="k">importance:</span> 6
+<span class="d">---</span>
+<span class="w">## Decision: Postgres over Mongo</span></div>
+    </div>
+    <div class="panel">
+<div class="body"><span class="g">/plugin</span> marketplace add Agripp87/memoria_mcp
+<span class="g">/plugin</span> install memoria@memoria</div>
+    </div>
+  </div>
+  <div class="foot"><span class="a">github.com/Agripp87/memoria_mcp</span></div>
+</section>
+
+<!-- 9. LinkedIn / Open Graph, 1200x627 -->
+<section class="card li" id="launch-linkedin">
+  <div>
+    <div class="eyebrow">Open-source MCP server</div>
+    <h1>Memoria</h1>
+    <p class="lede">Long-term memory for Claude, as <b>a Markdown repo you own</b>. Hybrid search, git sync, one memory for Claude Code and claude.ai.</p>
+  </div>
+  <div class="stack">
+    <div class="panel">
+      <div class="bar"><i></i><i></i><i></i><span>memories/decisions/postgres-over-mongo.md</span></div>
+<div class="body"><span class="d">---</span>
+<span class="k">name:</span> <span class="g">Postgres over Mongo</span>
+<span class="k">type:</span> decision
+<span class="k">importance:</span> 6
+<span class="d">---</span>
+<span class="w">## Decision: Postgres over Mongo</span></div>
+    </div>
+    <div class="panel">
+<div class="body"><span class="g">/plugin</span> install memoria@memoria</div>
+    </div>
+  </div>
+  <div class="foot"><span class="a">github.com/Agripp87/memoria_mcp</span><span class="sep">•</span>Apache-2.0</div>
+</section>
+
+</body>
+</html>
