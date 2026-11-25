@@ -68,11 +68,15 @@ If you would rather look before installing, there is a demo dashboard on fake
 data: https://memoria-demo-hpb4luig7q-uc.a.run.app/dashboard (key:
 `memoria-demo`)
 
+How it differs from the built-in memory: Claude Code's auto memory is kept per
+repository on one machine, and claude.ai has a separate memory of its own.
+Memoria is one store across all your repos, machines and clients, with search
+over the whole thing. If you work in one repo on one machine, the built-in
+memory is probably all you need.
+
 What it is not: it does not replace CLAUDE.md, which I still use for standing
-instructions, and it is not trying to replace Claude's built-in memory. It is
-for when you want one memory across clients and machines that you can read.
-The claude.ai side needs the server running somewhere reachable, which is a
-Docker container and not a single click.
+instructions. And the claude.ai side needs the server running somewhere
+reachable, which is a Docker container and not a single click.
 
 Repo: https://github.com/Agripp87/memoria_mcp (Apache-2.0)
 

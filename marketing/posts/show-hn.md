@@ -62,6 +62,12 @@ https://github.com/Agripp87/memoria_mcp
 > implements OAuth 2.1 with PKCE and dynamic client registration, so it works
 > as a claude.ai custom connector.
 >
+> How this differs from what Claude ships: Claude Code's auto memory is also
+> Markdown files, kept per repository on one machine, and claude.ai has a
+> separate memory of its own. Memoria is one store across all your repos,
+> machines and clients, with search over the whole thing. If you work in one
+> repo on one machine, the built-in memory is probably enough.
+>
 > What it is not: multi-user, or a memory backend for an app you are building.
 > It is single-tenant, for your own assistant. There is also a collector that
 > can ingest email and calendar events; it is experimental, off by default,

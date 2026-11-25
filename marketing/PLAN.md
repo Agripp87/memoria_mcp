@@ -119,7 +119,6 @@ Not planned: paid ads (no budget, and this audience blocks them), Product Hunt
 | L−7 | Repo pass: topics, social preview, pinned discussion, `good first issue` labels | GitHub | Checklist in [README.md](README.md#before-launch). |
 | L−7 | Review the animated demo; optionally record a live one | — | [video/demo.mp4](video/demo.mp4) is ready. A live take follows [demo-video-script.md](demo-video-script.md). |
 | L−5 | Awesome-list pull requests and directory submissions | GitHub, directories | They take days to merge; start early. |
-| L−2 | Publish the launch blog post | dev.to / blog | Live before HN so comments can link to it. |
 | L−1 | Check the hosted demo is up and the install commands work on a clean machine | — | A broken install on launch day costs more than any post earns. |
 | **L**, morning US Eastern | Show HN | Hacker News | Post, then add the first comment. Stay for six hours. |
 | L, +2h | Launch thread | X | Pin it. |
@@ -128,6 +127,7 @@ Not planned: paid ads (no budget, and this audience blocks them), Product Hunt
 | L+1 | LinkedIn post | LinkedIn | |
 | L+2 | Discord showcase posts; newsletter pitches | Discord, email | |
 | L+3 | r/selfhosted post | Reddit | Different angle: Docker, OAuth, your own box. |
+| L+5 | Publish the launch blog post | dev.to / blog | Held back from launch day: it still has `[yours]` sentences to rewrite, and no launch-day post links to it. |
 | L+5 | Feature post: git union merge | X | Image: `card-sync`. |
 | L+7 | Technical post: "We measured our ranking weights. They were wrong." | dev.to / blog, then HN as a normal link | The second shot at HN, on substance. |
 | L+9 | Feature post: the eval | X | Image: `card-search`. |
@@ -195,7 +195,7 @@ runs on throwaway data, so cap its max instances rather than take it down.
 
 | Risk | Likelihood | Mitigation |
 |------|-----------|------------|
-| **"Claude already has memory."** The first comment on every post. | Certain | Answer it in the post, before it is asked: Memoria is one store shared across Claude Code, claude.ai and other MCP clients, across machines, in files you can read. The import script (`sync-from-claude-memory.sh`) makes it an addition, not a replacement. Wording in [messaging.md](messaging.md). |
+| **"Claude already has memory."** The first comment on every post. | Certain | Answer it in the post, before it is asked: the built-in memories are per repository and per machine (Claude Code) or separate (claude.ai); Memoria is one store across repos, machines and clients, with search over all of it. Do not claim "files you can read": the built-ins are readable too. Wording, and what was checked on 25 November, in [messaging.md](messaging.md). |
 | **Install fails on launch day.** `better-sqlite3` is native; the first plugin start builds from source. | Medium | Test all three install paths on a clean macOS, Linux and Windows machine at L−1. Say "the first start takes a minute" in every post. Keep the hosted demo as the no-install path. |
 | **Security scrutiny.** A memory server that can read email invites it. | Medium | Lead with it: the collector is experimental, off by default, consent is dashboard-only, and `SECURITY.md` states the trust model. Do not feature the collector in launch posts. |
 | **The Show HN sinks.** Most do. | High | The plan does not depend on it: Reddit and the lists carry the baseline, and the eval post at L+7 is a second, different submission. Do not repost the Show HN. |

@@ -150,14 +150,35 @@ done
 The README and the blog posts link these files by path on `main`, so they
 show up once this branch is merged.
 
+## Pre-launch checks, 25 November 2026
+
+Run the evening before launch, on Linux only.
+
+| Check | Result |
+|-------|--------|
+| Plugin install into a new home directory (`claude plugin marketplace add`, `claude plugin install`, Claude Code 2.1.332) | Passed. Installed 0.3.2 from `main`. |
+| First start of the plugin's server | Passed. Answered after 18 seconds (dependency install 14 s, build 3 s), then a write, a daily entry and a search all worked with local embeddings. |
+| `npx -y @agrippa87/memoria-mcp` in another new home directory | Passed. Answered after 17 seconds; write and search worked. |
+| `docker compose` | Not run: no Docker daemon in the test environment. CI builds the image on every pull request and was green. |
+| macOS and Windows | Not run. |
+| Hosted demo | Up, and the key `memoria-demo` works. **It is running an old build:** its dashboard keeps the key in `localStorage`, which the README says was replaced by a session cookie, and it indexes 29 files as 29 chunks, so it predates 0.3.2. Redeploy with `deploy/gcp/deploy-demo.sh`. |
+| Narration of the 30-second video | A speech-to-text pass over each of its five clips returned the script word for word, "Memoria" included. This checks the words, not how the voice sounds. |
+
+One thing the plugin check turned up: the plugin is installed from the
+repository root, so each install now also copies `marketing/` and `docs/`
+(about 27 MB of the 29 MB). It works, but it is weight every plugin user
+carries. Moving the videos and images out of the default branch, or
+publishing the plugin from a subdirectory, would fix it.
+
 ## Before launch
 
 - [ ] Read [messaging.md](messaging.md). Fix anything that is not how you
       would say it.
 - [ ] Rewrite the sentences marked `[yours]` in the two blog posts. They
       describe your experience in words guessed from the README.
-- [ ] Check what Claude Code's and claude.ai's built-in memory currently do,
-      and adjust the "Claude already has memory" answer to match.
+- [x] Check what Claude Code's and claude.ai's built-in memory currently do,
+      and adjust the "Claude already has memory" answer to match. Done on
+      25 November; see [messaging.md](messaging.md).
 - [ ] Enable GitHub Pages from `main` `/docs` (see Landing page above), check
       the page at its public URL on a phone and a laptop, then set it as the
       repository's Website.
