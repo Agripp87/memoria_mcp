@@ -120,9 +120,9 @@ two videos in `docs/site/` (1280 wide, about 1 MB and 2.6 MB).
 To publish it, once, in the repository's settings: **Settings → Pages → Build
 and deployment → Source: Deploy from a branch → Branch: `main`, folder
 `/docs`**. It then lives at <https://agripp87.github.io/memoria_mcp/> and
-redeploys on every push to `main` that touches `docs/`. After it is live, set
-that URL as the repository's Website in the About panel, and add it to the
-README and to the directory listings.
+redeploys on every push to `main` that touches `docs/`. The README links to it
+from its second line. Also set that URL as the repository's Website in the
+About panel, and add it to the directory listings.
 
 The page quotes the same facts as the README (eval scores, install commands,
 the demo URL). When one changes, change it in `docs/index.html` too. If the
