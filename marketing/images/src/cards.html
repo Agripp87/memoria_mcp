@@ -72,7 +72,8 @@
 
   /* sync card */
   .two { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: stretch; }
-  #card-sync .panel { font-size: 21px; }
+  #card-sync .panel { font-size: 19px; }
+  #card-sync .body { white-space: pre-wrap; }
   #card-sync .panel + .panel { margin-top: 0; }
   #card-sync .body { padding: 18px 24px 20px; }
   #card-sync .bar { padding: 13px 22px; font-size: 18px; }
@@ -105,7 +106,7 @@
   .shot { border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 40px 90px rgba(0,0,0,.55); }
   .shot img { display: block; width: 100%; }
   .card.dash { grid-template-columns: 600px; }
-  .card.dash .shot { position: absolute; left: 770px; top: 96px; width: 1180px; border-radius: 18px; }
+  .card.dash .shot { position: absolute; left: 770px; top: 84px; width: 1500px; border-radius: 18px; }
 
   /* other sizes */
   .card.square { width: 1080px; height: 1080px; grid-template-columns: 1fr; padding: 64px 80px; align-content: start; gap: 34px; }
@@ -191,24 +192,22 @@ project/nimbus-notes.md
     <div class="two">
       <div class="panel">
         <div class="bar"><i></i><i></i><i></i><span>laptop</span></div>
-<div class="body"><span class="w">## 09:12 UTC — note</span>
-Chose pnpm workspaces
-for the monorepo.</div>
+<div class="body"><span class="w">## 02:15 UTC — note</span>
+Moved the Atlas API job queue to Postgres (SKIP LOCKED). See decisions/job-queue-postgres.md.</div>
       </div>
       <div class="panel">
         <div class="bar"><i></i><i></i><i></i><span>desktop</span></div>
-<div class="body"><span class="w">## 14:05 UTC — note</span>
-Fixed the sync cursor
-off-by-one.</div>
+<div class="body"><span class="w">## 02:13 UTC — note</span>
+Fixed the sync cursor off-by-one in Atlas API. Regression test added first.</div>
       </div>
     </div>
-    <div class="arrow">↓ &nbsp;git pull&nbsp; ↓</div>
+    <div class="arrow">↓ &nbsp;push, then pull on the other machine&nbsp; ↓</div>
     <div class="panel">
-      <div class="bar"><i></i><i></i><i></i><span>memories/daily/2026-11-18.md</span></div>
-<div class="body"><span class="w">## 09:12 UTC — note</span>
-Chose pnpm workspaces for the monorepo.
-<span class="w">## 14:05 UTC — note</span>
-Fixed the sync cursor off-by-one.</div>
+      <div class="bar"><i></i><i></i><i></i><span>memories/daily/2026-11-19.md &nbsp;·&nbsp; both entries kept</span></div>
+<div class="body"><span class="w">## 02:13 UTC — note</span>
+Fixed the sync cursor off-by-one in Atlas API. Regression test added first.
+<span class="w">## 02:15 UTC — note</span>
+Moved the Atlas API job queue to Postgres (SKIP LOCKED). See decisions/job-queue-postgres.md.</div>
     </div>
     <div class="gap"></div>
     <div class="panel">

@@ -90,7 +90,8 @@ audience and the launch posts link to it deliberately. No superlatives, no
   a sync service) and the eval. No adjectives. Limitations up front.
 - *Reddit:* lead with the problem and the two install commands. Answer every
   comment.
-- *X:* one idea per post, one image or clip per post.
+- *X:* one idea per post, one image or video per post. The 30-second cut
+  leads the thread.
 - *LinkedIn:* the same story framed as a lesson from building it.
 
 ## 4. Channels
@@ -114,6 +115,7 @@ Not planned: paid ads (no budget, and this audience blocks them), Product Hunt
 
 | When | Piece | Channel | Notes |
 |------|-------|---------|-------|
+| L−7 | Merge the marketing branch so the README shows the demo, cards and screenshots | GitHub | Then check the page on github.com. |
 | L−7 | Repo pass: topics, social preview, pinned discussion, `good first issue` labels | GitHub | Checklist in [README.md](README.md#before-launch). |
 | L−7 | Review the animated demo; optionally record a live one | — | [video/demo.mp4](video/demo.mp4) is ready. A live take follows [demo-video-script.md](demo-video-script.md). |
 | L−5 | Awesome-list pull requests and directory submissions | GitHub, directories | They take days to merge; start early. |
@@ -149,7 +151,8 @@ All drafted here. "Must" means the launch does not go without it.
 | Reddit posts for four subreddits | [posts/reddit.md](posts/reddit.md) | Must |
 | X launch thread and six follow-up posts | [posts/x.md](posts/x.md) | Must |
 | Launch blog post | [posts/blog-launch.md](posts/blog-launch.md) | Must |
-| Animated demo video, GIF and poster | [video/](video/) | Must |
+| Animated demo with narration: 84-second and 30-second cuts, GIF, poster | [video/](video/) | Must |
+| README visuals: demo GIF, feature cards, dashboard screenshots | [../README.md](../README.md) | Must |
 | Shot list for an optional live recording | [demo-video-script.md](demo-video-script.md) | Nice to have |
 | Social cards (launch, four feature cards, square) | [images/](images/) | Must |
 | Technical blog post on the retrieval eval | [posts/blog-eval.md](posts/blog-eval.md) | Should |

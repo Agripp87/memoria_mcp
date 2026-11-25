@@ -1,7 +1,8 @@
 # LinkedIn
 
-One post, the day after launch. Attach `launch-linkedin.png` (1200×627) or the
-demo clip. Put the link in the first comment as well as the post: LinkedIn
+One post, the day after launch. Attach `video/demo.mp4` (the full 84 seconds,
+with narration; upload the file), or `launch-linkedin.png` (1200×627) if you
+would rather post a still. Put the link in the first comment as well as the post: LinkedIn
 shows link posts to fewer people.
 
 ---

@@ -32,14 +32,14 @@ dashboard is a real screenshot of it.
 
 | File | Size | Use |
 |------|------|-----|
-| `launch.png` | 1600×900 | Blog cover, first X post if there is no clip, directory listings. |
+| `launch.png` | 1600×900 | Blog cover, directory listings, anywhere a video cannot go. |
 | `launch-linkedin.png` | 1200×627 | LinkedIn, and any Open Graph slot. |
 | `launch-square.png` | 1080×1080 | Square slots. |
 | `card-own.png` | 1600×900 | "Your memory is a folder." |
-| `card-sync.png` | 1600×900 | "Sync is git. Same-day writes merge." |
+| `card-sync.png` | 1600×900 | "Sync is git. Same-day writes merge." The two entries are from the real two-machine run in the demo video. |
 | `card-search.png` | 1600×900 | "Hybrid search, measured in the open." Eval numbers as of 0.3.2. |
 | `card-everywhere.png` | 1600×900 | "One memory. Every Claude." |
-| `card-dashboard.png` | 1600×900 | "Browse it like a wiki." |
+| `card-dashboard.png` | 1600×900 | "Browse it like a wiki." A screenshot of the synced demo store, with the backlink to the new decision. |
 | `card-install.png` | 1600×900 | The two install commands. End card for the demo video. |
 
 To change a card, edit the HTML and re-render:
@@ -110,6 +110,21 @@ Mono fonts. Opening `demo.html` in a browser plays it in real time, and
 cut. The page itself is silent. If you change what a tool result
 says, capture the new text from the real server first.
 
+## Where the visuals are used
+
+| Place | What it shows |
+|-------|---------------|
+| Repository README, top | `video/demo-30s.gif`, then a 2×2 grid of `card-own`, `card-sync`, `card-everywhere`, `card-search`, each linking to its section. |
+| README, Quick Start | `card-install`. |
+| README, Multi-device sync | `card-sync`, linking to the full video. |
+| README, Dashboard | Four screenshots in `docs/images/dashboard-*.png`. |
+| X thread | The 30-second video on the first post, one card on each of the rest. |
+| Reddit, LinkedIn, Discord | See the attachment notes at the top of each file in `posts/`. |
+| Blog posts | The GIF and four cards in the launch post, `card-search` in the eval post. |
+
+The README and the blog posts link these files by path on `main`, so they
+show up once this branch is merged.
+
 ## Before launch
 
 - [ ] Read [messaging.md](messaging.md). Fix anything that is not how you
@@ -118,6 +133,10 @@ says, capture the new text from the real server first.
       describe your experience in words guessed from the README.
 - [ ] Check what Claude Code's and claude.ai's built-in memory currently do,
       and adjust the "Claude already has memory" answer to match.
+- [ ] Merge this branch, then open the repository page on github.com and
+      check that the demo GIF plays and every image loads.
+- [ ] Listen to both videos. The narration was generated and placed by cue
+      time but has not been judged by ear.
 - [ ] Watch `video/demo.mp4` and decide whether it is enough on its own, or
       whether to also record a live session
       ([demo-video-script.md](demo-video-script.md)).

@@ -4,9 +4,21 @@ Four posts for four subreddits, each written for that subreddit. Do not
 cross-post one text: moderators and readers both notice.
 
 Before each post, read the subreddit's rules on self-promotion (some require a
-flair, some allow project posts only on certain days) and attach the demo clip
-or an image from [../images/](../images/). Reply to every comment in the first
-day.
+flair, some allow project posts only on certain days). Reply to every comment
+in the first day.
+
+What to attach, where the subreddit allows media:
+
+| Subreddit | Attach |
+|-----------|--------|
+| r/ClaudeAI | `video/demo-30s.mp4` |
+| r/ClaudeCode | `video/demo.mp4` (the full cut shows the hooks and the sync) |
+| r/mcp | `images/card-everywhere.png` |
+| r/selfhosted | `images/card-dashboard.png`, or the four screenshots in `docs/images/dashboard-*.png` as a gallery |
+
+A video post on Reddit cannot also carry a long text body in every subreddit.
+Where it cannot, post the video with the title and put the body in the first
+comment.
 
 ---
 

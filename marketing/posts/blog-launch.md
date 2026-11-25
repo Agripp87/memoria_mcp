@@ -6,6 +6,10 @@ dev.to front matter:
   title: I keep Claude's memory in a git repo
   tags: claude, mcp, opensource, ai
   cover_image: marketing/images/launch.png (upload it)
+
+Images and the demo are linked from the repository's main branch, so they
+resolve once the marketing branch is merged. dev.to plays an uploaded video
+but not a linked .mp4: upload video/demo-30s.mp4 there and replace the GIF.
   canonical_url: set this if you also publish on your own site
 
 About 1,100 words. Sentences marked [yours] describe your own experience in
@@ -29,6 +33,10 @@ So I built a memory for it. It is called
 [Memoria](https://github.com/Agripp87/memoria_mcp), it is open source, and I
 have used it daily since spring. This post is about the one decision that
 shaped everything else: the memory is a folder of Markdown files.
+
+![A 30-second demo: Claude records a decision, the memory is shown as a Markdown file, a session on a second machine finds it after a git pull, and the dashboard shows it in the wiki](https://raw.githubusercontent.com/Agripp87/memoria_mcp/main/marketing/video/demo-30s.gif)
+
+*A scripted illustration. The Memoria output in it is real, from demo data.*
 
 ## What it is
 
@@ -69,6 +77,8 @@ notes that any editor and any future tool can read.
 
 **Git already solves sync.** This is the part I enjoyed most.
 
+![Your memory is a folder: a listing of the store's directories, a grep across them, and a git diff](https://raw.githubusercontent.com/Agripp87/memoria_mcp/main/marketing/images/card-own.png)
+
 ## Sync without a service
 
 To use the same memory on two machines, I made the folder a private git
@@ -87,6 +97,8 @@ store's `.gitattributes` turns it on:
 memories/daily/*.md merge=union
 ```
 
+![A laptop and a desktop each append an entry to the same daily log; after a push and a pull the file holds both](https://raw.githubusercontent.com/Agripp87/memoria_mcp/main/marketing/images/card-sync.png)
+
 Same-day entries from two machines now merge silently and none are lost.
 Curated notes, the ones that get edited and not appended to, keep the normal
 three-way merge on purpose. If both machines changed the same decision, that
@@ -100,6 +112,8 @@ The server speaks MCP two ways. Claude Code talks to it over stdio. For
 claude.ai it runs over HTTP and implements OAuth 2.1 (authorization code with
 PKCE, dynamic client registration), which is what claude.ai needs to add it as
 a custom connector.
+
+![Claude Code, claude.ai and Cursor all read and write one Markdown store, with a derived SQLite index beside it](https://raw.githubusercontent.com/Agripp87/memoria_mcp/main/marketing/images/card-everywhere.png)
 
 Both read and write the same folder. [yours] A decision I record in a terminal
 session is something I can ask about from a chat on my phone.
@@ -169,6 +183,8 @@ to your `CLAUDE.md` so Claude knows when to use it:
 > decisions, solved bugs and preferences with `memory_daily` during the
 > session, `memory_write` for durable facts. Do not capture transactional
 > work.
+
+![The dashboard's wiki view of a decision, with its related memories and backlinks](https://raw.githubusercontent.com/Agripp87/memoria_mcp/main/marketing/images/card-dashboard.png)
 
 To look around without installing anything, the dashboard runs on generated
 fake data at

@@ -2,8 +2,9 @@
 
 A launch thread and six follow-up posts. Every post is under 280 characters
 with its link counted (X counts any URL as 23). Attach the named image from
-[../images/](../images/), or the demo clip where it says so. Posts with a clip
-or image travel much further than text alone.
+[../images/](../images/), or the video where it says so. Posts with a video or
+image travel much further than text alone. Upload the video file itself: a
+link to it on GitHub will not play in the feed.
 
 Put the repository link in the first post's reply chain and not only at the
 end: most people never reach the last post of a thread.
@@ -12,7 +13,7 @@ end: most people never reach the last post of a thread.
 
 Post on launch day, about two hours after the Show HN. Pin it.
 
-**1/** *(attach the demo clip; fall back to `launch.png`)*
+**1/** *(attach `video/demo-30s.mp4`, the 30-second cut with narration)*
 
 ```
 I use Claude Code all day on two machines and got tired of re-explaining Monday's decisions on Thursday.
@@ -73,7 +74,7 @@ Apache-2.0. Solo project, used daily since spring. The README has a Known Limita
 https://github.com/Agripp87/memoria_mcp
 ```
 
-**7/**
+**7/** *(attach `card-dashboard.png`)*
 
 ```
 No install needed to look around. The dashboard runs on fake data here (key: memoria-demo):
@@ -83,12 +84,20 @@ https://memoria-demo-hpb4luig7q-uc.a.run.app/dashboard
 Tell me what breaks.
 ```
 
+**8/** *(optional; attach `video/demo.mp4`, the full 84 seconds)*
+
+```
+The longer version of the demo follows one decision from a laptop to a desktop: the Stop hook pushes, the SessionStart hook pulls, and a new session on the other machine already knows.
+
+Then four views of the dashboard.
+```
+
 ## Follow-up posts
 
 One every few days after launch, per the calendar in [../PLAN.md](../PLAN.md).
 Each stands alone, so someone who missed the thread still gets the idea.
 
-**A. Union merge** *(L+5, `card-sync.png`)*
+**A. Union merge** *(L+5, `card-sync.png`; its entries are from a real two-machine run)*
 
 ```
 A git trick I wish I had known sooner:

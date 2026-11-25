@@ -7,6 +7,9 @@ dev.to front matter:
   tags: search, rag, opensource, ai
   cover_image: marketing/images/card-search.png (upload it)
 
+The one image in the body is linked from the repository's main branch, so it
+resolves once the marketing branch is merged.
+
 About 1,400 words. Every number is from mcp-server/eval/README.md as of 0.3.2.
 If you re-run the eval before publishing, update the numbers from your run.
 The order of events is reconstructed from that file: correct the narrative
@@ -119,6 +122,11 @@ Sweeping the vector share of relevance on the larger set:
 | **0.7 (shipped)** | **82.6** | 67.9 | 92.8 |
 | 0.8 | 83.2 | 72.2 | 90.4 |
 | 1.0 (vectors only) | 78.6 | 72.6 | 76.8 |
+
+![nDCG@10 on the retrieval eval: keyword only 67.3, vector only 83.0, shipped default 83.7](https://raw.githubusercontent.com/Agripp87/memoria_mcp/main/marketing/images/card-search.png)
+
+*The card shows the current table, after the chunking change described below;
+the sweep above was measured before it.*
 
 The hybrid beats both of its halves. Keywords alone lose 17 points. Vectors
 alone lose 4.0, with a 95% interval of −7.8 to −0.3 from a paired bootstrap

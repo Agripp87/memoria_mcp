@@ -79,6 +79,12 @@ https://github.com/Agripp87/memoria_mcp
 > I would most like to hear where the retrieval eval is wrong, and what breaks
 > on your machine.
 
+## Before posting
+
+The submission is the repository, so the README is the landing page. It now
+opens with the 30-second demo, the feature cards and the install commands.
+Check on github.com that the GIF plays and the images load before you submit.
+
 ## Replying
 
 - Answer the technical questions first and at length. Those threads are what

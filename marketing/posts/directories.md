@@ -55,6 +55,8 @@ The official MCP Registry listing is already done. For community directories
 | Transports | stdio; Streamable HTTP with OAuth 2.1 |
 | Install | `npx -y @agrippa87/memoria-mcp` |
 | Image | `marketing/images/launch.png` |
+| Screenshots | `docs/images/dashboard-wiki-backlinks.png`, `dashboard-overview.png`, `dashboard-search.png` |
+| Video | `marketing/video/demo-30s.mp4` (30 seconds, narrated); `demo.mp4` for the full 84 |
 
 **Description (about 60 words):**
 
@@ -84,6 +86,11 @@ Persistent, plain-text memory for Claude — as a Markdown repo you own.
 mcp mcp-server claude claude-code claude-code-plugin memory ai-memory markdown sqlite semantic-search model-context-protocol self-hosted
 ```
 
+**README:** the top of the README now carries the 30-second demo, four
+feature cards, the install card and four dashboard screenshots. They are
+referenced by relative path, so they appear once this branch is merged to
+`main`.
+
 **Social preview:** `docs/images/social-preview.png` is already the right size
 (1280×640). Confirm it is uploaded under Settings → Social preview.
 
@@ -108,8 +115,8 @@ mcp mcp-server claude claude-code claude-code-plugin memory ai-memory markdown s
 
 For showcase or "share your project" channels only, in servers whose rules
 allow it (the Anthropic Discord and the MCP community Discord both have had
-such channels; check the current rules). One post per server. Attach the demo
-clip.
+such channels; check the current rules). One post per server. Attach
+`video/demo-30s.mp4`.
 
 > **Memoria: long-term memory for Claude as a Markdown repo you own**
 >
