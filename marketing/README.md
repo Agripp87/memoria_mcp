@@ -162,7 +162,7 @@ Run the evening before launch, on Linux only.
 | `docker compose` | Not run: no Docker daemon in the test environment. CI builds the image on every pull request and was green. |
 | macOS and Windows | Not run. |
 | Hosted demo | Up, and the key `memoria-demo` works. **It is running an old build:** its dashboard keeps the key in `localStorage`, which the README says was replaced by a session cookie, and it indexes 29 files as 29 chunks, so it predates 0.3.2. Redeploy with `deploy/gcp/deploy-demo.sh`. |
-| Narration of the 30-second video | A speech-to-text pass over each of its five clips returned the script word for word, "Memoria" included. This checks the words, not how the voice sounds. |
+| Narration of both videos | A speech-to-text pass over all 14 narration clips (five in the 30-second cut, twelve in the full one, three shared) returned the script word for word, "Memoria" included. This checks the words, not how the voice sounds. |
 
 One thing the plugin check turned up: the plugin is installed from the
 repository root, so each install now also copies `marketing/` and `docs/`
