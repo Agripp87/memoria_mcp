@@ -169,14 +169,29 @@ Write the way the README does.
 Paste-ready replies. Adjust the wording so it does not read as canned.
 
 **"Claude already has memory."**
-> It does, and Memoria is not trying to replace it. The difference is where
-> the memory lives. Memoria is one store that Claude Code, claude.ai and other
-> MCP clients all read and write, on every machine you sync it to, as files
-> you can open. If you only use Claude Code on one machine, the built-in
-> memory may be all you need. There is a script that imports it
-> (`scripts/sync-from-claude-memory.sh`) if you want to try both.
+> It does, and it is good. Claude Code's auto memory is Markdown files too,
+> kept per repository on the machine you are working on. claude.ai has its
+> own memory, organised by topic, that you can view and edit in settings. As
+> far as I can tell from the docs, those two do not share anything, and
+> neither follows you to another machine as files.
+>
+> Memoria is for that gap: one store across all your repos, your machines and
+> your clients (Claude Code, claude.ai, Cursor), with search over the whole
+> thing and git for sync. If you work in one repo on one machine, the
+> built-in memory is probably all you need. There is a script that imports
+> Claude Code's auto memory (`scripts/sync-from-claude-memory.sh`) if you
+> want to try both.
 
-*(Check how the built-in features currently behave before posting this.)*
+*Checked on 25 November 2026 against the Claude Code memory docs and the
+claude.ai memory help article. What they say: auto memory is on by default in
+local sessions, lives under `~/.claude/projects/<project>/memory/` as a
+`MEMORY.md` index plus topic files, is scoped per repository, and loads the
+first 200 lines or 25 KB of the index at session start. claude.ai memory is on
+by default on Free, Pro and Max, is stored as topics with a separate memory
+per project, and is included in data exports. Neither page says the two are
+shared, or that either is available to other MCP clients. Do not claim "files
+you can read" as a difference: both built-ins are readable and editable.
+Re-check before any later post; these features change.*
 
 **"Why not just use CLAUDE.md?"**
 > I still do, for standing instructions. CLAUDE.md is loaded whole into every
