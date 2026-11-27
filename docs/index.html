@@ -98,6 +98,8 @@
     background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; cursor: pointer;
   }
   .copy:hover { color: var(--text); border-color: #44456a; }
+  .code .bar .copy { position: static; margin-left: auto; flex: none; }
+  .code .bar span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* media */
   .frame { border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: #0b0c10; box-shadow: 0 30px 80px rgba(0,0,0,.45); }
@@ -159,6 +161,7 @@
   .install h3 { margin-top: 0; }
   .install .card { padding: 20px; }
   .install .card p { margin-bottom: 14px; }
+  @media (max-width: 520px) { .install pre { white-space: pre-wrap; overflow-wrap: anywhere; } }
 
   footer { border-top: 1px solid var(--line); padding: 36px 0 56px; color: var(--dim); font-size: 14.5px; }
   footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; justify-content: space-between; }
@@ -438,7 +441,7 @@ Moved the Atlas API job queue to Postgres
         <h3>Claude Code plugin</h3>
         <p>Registers the server and wires the sync hooks. The first start builds from source and takes about a minute.</p>
         <div class="code">
-          <button class="copy" type="button" data-copy="/plugin marketplace add Agripp87/memoria_mcp&#10;/plugin install memoria@memoria">Copy</button>
+          <div class="bar"><i></i><i></i><i></i><span>in Claude Code</span><button class="copy" type="button" data-copy="/plugin marketplace add Agripp87/memoria_mcp&#10;/plugin install memoria@memoria">Copy</button></div>
 <pre><span class="g">/plugin</span> marketplace add Agripp87/memoria_mcp
 <span class="g">/plugin</span> install memoria@memoria</pre>
         </div>
@@ -447,7 +450,7 @@ Moved the Atlas API job queue to Postgres
         <h3>From npm</h3>
         <p>The server alone, without the hooks. Other MCP clients use the same command.</p>
         <div class="code">
-          <button class="copy" type="button" data-copy="claude mcp add memoria -s user -- npx -y @agrippa87/memoria-mcp">Copy</button>
+          <div class="bar"><i></i><i></i><i></i><span>terminal</span><button class="copy" type="button" data-copy="claude mcp add memoria -s user -- npx -y @agrippa87/memoria-mcp">Copy</button></div>
 <pre><span class="g">$</span> claude mcp add memoria -s user -- \
     npx -y @agrippa87/memoria-mcp</pre>
         </div>
@@ -457,7 +460,7 @@ Moved the Atlas API job queue to Postgres
       <h3>Then tell Claude how to use it</h3>
       <p>Add a standing instruction to your <code>CLAUDE.md</code>, for example:</p>
       <div class="code">
-        <button class="copy" type="button" data-copy="At session start, memory_search for context relevant to the task. Record decisions, solved bugs and preferences with memory_daily during the session, memory_write for durable facts. Do not capture transactional work.">Copy</button>
+        <div class="bar"><i></i><i></i><i></i><span>CLAUDE.md</span><button class="copy" type="button" data-copy="At session start, memory_search for context relevant to the task. Record decisions, solved bugs and preferences with memory_daily during the session, memory_write for durable facts. Do not capture transactional work.">Copy</button></div>
 <pre style="white-space:pre-wrap">At session start, memory_search for context relevant to the task. Record decisions, solved bugs and preferences with memory_daily during the session, memory_write for durable facts. Do not capture transactional work.</pre>
       </div>
       <p style="margin:14px 0 0">For claude.ai, Docker, multi-device sync and every setting, see the <a href="https://github.com/Agripp87/memoria_mcp#quick-start">Quick Start in the README</a>.</p>
