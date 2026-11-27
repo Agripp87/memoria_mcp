@@ -161,7 +161,7 @@ Run the evening before launch, on Linux only.
 | `npx -y @agrippa87/memoria-mcp` in another new home directory | Passed. Answered after 17 seconds; write and search worked. |
 | `docker compose` | Not run: no Docker daemon in the test environment. CI builds the image on every pull request and was green. |
 | macOS and Windows | Not run. |
-| Hosted demo | Up, and the key `memoria-demo` works. **It is running an old build:** its dashboard keeps the key in `localStorage`, which the README says was replaced by a session cookie, and it indexes 29 files as 29 chunks, so it predates 0.3.2. Redeploy with `deploy/gcp/deploy-demo.sh`. |
+| Hosted demo | On 25 November it was up but on an old build (key kept in `localStorage`, 29 files as 29 chunks). **Redeployed and re-checked on 27 November:** it runs the current build, the key `memoria-demo` logs in through the session-cookie flow, nothing is kept in `localStorage`, the 29 files index as 93 chunks, the content security policy and the CSRF guard are active, and the address used in the posts still works. It is limited to one instance. |
 | Narration of both videos | A speech-to-text pass over all 14 narration clips (five in the 30-second cut, twelve in the full one, three shared) returned the script word for word, "Memoria" included. This checks the words, not how the voice sounds. |
 
 One thing the plugin check turned up: the plugin is installed from the
@@ -191,8 +191,8 @@ publishing the plugin from a subdirectory, would fix it.
       ([demo-video-script.md](demo-video-script.md)).
 - [ ] Install from scratch on a clean macOS, Linux and Windows machine, by
       all three routes: the plugin, `npx`, and `docker compose`.
-- [ ] Confirm the hosted demo is up and its key works, and cap its maximum
-      instances.
+- [x] Confirm the hosted demo is up and its key works, and cap its maximum
+      instances. Redeployed and verified on 27 November.
 - [ ] Set the repository topics and pin the "Start here" discussion
       ([posts/directories.md](posts/directories.md#github-repository-settings)).
 - [ ] Label three to five issues `good first issue`.
